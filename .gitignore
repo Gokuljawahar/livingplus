@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-ssr/
+*.db
+*.db-journal
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+Project/backend/uploads/*

@@ -1,0 +1,242 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         String   @id @default(uuid())
+  email      String?  @unique
+  phone      String?  @unique
+  password   String
+  name       String
+  role       String   @default("PG_OWNER")
+  profileImage String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  pgAccess   PGPropertyAccess[]
+}
+
+model PGProperty {
+  id           String   @id @default(uuid())
+  name         String
+  description  String?
+  address      String
+  locality     String
+  contactPhone String?
+  landmark     String?
+  city         String   @default("Chennai")
+  pincode      String?
+  latitude     Float?
+  longitude    Float?
+  genderPolicy String   @default("ANY")
+  amenities    Json     @default("[]")
+  houseRules   Json     @default("[]")
+  photoUrls    Json     @default("[]")
+  status       String   @default("ACTIVE")
+  bookingLockMinutes Int @default(120)
+  rentDay      Int      @default(1)
+  rentDueDay   Int      @default(5)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  rooms              PGRoom[]
+  access             PGPropertyAccess[]
+  bookings           PGBooking[]
+  tenants            PGTenant[]
+  auditLogs          PHAuditLog[]
+  maintenanceTickets PGMaintenanceTicket[]
+}
+
+model PGPropertyAccess {
+  id         String     @id @default(uuid())
+  propertyId String
+  userId     String
+  role       String     @default("OWNER")
+  createdAt  DateTime   @default(now())
+  property   PGProperty @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, userId])
+  @@index([userId, role])
+}
+
+model PGRoom {
+  id                 String     @id @default(uuid())
+  propertyId         String
+  block              String?
+  roomNumber         String
+  floor              Int?
+  roomType           String     @default("SHARED")
+  monthlyRent        Float
+  depositAmount      Float      @default(0)
+  maintenanceFee     Float      @default(0)
+  utilitiesSurcharge Float      @default(0)
+  hasAc              Boolean    @default(false)
+  foodIncluded       Boolean    @default(false)
+  status             String     @default("ACTIVE")
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  property           PGProperty @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  beds               PGBed[]
+
+  @@unique([propertyId, roomNumber])
+  @@index([propertyId, status])
+}
+
+model PGBed {
+  id              String   @id @default(uuid())
+  roomId          String
+  label           String
+  status          String   @default("AVAILABLE")
+  maintenanceNote String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  room            PGRoom   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  bookings        PGBooking[]
+  tenants         PGTenant[]
+
+  @@unique([roomId, label])
+  @@index([roomId, status])
+}
+
+model PGBooking {
+  id            String     @id @default(uuid())
+  bookingRef    String?    @unique
+  propertyId    String
+  bedId         String?
+  residentName  String
+  phone         String
+  email         String?
+  moveInDate    DateTime
+  moveOutDate   DateTime?
+  lockExpiresAt DateTime?
+  status        String     @default("PENDING")
+  notes         String?
+  rejectionReason String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  property      PGProperty @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  bed           PGBed?     @relation(fields: [bedId], references: [id], onDelete: SetNull)
+  tenant        PGTenant?
+
+  @@index([propertyId, status, createdAt])
+  @@index([bedId, status])
+}
+
+model PGTenant {
+  id                    String       @id @default(uuid())
+  propertyId            String
+  bedId                 String?
+  bookingId             String?      @unique
+  name                  String
+  phone                 String
+  email                 String?
+  permanentAddress      String?
+  bloodGroup            String?
+  institutionOrEmployer String?
+  emergencyName         String?
+  emergencyPhone        String?
+  kycType               String?
+  kycDocumentUrl        String?
+  kycVerified           Boolean    @default(false)
+  kycVerifiedAt         DateTime?
+  noticeDate            DateTime?
+  moveInDate            DateTime
+  moveOutDate           DateTime?
+  checkedInAt           DateTime?
+  checkedOutAt          DateTime?
+  monthlyRent           Float
+  depositAmount         Float        @default(0)
+  depositReceived       Float        @default(0)
+  depositDeductions     Float        @default(0)
+  depositRefundAmount   Float?
+  depositRefundStatus   String       @default("NOT_APPLICABLE")
+  depositRefundReference String?
+  depositRefundedAt     DateTime?
+  checkoutNote          String?
+  status                String       @default("RESERVED")
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  property              PGProperty   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  bed                   PGBed?       @relation(fields: [bedId], references: [id], onDelete: SetNull)
+  booking               PGBooking?   @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  rentEntries           PGRentEntry[]
+  maintenanceTickets    PGMaintenanceTicket[]
+
+  @@index([propertyId, status])
+}
+
+model PGRentEntry {
+  id          String   @id @default(uuid())
+  tenantId    String
+  entryType   String   @default("RENT")
+  period      String
+  amount      Float
+  paidAmount  Float    @default(0)
+  dueDate     DateTime
+  paidAt      DateTime?
+  status      String   @default("DUE")
+  reference   String?
+  method      String?
+  notes       String?
+  invoiceCode String?  @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      PGTenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, period, entryType])
+  @@index([period, status])
+}
+
+model PGMaintenanceTicket {
+  id          String     @id @default(uuid())
+  propertyId  String
+  bedId       String?
+  tenantId    String?
+  title       String
+  description String
+  category    String     @default("OTHER")
+  priority    String     @default("NORMAL")
+  status      String     @default("OPEN")
+  imageUrl    String?
+  assignedTo  String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  property    PGProperty @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  tenant      PGTenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId, status, priority])
+}
+
+model OtpCode {
+  id           String    @id @default(uuid())
+  phone        String
+  purpose      String    @default("BOOKING")
+  codeHash     String
+  verifiedToken String?  @unique
+  tokenExpiresAt DateTime?
+  expiresAt    DateTime
+  attempts     Int       @default(0)
+  consumedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([phone, purpose, createdAt])
+}
+
+model PHAuditLog {
+  id         String   @id @default(uuid())
+  propertyId String
+  actorId    String?
+  action     String
+  entityType String?
+  entityId   String?
+  detail     String?
+  createdAt  DateTime @default(now())
+  property   PGProperty @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId, createdAt])
+}

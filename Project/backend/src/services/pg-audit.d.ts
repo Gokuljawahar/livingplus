@@ -1,0 +1,2 @@
+export declare function logAudit(propertyId: string, actorId: string | null | undefined, action: string, entityType?: string | null, entityId?: string | null, detail?: string | null): void;
+//# sourceMappingURL=pg-audit.d.ts.map

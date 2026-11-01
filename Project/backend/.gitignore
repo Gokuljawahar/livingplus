@@ -1,0 +1,22 @@
+node_modules
+# Environment files (may contain secrets) — copy .env.example to start
+.env
+.env.local
+.env.*.local
+# Keep environment variables out of version control
+
+# Local SQLite databases (runtime data, incl. KYC-adjacent records)
+/generated/prisma
+*.db
+*.db-journal
+uploads/*
+
+# Logs
+logs
+*.log
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store

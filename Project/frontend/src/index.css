@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --brand-primary: #02224B;
+    --brand-secondary: #FEB109;
+    --brand-dark: #011632;
+    --brand-blue: #02224B;
+    --brand-yellow: #FEB109;
+    --bg-main: #F8FAFB;
+    --sidebar-bg: #FFFFFF;
+    --text-primary: #1E293B;
+    --text-secondary: #64748B;
+    --border-color: #E2E8F0;
+  }
+
+  body {
+    @apply bg-[#F8FAFB] text-[#1E293B] font-sans antialiased;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white rounded-xl border border-slate-100 shadow-sm p-6;
+  }
+  
+  .btn-primary {
+    @apply bg-[#02224B] hover:bg-[#0A3B75] text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center gap-2;
+  }
+
+  .btn-accent {
+    @apply bg-[#FEB109] hover:bg-[#E59E00] text-[#02224B] font-bold py-2 px-4 rounded-lg transition-colors flex items-center gap-2;
+  }
+
+  .stat-card {
+    @apply bg-white p-6 rounded-xl border border-slate-100 shadow-sm flex flex-col gap-1;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
