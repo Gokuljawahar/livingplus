@@ -9,3 +9,6 @@ dist-ssr/
 *.log
 .DS_Store
 Project/backend/uploads/*
+
+# Local-only helper repo (has its own .git); not part of this project
+meta-model-cookbook/

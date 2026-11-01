@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+.vite
 # Environment files (may contain keys) — never commit real values
 .env
 .env.local
