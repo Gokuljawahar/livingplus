@@ -5,6 +5,9 @@ import { prisma } from '../app.js';
 import { featureFlags, notifyWhatsAppSafely } from '../services/pg-notifications.js';
 import { consumePhoneToken } from './pg-auth.controller.js';
 import { logAudit } from '../services/pg-audit.js';
+import { sendDueRentReminders } from '../services/pg-rent-reminders.js';
+import { createExpense, deleteExpense, listExpenses } from '../services/pg-expenses.js';
+import { calculateMonthlyRent, ensureFoodEntries } from '../services/pg-billing.js';
 
 function phoneVariants(phone: string): string[] {
   const digits = String(phone || '').replace(/\D/g, '');
@@ -234,7 +237,7 @@ export const deleteProperty = async (req: Request, res: Response): Promise<any> 
 
 export const createRoom = async (req: Request, res: Response): Promise<any> => {
   const { propertyId } = req.params;
-  const { roomNumber, floor, block, roomType, monthlyRent, depositAmount, maintenanceFee, utilitiesSurcharge, hasAc, foodIncluded, numberOfBeds, bedLabels } = req.body;
+  const { roomNumber, floor, block, roomType, monthlyRent, depositAmount, maintenanceFee, utilitiesSurcharge, hasAc, foodIncluded, foodCharge, numberOfBeds, bedLabels } = req.body;
   if (!await canManageProperty(req, String(propertyId), ['OWNER'])) {
     return res.status(403).json({ message: 'You do not have access to this property' });
   }
@@ -258,6 +261,7 @@ export const createRoom = async (req: Request, res: Response): Promise<any> => {
         utilitiesSurcharge: Number(utilitiesSurcharge) > 0 ? Number(utilitiesSurcharge) : 0,
         hasAc: Boolean(hasAc),
         foodIncluded: Boolean(foodIncluded),
+        foodCharge: Number(foodCharge) > 0 ? Number(foodCharge) : 0,
         beds: { create: Array.from({ length: bedCount }, (_, index) => ({ label: Array.isArray(bedLabels) && bedLabels[index]?.trim() ? bedLabels[index].trim() : `Bed ${index + 1}` })) }
       },
       include: { beds: true }
@@ -295,6 +299,7 @@ export const updateBedStatus = async (req: Request, res: Response): Promise<any>
 
 export const createBookingRequest = async (req: Request, res: Response): Promise<any> => {
   const { propertyId, bedId, residentName, phone, email, moveInDate, notes, phoneToken } = req.body;
+  const idemKey = String(req.body.idempotencyKey || req.headers['x-idempotency-key'] || '').trim().slice(0, 80) || null;
   if (!propertyId || !residentName?.trim() || !phone?.trim() || !moveInDate) {
     return res.status(400).json({ message: 'Property, name, phone and move-in date are required' });
   }
@@ -307,6 +312,11 @@ export const createBookingRequest = async (req: Request, res: Response): Promise
       select: { id: true, bookingLockMinutes: true }
     });
     if (!property) return res.status(404).json({ message: 'Property is not available' });
+
+    if (idemKey) {
+      const existing = await db.pGBooking.findUnique({ where: { idempotencyKey: idemKey } });
+      if (existing) return res.status(200).json({ id: existing.id, bookingRef: existing.bookingRef, status: existing.status, deduped: true, message: 'Booking request already submitted' });
+    }
 
     const digits = String(phone || '').replace(/\D/g, '');
     const normalizedPhone = digits.length === 10 ? `91${digits}` : digits;
@@ -339,7 +349,8 @@ export const createBookingRequest = async (req: Request, res: Response): Promise
           email: email?.trim() || null,
           moveInDate: moveIn,
           lockExpiresAt: new Date(Date.now() + (property.bookingLockMinutes || 120) * 60 * 1000),
-          notes: notes?.trim() || null
+          notes: notes?.trim() || null,
+          idempotencyKey: idemKey
         }
       });
     });
@@ -348,6 +359,10 @@ export const createBookingRequest = async (req: Request, res: Response): Promise
   } catch (error) {
     if ((error as Error)?.message === 'BED_UNAVAILABLE') {
       return res.status(409).json({ message: 'This bed is no longer available' });
+    }
+    if ((error as any)?.code === 'P2002' && idemKey) {
+      const existing = await db.pGBooking.findUnique({ where: { idempotencyKey: idemKey } });
+      if (existing) return res.status(200).json({ id: existing.id, bookingRef: existing.bookingRef, status: existing.status, deduped: true, message: 'Booking request already submitted' });
     }
     console.error('PG booking request error:', error);
     res.status(500).json({ message: 'Failed to submit booking request' });
@@ -513,7 +528,10 @@ export const updateBookingStatus = async (req: Request, res: Response): Promise<
 
 export const checkInTenant = async (req: Request, res: Response): Promise<any> => {
   try {
-    const tenant = await db.pGTenant.findUnique({ where: { id: String(req.params.tenantId) } });
+    const tenant = await db.pGTenant.findUnique({
+      where: { id: String(req.params.tenantId) },
+      include: { bed: { include: { room: true } }, property: { select: { rentDueDay: true } } }
+    });
     if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
     if (!await canManageProperty(req, tenant.propertyId)) {
       return res.status(403).json({ message: 'You do not have access to this property' });
@@ -521,8 +539,7 @@ export const checkInTenant = async (req: Request, res: Response): Promise<any> =
     if (tenant.status !== 'RESERVED') return res.status(409).json({ message: 'Only approved tenants can be checked in' });
 
     const now = new Date();
-    const period = now.toISOString().slice(0, 7);
-    const invoiceCode = `RENT-${tenant.id.slice(0, 8)}-${period}`;
+  const rent = calculateMonthlyRent(tenant, now);
     const checkedIn = await db.$transaction(async (tx: any) => {
       if (tenant.bedId) {
         const occupied = await tx.pGBed.updateMany({
@@ -532,10 +549,12 @@ export const checkInTenant = async (req: Request, res: Response): Promise<any> =
         if (occupied.count !== 1) throw new Error('BED_UNAVAILABLE');
       }
 
-      const activeTenant = await tx.pGTenant.update({
-        where: { id: tenant.id },
+      const transitioned = await tx.pGTenant.updateMany({
+        where: { id: tenant.id, status: 'RESERVED' },
         data: { status: 'ACTIVE', checkedInAt: now }
       });
+      if (transitioned.count !== 1) throw new Error('TENANT_STATE_CHANGED');
+      const activeTenant = await tx.pGTenant.findUniqueOrThrow({ where: { id: tenant.id } });
       const tenantDigits = String(tenant.phone || '').replace(/\D/g, '');
       const tenantNormalized = tenantDigits.length === 10 ? `91${tenantDigits}` : tenantDigits;
       const existingLogin = await tx.user.findFirst({ where: { phone: { in: [tenantDigits, tenantNormalized] } }, select: { id: true } });
@@ -548,17 +567,18 @@ export const checkInTenant = async (req: Request, res: Response): Promise<any> =
       }
 
       await tx.pGRentEntry.upsert({
-        where: { tenantId_period_entryType: { tenantId: tenant.id, period, entryType: 'RENT' } },
+        where: { tenantId_period_entryType: { tenantId: tenant.id, period: rent.period, entryType: 'RENT' } },
         update: {},
         create: {
           tenantId: tenant.id,
-          period,
-          amount: tenant.monthlyRent,
-          dueDate: new Date(now.getFullYear(), now.getMonth(), 1),
+          period: rent.period,
+          amount: rent.amount,
+          dueDate: rent.dueDate,
           entryType: 'RENT',
-          invoiceCode
+          invoiceCode: `RENT-${rent.period}-${tenant.id.slice(0, 8).toUpperCase()}`
         }
       });
+      await ensureFoodEntries(tx, tenant, rent.period, rent.dueDate);
       if (tenant.depositAmount > 0) {
         await tx.pGRentEntry.upsert({
           where: { tenantId_period_entryType: { tenantId: tenant.id, period: 'DEPOSIT', entryType: 'DEPOSIT' } },
@@ -579,6 +599,7 @@ export const checkInTenant = async (req: Request, res: Response): Promise<any> =
     res.json(checkedIn);
   } catch (error: any) {
     if (error?.message === 'BED_UNAVAILABLE') return res.status(409).json({ message: 'This bed is no longer reserved for the tenant' });
+    if (error?.message === 'TENANT_STATE_CHANGED') return res.status(409).json({ message: 'Tenant status changed; refresh and try again' });
     console.error('PG tenant check-in error:', error);
     res.status(500).json({ message: 'Failed to check in tenant' });
   }
@@ -781,6 +802,9 @@ export const updateTenantProfile = async (req: Request, res: Response): Promise<
       data.kycVerified = Boolean(verifyKyc);
       data.kycVerifiedAt = verifyKyc ? new Date() : null;
     }
+    if (req.body.foodOptOut !== undefined) {
+      data.foodOptOut = Boolean(req.body.foodOptOut);
+    }
     const updated = await db.pGTenant.update({ where: { id: tenant.id }, data });
     res.json(updated);
   } catch (error) {
@@ -940,6 +964,123 @@ export const createRentEntry = async (req: Request, res: Response): Promise<any>
   }
 };
 
+export const sendRentReminders = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const propertyIds = await accessiblePropertyIds(req, ['OWNER', 'WARDEN']);
+    const summary = await sendDueRentReminders(db, {
+      propertyIds,
+      period: req.body?.period ? String(req.body.period) : undefined,
+      force: req.body?.force === true || req.body?.force === 'true',
+      actorId: (req as any).user?.userId ? String((req as any).user.userId) : null
+    });
+    res.json(summary);
+  } catch (error) {
+    console.error('PG rent reminders error:', error);
+    res.status(500).json({ message: 'Failed to send rent reminders' });
+  }
+};
+
+export const listOwnerExpenses = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const propertyIds = await accessiblePropertyIds(req, ['OWNER', 'WARDEN']);
+    const period = req.query.period ? String(req.query.period) : undefined;
+    res.json(await listExpenses(db, propertyIds, period));
+  } catch (error) {
+    console.error('PG expense list error:', error);
+    res.status(500).json({ message: 'Failed to load expenses' });
+  }
+};
+
+export const createOwnerExpense = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const propertyId = String(req.body?.propertyId || '');
+    if (!propertyId || !await canManageProperty(req, propertyId, ['OWNER', 'WARDEN'])) {
+      return res.status(403).json({ message: 'You do not have access to this property' });
+    }
+    const expense = await createExpense(db, (req as any).user?.userId ? String((req as any).user.userId) : null, {
+      propertyId,
+      category: req.body?.category,
+      amount: req.body?.amount,
+      spentOn: req.body?.spentOn,
+      note: req.body?.note
+    });
+    res.status(201).json(expense);
+  } catch (error: any) {
+    const code = String(error?.message || '');
+    if (['INVALID_PROPERTY', 'INVALID_AMOUNT', 'INVALID_CATEGORY', 'INVALID_DATE'].includes(code)) {
+      return res.status(400).json({ message: 'Expense needs a valid amount, category and date' });
+    }
+    if (code === 'PROPERTY_NOT_FOUND') return res.status(404).json({ message: 'Property is not available' });
+    console.error('PG expense create error:', error);
+    res.status(500).json({ message: 'Failed to record expense' });
+  }
+};
+
+export const deleteOwnerExpense = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const propertyIds = await accessiblePropertyIds(req, ['OWNER']);
+    await deleteExpense(db, (req as any).user?.userId ? String((req as any).user.userId) : null, String(req.params.expenseId), propertyIds);
+    res.json({ message: 'Expense removed' });
+  } catch (error: any) {
+    const code = String(error?.message || '');
+    if (code === 'EXPENSE_NOT_FOUND') return res.status(404).json({ message: 'Expense not found' });
+    if (code === 'FORBIDDEN') return res.status(403).json({ message: 'You do not have access to this expense' });
+    console.error('PG expense delete error:', error);
+    res.status(500).json({ message: 'Failed to remove expense' });
+  }
+};
+
+export const listElectricityBills = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const propertyIds = await accessiblePropertyIds(req, ['OWNER', 'WARDEN']);
+    const period = req.query.period ? String(req.query.period) : undefined;
+    const { listElectricityBills: listBills } = await import('../services/pg-billing.js');
+    res.json(await listBills(db, propertyIds, period));
+  } catch (error) {
+    console.error('PG electricity bill list error:', error);
+    res.status(500).json({ message: 'Failed to load electricity bills' });
+  }
+};
+
+export const proposeElectricityBill = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const propertyId = String(req.body?.propertyId || '');
+    if (!propertyId || !await canManageProperty(req, propertyId, ['OWNER', 'WARDEN'])) {
+      return res.status(403).json({ message: 'You do not have access to this property' });
+    }
+    const { proposeElectricityBill: propose } = await import('../services/pg-billing.js');
+    const bill = await propose(db, (req as any).user?.userId ? String((req as any).user.userId) : null, {
+      propertyId, period: req.body?.period, totalAmount: req.body?.totalAmount, imageUrl: req.body?.imageUrl
+    });
+    res.status(201).json(bill);
+  } catch (error: any) {
+    const code = String(error?.message || '');
+    if (['INVALID_PROPERTY', 'INVALID_PERIOD', 'INVALID_AMOUNT'].includes(code)) {
+      return res.status(400).json({ message: 'Bill needs a property, a YYYY-MM period and a positive total' });
+    }
+    if (code === 'PROPERTY_NOT_FOUND') return res.status(404).json({ message: 'Property is not available' });
+    if (code === 'ALREADY_BILLED') return res.status(409).json({ message: 'This period is already billed' });
+    if (code === 'NO_OCCUPANTS') return res.status(409).json({ message: 'No active tenants to split across' });
+    console.error('PG electricity bill propose error:', error);
+    res.status(500).json({ message: 'Failed to propose electricity bill' });
+  }
+};
+
+export const approveElectricityBill = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const propertyIds = await accessiblePropertyIds(req, ['OWNER', 'WARDEN']);
+    const { approveElectricityBill: approve } = await import('../services/pg-billing.js');
+    const result = await approve(db, (req as any).user?.userId ? String((req as any).user.userId) : null, String(req.params.billId), propertyIds);
+    res.json(result);
+  } catch (error: any) {
+    const code = String(error?.message || '');
+    if (code === 'BILL_NOT_FOUND') return res.status(404).json({ message: 'Bill not found' });
+    if (code === 'FORBIDDEN') return res.status(403).json({ message: 'You do not have access to this bill' });
+    console.error('PG electricity bill approve error:', error);
+    res.status(500).json({ message: 'Failed to approve electricity bill' });
+  }
+};
+
 export const recordRentPayment = async (req: Request, res: Response): Promise<any> => {
   const amount = Number(req.body.amount);
   const method = String(req.body.method || '').toUpperCase();
@@ -956,30 +1097,37 @@ export const recordRentPayment = async (req: Request, res: Response): Promise<an
     if (!await canManageProperty(req, entry.tenant.propertyId, ['OWNER'])) {
       return res.status(403).json({ message: 'You do not have access to this property' });
     }
-    const paidAmount = Math.min(entry.amount, entry.paidAmount + amount);
-    const status = paidAmount >= entry.amount ? 'PAID' : 'PARTIAL';
     const updated = await db.$transaction(async (tx: any) => {
-      const savedEntry = await tx.pGRentEntry.update({
-        where: { id: entry.id },
+      const current = await tx.pGRentEntry.findUnique({ where: { id: entry.id } });
+      if (!current) throw new Error('LEDGER_ENTRY_NOT_FOUND');
+
+      const paidAmount = Math.min(current.amount, current.paidAmount + amount);
+      const status = paidAmount >= current.amount ? 'PAID' : 'PARTIAL';
+      const changed = await tx.pGRentEntry.updateMany({
+        where: { id: current.id, paidAmount: current.paidAmount, status: current.status },
         data: {
           paidAmount,
           status,
           method,
-          reference: req.body.reference?.trim() || entry.reference,
-          paidAt: status === 'PAID' ? new Date() : entry.paidAt
+          reference: req.body.reference?.trim() || current.reference,
+          paidAt: status === 'PAID' ? new Date() : current.paidAt
         }
       });
+      if (changed.count !== 1) throw new Error('PAYMENT_CONFLICT');
       if (entry.entryType === 'DEPOSIT') {
         await tx.pGTenant.update({
           where: { id: entry.tenantId },
-          data: { depositReceived: { increment: paidAmount - entry.paidAmount } }
+          data: { depositReceived: { increment: paidAmount - current.paidAmount } }
         });
       }
-      return savedEntry;
+      return tx.pGRentEntry.findUniqueOrThrow({ where: { id: current.id } });
     });
-    logAudit(entry.tenant.propertyId, currentUser(req)?.id, 'RENT_PAYMENT_RECORDED', 'PGRentEntry', entry.id, `${paidAmount}/${entry.amount} via ${method}`);
+    logAudit(entry.tenant.propertyId, currentUser(req)?.id, 'RENT_PAYMENT_RECORDED', 'PGRentEntry', entry.id, `${updated.paidAmount}/${entry.amount} via ${method}`);
     res.json(updated);
   } catch (error) {
+    if ((error as Error)?.message === 'PAYMENT_CONFLICT') {
+      return res.status(409).json({ message: 'Payment changed concurrently; refresh the ledger and retry' });
+    }
     console.error('PG rent payment record error:', error);
     res.status(500).json({ message: 'Failed to record payment' });
   }

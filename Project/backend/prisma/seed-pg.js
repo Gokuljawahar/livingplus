@@ -9,34 +9,34 @@ const demoProperties = [
         address: '14, Lake View Road',
         genderPolicy: 'WOMEN',
         amenities: ['Wi-Fi', 'Meals', 'Laundry'],
-        rooms: [{ number: '101', rent: 9800 }, { number: '102', rent: 8500 }]
+        rooms: [{ number: '101', rent: 9800, foodIncluded: false, foodCharge: 0 }, { number: '102', rent: 8500, foodIncluded: false, foodCharge: 0 }]
     },
     {
         id: 'pg-demo-thoraipakkam-men',
         name: 'Harbour Point Men\'s PG',
-        locality: 'Thoraipakkam',
+        locality: 'Sholinganallur',
         address: '22, Rajiv Gandhi Salai',
         genderPolicy: 'MEN',
         amenities: ['Wi-Fi', 'Housekeeping', 'Parking'],
-        rooms: [{ number: '201', rent: 8800 }, { number: '202', rent: 7600 }]
+        rooms: [{ number: '201', rent: 8800, foodIncluded: true, foodCharge: 1500 }, { number: '202', rent: 7600, foodIncluded: true, foodCharge: 1500 }]
     },
     {
         id: 'pg-demo-guindy-coliving',
         name: 'Cedar House Co-Living',
-        locality: 'Guindy',
-        address: '8, Race Course Road',
+        locality: 'Thoraipakkam',
+        address: '8, Rajiv Gandhi Salai',
         genderPolicy: 'ANY',
         amenities: ['Wi-Fi', 'Kitchen', 'Study area'],
-        rooms: [{ number: '301', rent: 11200 }, { number: '302', rent: 10400 }]
+        rooms: [{ number: '301', rent: 11200, foodIncluded: false, foodCharge: 0 }, { number: '302', rent: 10400, foodIncluded: false, foodCharge: 0 }]
     },
     {
         id: 'pg-demo-anna-nagar',
         name: 'Northstar Student Living',
-        locality: 'Anna Nagar',
-        address: '31, 2nd Avenue',
+        locality: 'Velachery',
+        address: '31, 100 Feet Road',
         genderPolicy: 'ANY',
         amenities: ['Wi-Fi', 'Meals', 'Study area'],
-        rooms: [{ number: '401', rent: 9200 }, { number: '402', rent: 8200 }]
+        rooms: [{ number: '401', rent: 9200, foodIncluded: false, foodCharge: 0 }, { number: '402', rent: 8200, foodIncluded: false, foodCharge: 0 }]
     }
 ];
 async function main() {
@@ -82,13 +82,15 @@ async function main() {
         for (const roomData of item.rooms) {
             const room = await prisma.pGRoom.upsert({
                 where: { propertyId_roomNumber: { propertyId: item.id, roomNumber: roomData.number } },
-                update: { monthlyRent: roomData.rent, status: 'ACTIVE' },
+                update: { monthlyRent: roomData.rent, foodIncluded: roomData.foodIncluded, foodCharge: roomData.foodCharge, status: 'ACTIVE' },
                 create: {
                     propertyId: item.id,
                     roomNumber: roomData.number,
                     floor: Number(roomData.number[0]),
                     roomType: 'SHARED',
-                    monthlyRent: roomData.rent
+                    monthlyRent: roomData.rent,
+                    foodIncluded: roomData.foodIncluded,
+                    foodCharge: roomData.foodCharge
                 }
             });
             for (const label of ['Bed 1', 'Bed 2']) {

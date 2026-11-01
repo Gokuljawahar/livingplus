@@ -1,12 +1,24 @@
 import { Router } from 'express';
 import { createPgOperator, deletePgOperatorProperty, listPgOperators } from '../controllers/pg-admin.controller.js';
-import { cancelBookingRequest, checkInTenant, checkOutTenant, createBookingRequest, createMaintenanceTicket, createProperty, createPropertyStaff, createRentEntry, createRoom, deleteProperty, getPublicConfig, listTenantStays, submitTenantNotice, cancelTenantNotice, listAuditLogs, getOwnerReport, getOwnerSummary, getPublicBookingStatus, listOwnerBookings, listOwnerProperties, listOwnerRentEntries, listOwnerTenants, listOwnerTickets, markDepositRefunded, listProperties, listPropertyStaff, recordRentPayment, removePropertyStaff, updateBedStatus, updateBookingStatus, updateMaintenanceStatus, updateProperty, updateTenantProfile } from '../controllers/pg.controller.js';
-import { authenticate } from '../middleware/auth.middleware.js';
+import { cancelBookingRequest, checkInTenant, checkOutTenant, createBookingRequest, createMaintenanceTicket, createProperty, createPropertyStaff, createRentEntry, createRoom, deleteProperty, getPublicConfig, listTenantStays, submitTenantNotice, cancelTenantNotice, listAuditLogs, getOwnerReport, getOwnerSummary, getPublicBookingStatus, listOwnerBookings, listOwnerProperties, listOwnerRentEntries, sendRentReminders, listOwnerExpenses, createOwnerExpense, deleteOwnerExpense, listElectricityBills, proposeElectricityBill, approveElectricityBill, listOwnerTenants, listOwnerTickets, markDepositRefunded, listProperties, listPropertyStaff, recordRentPayment, removePropertyStaff, updateBedStatus, updateBookingStatus, updateMaintenanceStatus, updateProperty, updateTenantProfile } from '../controllers/pg.controller.js';
+import multer from 'multer';
+import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware.js';
+import { getAiStatus, postChat, postTranscribe } from '../controllers/ai.controller.js';
+const voiceUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req, file, done) => {
+        done(null, /^audio\//.test(file.mimetype || ''));
+    }
+});
 const router = Router();
 router.get('/admin/operators', authenticate, listPgOperators);
 router.post('/admin/operators', authenticate, createPgOperator);
 router.delete('/admin/operators/:propertyId', authenticate, deletePgOperatorProperty);
 router.get('/config', getPublicConfig);
+router.get('/ai/status', getAiStatus);
+router.post('/ai/chat', optionalAuthenticate, postChat);
+router.post('/ai/transcribe', voiceUpload.single('audio'), postTranscribe);
 router.get('/tenant/stays', authenticate, listTenantStays);
 router.post('/tenant/:tenantId/notice', authenticate, submitTenantNotice);
 router.post('/tenant/:tenantId/notice-cancel', authenticate, cancelTenantNotice);
@@ -33,6 +45,13 @@ router.post('/owner/staff', authenticate, createPropertyStaff);
 router.delete('/owner/staff/:propertyId/:userId', authenticate, removePropertyStaff);
 router.get('/owner/rent', authenticate, listOwnerRentEntries);
 router.post('/owner/rent', authenticate, createRentEntry);
+router.post('/owner/rent/reminders', authenticate, sendRentReminders);
+router.get('/owner/expenses', authenticate, listOwnerExpenses);
+router.post('/owner/expenses', authenticate, createOwnerExpense);
+router.delete('/owner/expenses/:expenseId', authenticate, deleteOwnerExpense);
+router.get('/owner/electricity/bills', authenticate, listElectricityBills);
+router.post('/owner/electricity/bills', authenticate, proposeElectricityBill);
+router.post('/owner/electricity/bills/:billId/approve', authenticate, approveElectricityBill);
 router.patch('/owner/rent/:entryId/payment', authenticate, recordRentPayment);
 router.get('/owner/summary', authenticate, getOwnerSummary);
 router.get('/owner/reports', authenticate, getOwnerReport);

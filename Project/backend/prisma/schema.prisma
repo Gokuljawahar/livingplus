@@ -49,6 +49,8 @@ model PGProperty {
   tenants            PGTenant[]
   auditLogs          PHAuditLog[]
   maintenanceTickets PGMaintenanceTicket[]
+  expenses           PGExpense[]
+  electricityBills   PGElectricityBill[]
 }
 
 model PGPropertyAccess {
@@ -77,6 +79,7 @@ model PGRoom {
   utilitiesSurcharge Float      @default(0)
   hasAc              Boolean    @default(false)
   foodIncluded       Boolean    @default(false)
+  foodCharge         Float      @default(0)
   status             String     @default("ACTIVE")
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
@@ -117,6 +120,7 @@ model PGBooking {
   status        String     @default("PENDING")
   notes         String?
   rejectionReason String?
+  idempotencyKey String? @unique
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
   property      PGProperty @relation(fields: [propertyId], references: [id], onDelete: Cascade)
@@ -144,6 +148,7 @@ model PGTenant {
   kycDocumentUrl        String?
   kycVerified           Boolean    @default(false)
   kycVerifiedAt         DateTime?
+  foodOptOut            Boolean    @default(false)
   noticeDate            DateTime?
   moveInDate            DateTime
   moveOutDate           DateTime?
@@ -184,6 +189,7 @@ model PGRentEntry {
   method      String?
   notes       String?
   invoiceCode String?  @unique
+  lastReminderAt DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   tenant      PGTenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -210,6 +216,37 @@ model PGMaintenanceTicket {
   tenant      PGTenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
   @@index([propertyId, status, priority])
+}
+
+model PGExpense {
+  id         String   @id @default(uuid())
+  propertyId String
+  category   String   @default("OTHER")
+  amount     Float
+  spentOn    DateTime
+  note       String?
+  createdBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  property   PGProperty @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId, spentOn])
+}
+
+model PGElectricityBill {
+  id          String   @id @default(uuid())
+  propertyId  String
+  period      String
+  totalAmount Float
+  imageUrl    String?
+  status      String   @default("DRAFT")
+  splitJson   String   @default("[]")
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  property    PGProperty @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId, period, status])
 }
 
 model OtpCode {
@@ -239,4 +276,16 @@ model PHAuditLog {
   property   PGProperty @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   @@index([propertyId, createdAt])
+}
+
+model ConversationSession {
+  id        String   @id @default(uuid())
+  userId    String?
+  channel   String   @default("web")
+  role      String   @default("RESIDENT")
+  stateJson String   @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, updatedAt])
 }

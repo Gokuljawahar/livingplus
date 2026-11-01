@@ -4,13 +4,14 @@ import multer from 'multer';
 import { PrismaClient } from '@prisma/client';
 import routes from './routes/index.js';
 import { decryptRequest, encryptResponse } from './middleware/encryption.middleware.js';
+import { authenticate } from './middleware/auth.middleware.js';
 
 const app = express();
 export const prisma = new PrismaClient();
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ limit: '100kb', extended: true }));
 import path from 'path';
 import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -30,24 +31,54 @@ const s3Upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
+const allowedUploadTypes = new Set([
+  'image/jpeg', 'image/png', 'image/webp', 'image/avif', 'image/gif', 'image/heic', 'image/heif', 'image/tiff', 'application/pdf'
+]);
 
-app.post('/api/upload-s3', s3Upload.single('image'), async (req, res) => {
+const authorizePropertyStaffUpload = async (req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> => {
+  const user = (req as any).user as { userId?: string; role?: string };
+  if (user.role === 'SUPER_ADMIN') return next();
+  if (!user.userId || !['PG_OWNER', 'PG_WARDEN'].includes(user.role || '')) {
+    res.status(403).json({ message: 'Property staff access is required' });
+    return;
+  }
+  const access = await prisma.pGPropertyAccess.findFirst({
+    where: { userId: user.userId, role: { in: ['OWNER', 'WARDEN'] } },
+    select: { id: true }
+  });
+  if (!access) {
+    res.status(403).json({ message: 'Property staff access is required' });
+    return;
+  }
+  next();
+};
+
+app.post('/api/upload-s3', authenticate, authorizePropertyStaffUpload, s3Upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "No image file provided" });
     }
 
     let imageBuffer = req.file.buffer;
-    let contentType = req.file.mimetype;
+    let contentType = req.file.mimetype.toLowerCase();
     let finalFilename = req.file.originalname;
+    if (!allowedUploadTypes.has(contentType)) {
+      return res.status(400).json({ error: 'Only supported image files and PDFs may be uploaded' });
+    }
 
     if (contentType.startsWith('image/')) {
-      imageBuffer = await sharp(req.file.buffer)
-        .resize({ width: 1600, withoutEnlargement: true })
-        .webp({ quality: 80 })
-        .toBuffer();
+      try {
+        imageBuffer = await sharp(req.file.buffer)
+          .resize({ width: 1600, withoutEnlargement: true })
+          .webp({ quality: 80 })
+          .toBuffer();
+      } catch {
+        return res.status(400).json({ error: 'Image file is invalid or unsupported' });
+      }
       contentType = 'image/webp';
       finalFilename = finalFilename.replace(/\.[^/.]+$/, "") + ".webp";
+    } else if (imageBuffer.indexOf(Buffer.from('%PDF-')) < 0 || imageBuffer.indexOf(Buffer.from('%PDF-')) > 1024) {
+      return res.status(400).json({ error: 'PDF file is invalid' });
     }
 
     const sanitizedFilename = finalFilename.replace(/[^a-zA-Z0-9.-]/g, '_');
@@ -76,9 +107,6 @@ app.use(encryptResponse);
 app.use((req, res, next) => {
   const start = Date.now();
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-  if (req.method !== 'GET') {
-    console.log('Body:', JSON.stringify(req.body, null, 2));
-  }
 
   res.on('finish', () => {
     const duration = Date.now() - start;
@@ -93,11 +121,11 @@ app.get('/health', (req, res) => {
 
 // S3 presigned URL endpoints (kept for backwards compatibility)
 
-app.post('/api/upload-url', async (req, res) => {
+app.post('/api/upload-url', authenticate, authorizePropertyStaffUpload, async (req, res) => {
   try {
     const { filename, mimeType } = req.body;
 
-    if (!filename || !mimeType) {
+    if (typeof filename !== 'string' || !filename.trim() || typeof mimeType !== 'string' || !allowedUploadTypes.has(mimeType.toLowerCase())) {
       return res.status(400).json({ error: "filename and mimeType are required" });
     }
 
@@ -121,9 +149,22 @@ app.post('/api/upload-url', async (req, res) => {
 
 const signedUrlCache = new Map<string, { url: string, expiresAt: number }>();
 
-app.get(/^\/api\/view-image\/(.+)$/, async (req, res) => {
+app.get(/^\/api\/view-image\/(.+)$/, authenticate, async (req, res) => {
   try {
     const fileKey = req.params[0] as string;
+    const tenant = await prisma.pGTenant.findFirst({
+      where: { kycDocumentUrl: fileKey },
+      select: { propertyId: true }
+    });
+    if (!tenant) return res.status(404).json({ message: 'Document not found' });
+
+    const user = (req as any).user as { userId?: string; role?: string };
+    const hasAccess = user.role === 'SUPER_ADMIN' || Boolean(user.userId && await prisma.pGPropertyAccess.findFirst({
+      where: { propertyId: tenant.propertyId, userId: user.userId, role: { in: ['OWNER', 'WARDEN'] } },
+      select: { id: true }
+    }));
+    if (!hasAccess) return res.status(403).json({ message: 'You do not have access to this document' });
+
     const now = Date.now();
 
     const cached = signedUrlCache.get(fileKey);
@@ -149,15 +190,21 @@ app.get(/^\/api\/view-image\/(.+)$/, async (req, res) => {
 app.post('/api/view-image/bulk', async (req, res) => {
   try {
     const { keys } = req.body;
-    if (!Array.isArray(keys)) {
-      return res.status(400).json({ error: "keys array is required" });
+    if (!Array.isArray(keys) || keys.length > 100 || keys.some((key) => typeof key !== 'string')) {
+      return res.status(400).json({ error: "keys must be an array of at most 100 strings" });
     }
 
+    const properties = await prisma.pGProperty.findMany({
+      where: { status: 'ACTIVE' },
+      select: { photoUrls: true }
+    });
+    const publicKeys = new Set(properties.flatMap((property) => Array.isArray(property.photoUrls) ? property.photoUrls : []));
+    const allowedKeys = [...new Set(keys)].filter((key): key is string => publicKeys.has(key));
     const urls: Record<string, string> = {};
     const now = Date.now();
 
     await Promise.all(
-      keys.map(async (fileKey) => {
+      allowedKeys.map(async (fileKey) => {
         try {
           const cached = signedUrlCache.get(fileKey);
           if (cached && cached.expiresAt > now) {

@@ -1,36 +1,34 @@
 import type { PrismaClient } from '@prisma/client';
+import { calculateMonthlyRent, ensureFoodEntries } from './pg-billing.js';
 
 export async function generateMonthlyRentEntries(prisma: PrismaClient, at = new Date()): Promise<number> {
-  const period = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}`;
   const tenants = await prisma.pGTenant.findMany({
     where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
     include: { bed: { include: { room: true } }, property: { select: { rentDay: true, rentDueDay: true } } }
   });
 
   for (const tenant of tenants) {
-    const room = tenant.bed?.room;
-    const dueDay = Math.min(28, Math.max(1, (tenant as any).property?.rentDueDay || 5));
-    const dueDate = new Date(at.getFullYear(), at.getMonth(), dueDay);
-    const amount = tenant.monthlyRent + (room?.maintenanceFee || 0) + (room?.utilitiesSurcharge || 0);
+    const rent = calculateMonthlyRent(tenant, at);
     await prisma.pGRentEntry.upsert({
       where: {
         tenantId_period_entryType: {
           tenantId: tenant.id,
-          period,
+          period: rent.period,
           entryType: 'RENT'
         }
       },
       update: {},
       create: {
         tenantId: tenant.id,
-        period,
+        period: rent.period,
         entryType: 'RENT',
-        amount,
-        dueDate,
-        invoiceCode: `RENT-${period}-${tenant.id.slice(0, 8).toUpperCase()}`,
+        amount: rent.amount,
+        dueDate: rent.dueDate,
+        invoiceCode: `RENT-${rent.period}-${tenant.id.slice(0, 8).toUpperCase()}`,
         status: 'DUE'
       }
     });
+    await ensureFoodEntries(prisma, tenant, rent.period, rent.dueDate);
   }
 
   return tenants.length;

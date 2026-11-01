@@ -1,7 +1,19 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { getJwtSecret } from '../utils/auth-config.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'secret';
+export const optionalAuthenticate = (req: Request, _res: Response, next: NextFunction): void => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : undefined;
+  if (token) {
+    try {
+      (req as any).user = jwt.verify(token, getJwtSecret());
+    } catch {
+      // Invalid or expired token: continue as guest rather than blocking chat.
+    }
+  }
+  next();
+};
 
 export const authenticate = (req: Request, res: Response, next: NextFunction): void => {
   const authHeader = req.headers.authorization;
@@ -17,7 +29,7 @@ export const authenticate = (req: Request, res: Response, next: NextFunction): v
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    const decoded = jwt.verify(token, getJwtSecret()) as any;
     (req as any).user = decoded;
     next();
   } catch (error) {

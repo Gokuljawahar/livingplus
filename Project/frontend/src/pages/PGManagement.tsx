@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BedDouble, Building2, Check, ClipboardList, Clock, Download, FileText, IndianRupee, Loader2, Plus, Users, Wallet, Wrench, X } from 'lucide-react';
+import { BedDouble, Building2, Check, ClipboardList, Clock, Download, FileText, IndianRupee, Loader2, Plus, Users, Wallet, Wrench, X, Zap } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
 import { SecureImage } from '../components/SecureImage';
@@ -7,11 +7,13 @@ import { MapPicker } from '../components/MapPicker';
 import { downloadXlsx } from '../utils/xlsx';
 
 type Activity = { id: string; action: string; entityType?: string | null; entityId?: string | null; detail?: string | null; actorName?: string | null; createdAt: string; propertyId: string };
-type Property = { id: string; name: string; description?: string | null; address: string; locality: string; contactPhone?: string | null; city: string; latitude?: number | null; longitude?: number | null; genderPolicy: string; amenities: string[]; houseRules: string[]; photoUrls: string[]; rooms: { id: string; roomNumber: string; monthlyRent: number; depositAmount: number; maintenanceFee: number; utilitiesSurcharge: number; roomType: string; beds: { id: string; label: string; status: string; maintenanceNote?: string | null }[] }[] };
+type Property = { id: string; name: string; description?: string | null; address: string; locality: string; contactPhone?: string | null; city: string; latitude?: number | null; longitude?: number | null; genderPolicy: string; amenities: string[]; houseRules: string[]; photoUrls: string[]; rooms: { id: string; roomNumber: string; monthlyRent: number; depositAmount: number; maintenanceFee: number; utilitiesSurcharge: number; foodCharge: number; roomType: string; beds: { id: string; label: string; status: string; maintenanceNote?: string | null }[] }[] };
 type Booking = { id: string; bookingRef: string; residentName: string; phone: string; moveInDate: string; status: string; rejectionReason?: string | null; property: { name: string; locality: string }; bed: { label: string; room: { roomNumber: string } } | null; bedId: string | null; tenant?: { id: string; status: string } | null };
 type Ticket = { id: string; title: string; description: string; category: string; priority: string; status: string; imageUrl?: string | null; assignedName?: string | null; property: { name: string }; tenant?: { name: string } | null };
-type Tenant = { id: string; name: string; phone: string; email?: string | null; status: string; monthlyRent: number; depositAmount: number; depositReceived: number; kycVerified?: boolean; noticeDate?: string | null; depositDeductions?: number; depositRefundAmount?: number | null; depositRefundStatus?: string; depositRefundReference?: string | null; checkoutNote?: string | null; permanentAddress?: string | null; bloodGroup?: string | null; institutionOrEmployer?: string | null; emergencyName?: string | null; emergencyPhone?: string | null; kycType?: string | null; kycDocumentUrl?: string | null; checkedInAt?: string | null; property: { id: string; name: string; locality: string }; bed?: { label: string; room: { roomNumber: string } } | null };
+type Tenant = { id: string; name: string; phone: string; email?: string | null; status: string; monthlyRent: number; depositAmount: number; depositReceived: number; kycVerified?: boolean; foodOptOut?: boolean; noticeDate?: string | null; depositDeductions?: number; depositRefundAmount?: number | null; depositRefundStatus?: string; depositRefundReference?: string | null; checkoutNote?: string | null; permanentAddress?: string | null; bloodGroup?: string | null; institutionOrEmployer?: string | null; emergencyName?: string | null; emergencyPhone?: string | null; kycType?: string | null; kycDocumentUrl?: string | null; checkedInAt?: string | null; property: { id: string; name: string; locality: string }; bed?: { label: string; room: { roomNumber: string } } | null };
 type RentEntry = { id: string; entryType: string; period: string; amount: number; paidAmount: number; dueDate: string; status: string; method?: string | null; reference?: string | null; tenant: { id: string; name: string; phone: string; property: { id: string; name: string }; bed?: { label: string; room: { roomNumber: string } } | null } };
+type Expense = { id: string; category: string; amount: number; spentOn: string; note?: string | null; property: { name: string } };
+type ElecBill = { id: string; period: string; totalAmount: number; status: string; splitJson: string; property: { name: string } };
 type Staff = { id: string; name: string; phone: string; email?: string | null; role: string; property: { id: string; name: string } };
 type Summary = { properties: number; totalBeds: number; occupiedBeds: number; occupancyRate: number; pendingBookings: number; openTickets: number; rentOutstanding: number; canManageStaff: boolean };
 type OwnerReport = { period: string; properties: number; totalBeds: number; occupiedBeds: number; availableBeds: number; occupancyRate: number; activeTenants: number; newBookings: number; rentCharged: number; rentCollected: number; outstanding: number; entries: RentEntry[] };
@@ -19,12 +21,18 @@ type OwnerReport = { period: string; properties: number; totalBeds: number; occu
 const emptySummary: Summary = { properties: 0, totalBeds: 0, occupiedBeds: 0, occupancyRate: 0, pendingBookings: 0, openTickets: 0, rentOutstanding: 0, canManageStaff: false };
 
 export default function PGManagement() {
-  const [view, setView] = useState<'overview' | 'properties' | 'bookings' | 'tenants' | 'activity' | 'rent' | 'maintenance' | 'reports' | 'staff'>('overview');
+  const [view, setView] = useState<'overview' | 'properties' | 'bookings' | 'tenants' | 'activity' | 'rent' | 'expenses' | 'utilities' | 'maintenance' | 'reports' | 'staff'>('overview');
   const [properties, setProperties] = useState<Property[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [rentEntries, setRentEntries] = useState<RentEntry[]>([]);
+  const [reminding, setReminding] = useState(false);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [expenseTotal, setExpenseTotal] = useState(0);
+  const [bills, setBills] = useState<ElecBill[]>([]);
+  const [billForm, setBillForm] = useState({ period: new Date().toISOString().slice(0, 7), totalAmount: '' });
+  const [expenseForm, setExpenseForm] = useState({ category: 'FOOD', amount: '', spentOn: new Date().toISOString().slice(0, 10), note: '' });
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [summary, setSummary] = useState<Summary>(emptySummary);
   const [report, setReport] = useState<OwnerReport | null>(null);
@@ -39,7 +47,7 @@ export default function PGManagement() {
   const [reassignBed, setReassignBed] = useState<Record<string, string>>({});
   const [propertyPhotoFiles, setPropertyPhotoFiles] = useState<File[]>([]);
   const [existingPhotoUrls, setExistingPhotoUrls] = useState<string[]>([]);
-  const [roomForm, setRoomForm] = useState({ roomNumber: '', block: '', floor: '', roomType: 'SHARED', monthlyRent: '', depositAmount: '', maintenanceFee: '', utilitiesSurcharge: '', numberOfBeds: '1', hasAc: false, foodIncluded: false });
+  const [roomForm, setRoomForm] = useState({ roomNumber: '', block: '', floor: '', roomType: 'SHARED', monthlyRent: '', depositAmount: '', maintenanceFee: '', utilitiesSurcharge: '', foodCharge: '', numberOfBeds: '1', hasAc: false, foodIncluded: false });
   const [rentForm, setRentForm] = useState({ tenantId: '', period: new Date().toISOString().slice(0, 7), amount: '', dueDate: '' });
   const [staffForm, setStaffForm] = useState({ name: '', phone: '', email: '', password: '', propertyId: '' });
   const [ticketForm, setTicketForm] = useState({ title: '', description: '', category: 'PLUMBING', priority: 'NORMAL', assignedTo: '' });
@@ -67,16 +75,24 @@ export default function PGManagement() {
         setTenants(tenantResponse.data);
         try { const activityResponse = await api.get('/pg/owner/activity'); setActivity(activityResponse.data); } catch { setActivity([]); }
         if (summaryResponse.data.canManageStaff) {
-          const [rentResponse, reportResponse, staffResponse] = await Promise.all([
+          const [rentResponse, expenseResponse, billResponse, reportResponse, staffResponse] = await Promise.all([
             api.get('/pg/owner/rent'),
+            api.get('/pg/owner/expenses'),
+            api.get('/pg/owner/electricity/bills'),
             api.get('/pg/owner/reports'),
             api.get('/pg/owner/staff')
           ]);
           setRentEntries(rentResponse.data);
+          setExpenses(expenseResponse.data.entries || []);
+          setExpenseTotal(expenseResponse.data.total || 0);
+          setBills(billResponse.data || []);
           setReport(reportResponse.data);
           setStaff(staffResponse.data);
         } else {
           setRentEntries([]);
+          setExpenses([]);
+          setExpenseTotal(0);
+          setBills([]);
           setReport(null);
           setStaff([]);
         }
@@ -187,7 +203,7 @@ export default function PGManagement() {
     setSaving(true);
     try {
       await api.post(`/pg/owner/properties/${selectedPropertyId}/rooms`, { ...roomForm, floor: roomForm.floor || null });
-      setRoomForm({ roomNumber: '', block: '', floor: '', roomType: 'SHARED', monthlyRent: '', depositAmount: '', maintenanceFee: '', utilitiesSurcharge: '', numberOfBeds: '1', hasAc: false, foodIncluded: false });
+      setRoomForm({ roomNumber: '', block: '', floor: '', roomType: 'SHARED', monthlyRent: '', depositAmount: '', maintenanceFee: '', utilitiesSurcharge: '', foodCharge: '', numberOfBeds: '1', hasAc: false, foodIncluded: false });
       toast.success('Room and beds added');
       refresh();
     } catch (error: any) {
@@ -351,6 +367,87 @@ export default function PGManagement() {
     }
   };
 
+  const sendReminders = async () => {
+    setReminding(true);
+    try {
+      const response = await api.post('/pg/owner/rent/reminders', {});
+      toast.success(`Reminders sent to ${response.data.sent} of ${response.data.total} open dues`);
+      refresh();
+    } catch (error: unknown) {
+      const failure = (error as { response?: { data?: { message?: string } } })?.response;
+      toast.error(failure?.data?.message || 'Could not send reminders');
+    } finally {
+      setReminding(false);
+    }
+  };
+
+  const submitExpense = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await api.post('/pg/owner/expenses', { ...expenseForm, propertyId: selectedPropertyId });
+      toast.success('Expense recorded');
+      setExpenseForm({ category: 'FOOD', amount: '', spentOn: new Date().toISOString().slice(0, 10), note: '' });
+      refresh();
+    } catch (error: unknown) {
+      const failure = (error as { response?: { data?: { message?: string } } })?.response;
+      toast.error(failure?.data?.message || 'Could not record expense');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeExpense = async (expenseId: string) => {
+    if (!window.confirm('Remove this expense from the ledger?')) return;
+    try {
+      await api.delete(`/pg/owner/expenses/${expenseId}`);
+      toast.success('Expense removed');
+      refresh();
+    } catch (error: unknown) {
+      const failure = (error as { response?: { data?: { message?: string } } })?.response;
+      toast.error(failure?.data?.message || 'Could not remove expense');
+    }
+  };
+
+  const proposeBill = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await api.post('/pg/owner/electricity/bills', { ...billForm, propertyId: selectedPropertyId });
+      toast.success('Bill split proposed — review and approve below');
+      setBillForm({ period: new Date().toISOString().slice(0, 7), totalAmount: '' });
+      refresh();
+    } catch (error: unknown) {
+      const failure = (error as { response?: { data?: { message?: string } } })?.response;
+      toast.error(failure?.data?.message || 'Could not propose bill');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const approveBill = async (billId: string) => {
+    if (!window.confirm('Approve this split and bill every tenant for this period?')) return;
+    try {
+      const response = await api.post(`/pg/owner/electricity/bills/${billId}/approve`, {});
+      toast.success(`Approved — ${response.data.entries} tenant bills created`);
+      refresh();
+    } catch (error: unknown) {
+      const failure = (error as { response?: { data?: { message?: string } } })?.response;
+      toast.error(failure?.data?.message || 'Could not approve bill');
+    }
+  };
+
+  const setFoodOptOut = async (tenantId: string, optOut: boolean) => {
+    try {
+      await api.patch(`/pg/owner/tenants/${tenantId}`, { foodOptOut: optOut });
+      toast.success(optOut ? 'Tenant opted out of food' : 'Tenant opted back in to food');
+      refresh();
+    } catch (error: unknown) {
+      const failure = (error as { response?: { data?: { message?: string } } })?.response;
+      toast.error(failure?.data?.message || 'Could not update food preference');
+    }
+  };
+
   const exportReport = () => {
     if (!report) return;
     const rows = [
@@ -422,6 +519,8 @@ export default function PGManagement() {
     { id: 'maintenance', label: 'Maintenance', icon: Wrench },
     ...(summary.canManageStaff ? [
       { id: 'rent' as const, label: 'Rent Ledger', icon: Wallet },
+      { id: 'expenses' as const, label: 'Expenses', icon: IndianRupee },
+      { id: 'utilities' as const, label: 'Utilities', icon: Zap },
       { id: 'reports' as const, label: 'Reports', icon: FileText },
       { id: 'staff' as const, label: 'Staff', icon: Users }
     ] : [])
@@ -487,7 +586,7 @@ export default function PGManagement() {
                     <label className="text-sm text-slate-600">Monthly rent<input required min="1" type="number" value={roomForm.monthlyRent} onChange={(event) => setRoomForm({ ...roomForm, monthlyRent: event.target.value })} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2" /></label>
                     <label className="text-sm text-slate-600">Deposit<input min="0" type="number" value={roomForm.depositAmount} onChange={(event) => setRoomForm({ ...roomForm, depositAmount: event.target.value })} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2" /></label>
                     <label className="text-sm text-slate-600">Maintenance fee<input min="0" type="number" value={roomForm.maintenanceFee} onChange={(event) => setRoomForm({ ...roomForm, maintenanceFee: event.target.value })} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2" /></label>
-                    <label className="text-sm text-slate-600">Utilities<input min="0" type="number" value={roomForm.utilitiesSurcharge} onChange={(event) => setRoomForm({ ...roomForm, utilitiesSurcharge: event.target.value })} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2" /></label>
+                    <label className="text-sm text-slate-600">Utilities<input min="0" type="number" value={roomForm.utilitiesSurcharge} onChange={(event) => setRoomForm({ ...roomForm, utilitiesSurcharge: event.target.value })} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2" /></label><label className="text-sm text-slate-600">Food / month (0 for none)<input min="0" type="number" value={roomForm.foodCharge} onChange={(event) => setRoomForm({ ...roomForm, foodCharge: event.target.value })} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2" /></label>
                     <label className="text-sm text-slate-600">Number of beds<input required min="1" max="20" type="number" value={roomForm.numberOfBeds} onChange={(event) => setRoomForm({ ...roomForm, numberOfBeds: event.target.value })} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2" /></label>
                     <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={roomForm.hasAc} onChange={(event) => setRoomForm({ ...roomForm, hasAc: event.target.checked })} />AC room</label>
                     <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={roomForm.foodIncluded} onChange={(event) => setRoomForm({ ...roomForm, foodIncluded: event.target.checked })} />Food included</label>
@@ -543,7 +642,7 @@ export default function PGManagement() {
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-[#02224B]">{tenant.name}</h3><span className="text-xs font-semibold uppercase text-slate-500">{tenant.status.replace('_', ' ')}</span></div><p className="mt-1 text-sm text-slate-500">{tenant.property.name} · {tenant.bed ? `Room ${tenant.bed.room.roomNumber}, ${tenant.bed.label}` : 'No bed assigned'}</p><p className="mt-1 text-sm text-slate-600">{tenant.phone} · ₹{tenant.monthlyRent.toLocaleString('en-IN')} / month · Deposit ₹{tenant.depositReceived.toLocaleString('en-IN')} / ₹{tenant.depositAmount.toLocaleString('en-IN')}</p></div>
                   <div className="flex gap-2">{tenant.status === 'RESERVED' && <button onClick={() => void updateTenantStay(tenant.id, 'check-in')} className="bg-emerald-700 px-3 py-2 text-sm font-semibold text-white">Check in</button>}{tenant.status === 'ACTIVE' && <button onClick={() => setCheckoutTenantId(checkoutTenantId === tenant.id ? '' : tenant.id)} className="border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700">Check out</button>}
-                  {tenant.status === 'CHECKED_OUT' && tenant.depositRefundStatus === 'PENDING' && <span className="inline-flex items-center border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">Refund due ₹{(tenant.depositRefundAmount || 0).toLocaleString('en-IN')}</span>}{tenant.kycDocumentUrl && <button type="button" onClick={() => void viewKycDocument(tenant.kycDocumentUrl!)} className="border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700">View KYC</button>}{tenant.kycDocumentUrl && !tenant.kycVerified && <button type="button" onClick={() => void verifyKyc(tenant.id, true)} className="border border-emerald-300 px-3 py-2 text-sm font-semibold text-emerald-700">Verify KYC</button>}{tenant.kycVerified && <button type="button" onClick={() => void verifyKyc(tenant.id, false)} className="border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-500">KYC verified · revoke</button>}</div>
+                  {tenant.status === 'CHECKED_OUT' && tenant.depositRefundStatus === 'PENDING' && <span className="inline-flex items-center border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">Refund due ₹{(tenant.depositRefundAmount || 0).toLocaleString('en-IN')}</span>}{tenant.kycDocumentUrl && <button type="button" onClick={() => void viewKycDocument(tenant.kycDocumentUrl!)} className="border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700">View KYC</button>}{tenant.kycDocumentUrl && !tenant.kycVerified && <button type="button" onClick={() => void verifyKyc(tenant.id, true)} className="border border-emerald-300 px-3 py-2 text-sm font-semibold text-emerald-700">Verify KYC</button>}{tenant.kycVerified && <button type="button" onClick={() => void verifyKyc(tenant.id, false)} className="border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-500">KYC verified · revoke</button>}{tenant.foodOptOut ? <button type="button" onClick={() => void setFoodOptOut(tenant.id, false)} className="border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-500">Food off · turn on</button> : <button type="button" onClick={() => void setFoodOptOut(tenant.id, true)} className="border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700">Food on · opt out</button>}</div>
                 </div>
                 <form onSubmit={(event) => void updateTenant(event, tenant.id)} className="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2 xl:grid-cols-4">
                   <input name="permanentAddress" defaultValue={tenant.permanentAddress || ''} placeholder="Permanent address" className="border border-slate-300 px-3 py-2 text-sm" />
@@ -563,10 +662,12 @@ export default function PGManagement() {
             </section>}
 
             {view === 'rent' && <section className="grid gap-8 pt-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-              <div><h2 className="font-semibold">Rent and deposit ledger</h2><div className="mt-3 divide-y divide-slate-200 border-y border-slate-200">{rentEntries.map((entry) => <article key={entry.id} className="py-4"><div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{entry.tenant.name}</h3><span className="text-xs font-semibold uppercase text-slate-500">{entry.entryType} · {entry.period}</span><span className="text-xs font-semibold uppercase text-amber-700">{entry.status}</span></div><p className="mt-1 text-sm text-slate-500">{entry.tenant.property.name}{entry.tenant.bed ? ` · Room ${entry.tenant.bed.room.roomNumber}, ${entry.tenant.bed.label}` : ''} · Due {new Date(entry.dueDate).toLocaleDateString()}</p><p className="mt-1 text-sm text-slate-700">₹{entry.paidAmount.toLocaleString('en-IN')} paid of ₹{entry.amount.toLocaleString('en-IN')}{entry.method ? ` · ${entry.method}` : ''}{entry.reference ? ` · Ref ${entry.reference}` : ''}</p></div></div>{entry.status !== 'PAID' && <form onSubmit={(event) => void recordPayment(event, entry.id)} className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_1.5fr_auto]"><input required name="amount" type="number" min="1" max={entry.amount - entry.paidAmount} defaultValue={entry.amount - entry.paidAmount} aria-label="Payment amount" className="border border-slate-300 px-3 py-2 text-sm" /><select name="method" className="border border-slate-300 bg-white px-3 py-2 text-sm"><option value="CASH">Cash</option><option value="NEFT">NEFT</option><option value="UPI">UPI</option><option value="OTHER">Other</option></select><input name="reference" placeholder="Receipt / transaction reference" className="border border-slate-300 px-3 py-2 text-sm" /><button className="bg-emerald-700 px-3 py-2 text-sm font-semibold text-white">Record payment</button></form>}</article>)}{!rentEntries.length && <p className="py-8 text-center text-sm text-slate-500">No rent entries yet.</p>}</div></div>
+              <div><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">Rent and deposit ledger</h2><button onClick={() => void sendReminders()} disabled={reminding} className="border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-60">{reminding ? 'Sending…' : 'Send due reminders'}</button></div><div className="mt-3 divide-y divide-slate-200 border-y border-slate-200">{rentEntries.map((entry) => <article key={entry.id} className="py-4"><div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{entry.tenant.name}</h3><span className="text-xs font-semibold uppercase text-slate-500">{entry.entryType} · {entry.period}</span><span className="text-xs font-semibold uppercase text-amber-700">{entry.status}</span></div><p className="mt-1 text-sm text-slate-500">{entry.tenant.property.name}{entry.tenant.bed ? ` · Room ${entry.tenant.bed.room.roomNumber}, ${entry.tenant.bed.label}` : ''} · Due {new Date(entry.dueDate).toLocaleDateString()}</p><p className="mt-1 text-sm text-slate-700">₹{entry.paidAmount.toLocaleString('en-IN')} paid of ₹{entry.amount.toLocaleString('en-IN')}{entry.method ? ` · ${entry.method}` : ''}{entry.reference ? ` · Ref ${entry.reference}` : ''}</p></div></div>{entry.status !== 'PAID' && <form onSubmit={(event) => void recordPayment(event, entry.id)} className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_1.5fr_auto]"><input required name="amount" type="number" min="1" max={entry.amount - entry.paidAmount} defaultValue={entry.amount - entry.paidAmount} aria-label="Payment amount" className="border border-slate-300 px-3 py-2 text-sm" /><select name="method" className="border border-slate-300 bg-white px-3 py-2 text-sm"><option value="CASH">Cash</option><option value="NEFT">NEFT</option><option value="UPI">UPI</option><option value="OTHER">Other</option></select><input name="reference" placeholder="Receipt / transaction reference" className="border border-slate-300 px-3 py-2 text-sm" /><button className="bg-emerald-700 px-3 py-2 text-sm font-semibold text-white">Record payment</button></form>}</article>)}{!rentEntries.length && <p className="py-8 text-center text-sm text-slate-500">No rent entries yet.</p>}</div></div>
               <form onSubmit={addRentEntry} className="border-t border-slate-200 pt-5 xl:border-l xl:border-t-0 xl:pl-7"><h2 className="font-semibold">Add ledger charge</h2><div className="mt-4 space-y-3"><select required value={rentForm.tenantId} onChange={(event) => setRentForm({ ...rentForm, tenantId: event.target.value })} className="w-full border border-slate-300 bg-white px-3 py-2.5 text-sm"><option value="">Select resident</option>{tenants.filter((tenant) => tenant.status === 'ACTIVE').map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name} · {tenant.property.name}</option>)}</select><select value={rentForm.period} onChange={(event) => setRentForm({ ...rentForm, period: event.target.value })} className="w-full border border-slate-300 bg-white px-3 py-2.5 text-sm"><option value={new Date().toISOString().slice(0, 7)}>{new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</option><option value="DEPOSIT">Security deposit</option></select><input required type="number" min="1" placeholder="Amount" value={rentForm.amount} onChange={(event) => setRentForm({ ...rentForm, amount: event.target.value })} className="w-full border border-slate-300 px-3 py-2.5 text-sm" /><input required type="date" value={rentForm.dueDate} onChange={(event) => setRentForm({ ...rentForm, dueDate: event.target.value })} className="w-full border border-slate-300 px-3 py-2.5 text-sm" /></div><button disabled={saving || !tenants.some((tenant) => tenant.status === 'ACTIVE')} className="mt-4 inline-flex items-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"><Plus className="h-4 w-4" />Add charge</button></form>
             </section>}
 
+            {view === 'expenses' && <section className="grid gap-8 pt-6 xl:grid-cols-[minmax(0,1fr)_340px]"><div><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">Property expenses</h2><span className="text-sm font-semibold text-[#02224B]">₹{expenseTotal.toLocaleString('en-IN')} total</span></div><div className="mt-3 divide-y divide-slate-200 border-y border-slate-200">{expenses.map((entry) => <article key={entry.id} className="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-medium">₹{entry.amount.toLocaleString('en-IN')} · {entry.category}</p><p className="text-xs text-slate-500">{entry.property.name} · {new Date(entry.spentOn).toLocaleDateString()}{entry.note ? ` · ${entry.note}` : ''}</p></div><button onClick={() => void removeExpense(entry.id)} className="text-xs font-semibold text-red-700 hover:underline">Remove</button></article>)}{!expenses.length && <p className="py-8 text-center text-sm text-slate-500">No expenses yet.</p>}</div></div><form onSubmit={submitExpense} className="border-t border-slate-200 pt-5 xl:border-l xl:border-t-0 xl:pl-7"><h2 className="font-semibold">Log expense</h2><div className="mt-4 space-y-3"><select value={selectedPropertyId} onChange={(event) => setSelectedPropertyId(event.target.value)} className="w-full border border-slate-300 bg-white px-3 py-2.5 text-sm">{properties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}</select><select value={expenseForm.category} onChange={(event) => setExpenseForm({ ...expenseForm, category: event.target.value })} className="w-full border border-slate-300 bg-white px-3 py-2.5 text-sm">{['FOOD', 'STAFF', 'MAINTENANCE', 'UTILITIES', 'OTHER'].map((category) => <option key={category} value={category}>{category}</option>)}</select><input required type="number" min="1" placeholder="Amount" value={expenseForm.amount} onChange={(event) => setExpenseForm({ ...expenseForm, amount: event.target.value })} className="w-full border border-slate-300 px-3 py-2.5 text-sm" /><input required type="date" value={expenseForm.spentOn} onChange={(event) => setExpenseForm({ ...expenseForm, spentOn: event.target.value })} className="w-full border border-slate-300 px-3 py-2.5 text-sm" /><input placeholder="Note (optional)" value={expenseForm.note} onChange={(event) => setExpenseForm({ ...expenseForm, note: event.target.value })} className="w-full border border-slate-300 px-3 py-2.5 text-sm" /></div><button disabled={saving || !selectedPropertyId} className="mt-4 inline-flex items-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"><Plus className="h-4 w-4" />Log expense</button></form></section>}
+            {view === 'utilities' && <section className="grid gap-8 pt-6 xl:grid-cols-[minmax(0,1fr)_340px]"><div><h2 className="font-semibold">Electricity bills</h2><div className="mt-3 divide-y divide-slate-200 border-y border-slate-200">{bills.map((bill) => <article key={bill.id} className="py-4"><div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-medium">₹{bill.totalAmount.toLocaleString('en-IN')} · {bill.period}</p><p className="text-xs text-slate-500">{bill.property.name} · <span className="font-semibold uppercase">{bill.status}</span></p></div>{bill.status === 'DRAFT' && <button onClick={() => void approveBill(bill.id)} className="bg-emerald-700 px-3 py-2 text-sm font-semibold text-white">Review & approve</button>}</div><div className="mt-2 flex flex-wrap gap-2">{JSON.parse(bill.splitJson || '[]').map((row: { tenantName: string; roomNumber: string; share: number }) => <span key={row.tenantName} className="border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">{row.tenantName} · Room {row.roomNumber} · ₹{row.share.toLocaleString('en-IN')}</span>)}</div></article>)}{!bills.length && <p className="py-8 text-center text-sm text-slate-500">No electricity bills yet.</p>}</div></div><form onSubmit={proposeBill} className="border-t border-slate-200 pt-5 xl:border-l xl:border-t-0 xl:pl-7"><h2 className="font-semibold">Propose split</h2><div className="mt-4 space-y-3"><select value={selectedPropertyId} onChange={(event) => setSelectedPropertyId(event.target.value)} className="w-full border border-slate-300 bg-white px-3 py-2.5 text-sm">{properties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}</select><input required type="month" value={billForm.period} onChange={(event) => setBillForm({ ...billForm, period: event.target.value })} className="w-full border border-slate-300 px-3 py-2.5 text-sm" /><input required type="number" min="1" placeholder="Bill total" value={billForm.totalAmount} onChange={(event) => setBillForm({ ...billForm, totalAmount: event.target.value })} className="w-full border border-slate-300 px-3 py-2.5 text-sm" /></div><button disabled={saving || !selectedPropertyId} className="mt-4 inline-flex items-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"><Plus className="h-4 w-4" />Propose split</button></form></section>}
             {view === 'reports' && report && <section className="pt-6"><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-700">Monthly operations</p><h2 className="mt-1 text-xl font-semibold text-[#02224B]">Report · {report.period}</h2></div><div className="flex gap-2"><button onClick={exportReport} className="inline-flex items-center gap-2 border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"><Download className="h-4 w-4" />Export CSV</button><button onClick={exportReportExcel} className="inline-flex items-center gap-2 border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"><Download className="h-4 w-4" />Export Excel</button><button onClick={() => window.print()} className="border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700">Print / PDF</button></div></div><div className="mt-5 grid gap-px border border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">{[['Occupancy', `${report.occupancyRate}%`], ['Available beds', report.availableBeds], ['Rent charged', `₹${report.rentCharged.toLocaleString('en-IN')}`], ['Rent collected', `₹${report.rentCollected.toLocaleString('en-IN')}`], ['Outstanding', `₹${report.outstanding.toLocaleString('en-IN')}`], ['New booking requests', report.newBookings]].map(([label, value]) => <div key={label} className="bg-white p-5"><p className="text-sm text-slate-500">{label}</p><p className="mt-2 text-2xl font-bold text-[#02224B]">{value}</p></div>)}</div></section>}
 
             {view === 'activity' && <section className="pt-6"><h2 className="font-semibold">Activity log</h2><div className="mt-3 divide-y divide-slate-200 border-y border-slate-200">{activity.map((entry) => <div key={entry.id} className="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-medium">{entry.action.replace(/_/g, ' ')}{entry.detail ? <span className="font-normal text-slate-600"> · {entry.detail}</span> : null}</p><p className="text-xs text-slate-500">{entry.actorName || 'System'}{entry.entityType ? ` · ${entry.entityType}` : ''}</p></div><span className="text-xs text-slate-500">{new Date(entry.createdAt).toLocaleString()}</span></div>)}{!activity.length && <p className="py-8 text-center text-sm text-slate-500">No activity yet.</p>}</div></section>}

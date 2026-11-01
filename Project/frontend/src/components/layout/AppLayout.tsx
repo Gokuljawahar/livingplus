@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { SidebarProvider } from '../../context/SidebarContext';
+import AIChatPanel from '../AIChatPanel';
 
 function AppLayoutInner() {
   return (
@@ -13,6 +14,7 @@ function AppLayoutInner() {
           <main className="flex-1 overflow-y-auto p-4 md:p-8">
             <Outlet />
           </main>
+          <AIChatPanel />
         </div>
       </div>
     </SidebarProvider>

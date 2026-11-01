@@ -1,5 +1,18 @@
 import jwt from 'jsonwebtoken';
-const JWT_SECRET = process.env.JWT_SECRET || 'secret';
+import { getJwtSecret } from '../utils/auth-config.js';
+export const optionalAuthenticate = (req, _res, next) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : undefined;
+    if (token) {
+        try {
+            req.user = jwt.verify(token, getJwtSecret());
+        }
+        catch {
+            // Invalid or expired token: continue as guest rather than blocking chat.
+        }
+    }
+    next();
+};
 export const authenticate = (req, res, next) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -12,7 +25,7 @@ export const authenticate = (req, res, next) => {
         return;
     }
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
+        const decoded = jwt.verify(token, getJwtSecret());
         req.user = decoded;
         next();
     }

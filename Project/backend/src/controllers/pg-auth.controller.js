@@ -1,8 +1,8 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { createHash, randomUUID, timingSafeEqual } from 'crypto';
+import { createHash, randomInt, randomUUID, timingSafeEqual } from 'crypto';
 import { prisma } from '../app.js';
-const JWT_SECRET = process.env.JWT_SECRET || 'secret';
+import { getJwtSecret } from '../utils/auth-config.js';
 function normalizePhone(phone) {
     const digits = phone.replace(/\D/g, '');
     return digits.length === 10 ? `91${digits}` : digits;
@@ -18,7 +18,7 @@ function toUserResponse(user) {
     };
 }
 function createToken(user) {
-    return jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: '1d' });
+    return jwt.sign({ userId: user.id, role: user.role }, getJwtSecret(), { expiresIn: '1d' });
 }
 export const login = async (req, res) => {
     const { email, phone, password } = req.body;
@@ -117,14 +117,17 @@ function hashOtp(code) {
 async function sendSms(phone, message) {
     const apiUrl = process.env.SMS_API_URL;
     if (!apiUrl) {
-        console.log(`[PG OTP] ${phone}: ${message}`);
+        if (process.env.NODE_ENV === 'production')
+            throw new Error('SMS delivery is not configured');
         return null;
     }
-    await fetch(apiUrl, {
+    const response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(process.env.SMS_API_KEY ? { Authorization: `Bearer ${process.env.SMS_API_KEY}` } : {}) },
         body: JSON.stringify({ to: phone, message })
     });
+    if (!response.ok)
+        throw new Error(`SMS provider returned HTTP ${response.status}`);
     return null;
 }
 export const requestOtp = async (req, res) => {
@@ -138,12 +141,12 @@ export const requestOtp = async (req, res) => {
         });
         if (recent >= 3)
             return res.status(429).json({ message: 'Too many codes requested. Try again in 10 minutes.' });
-        const code = String(Math.floor(100000 + Math.random() * 900000));
+        const code = String(randomInt(100000, 1000000));
         await sendSms(phone, `Your LivingPlus verification code is ${code}. It expires in 5 minutes.`);
         await prisma.otpCode.create({
             data: { phone, purpose, codeHash: hashOtp(code), expiresAt: new Date(Date.now() + 5 * 60 * 1000) }
         });
-        res.json({ message: 'Verification code sent', ...(process.env.SMS_API_URL ? {} : { devCode: code }) });
+        res.json({ message: 'Verification code sent', ...(process.env.SMS_API_URL || process.env.NODE_ENV === 'production' ? {} : { devCode: code }) });
     }
     catch (error) {
         console.error('PG OTP request error:', error);
@@ -202,12 +205,17 @@ export const verifyOtp = async (req, res) => {
 export async function consumePhoneToken(phone, token, purpose = 'BOOKING') {
     if (!token)
         return false;
-    const record = await prisma.otpCode.findUnique({ where: { verifiedToken: token } });
-    if (!record || record.phone !== phone || record.purpose !== purpose || record.consumedAt || !record.tokenExpiresAt || record.tokenExpiresAt < new Date()) {
-        return false;
-    }
-    await prisma.otpCode.update({ where: { id: record.id }, data: { consumedAt: new Date() } });
-    return true;
+    const consumed = await prisma.otpCode.updateMany({
+        where: {
+            verifiedToken: token,
+            phone,
+            purpose,
+            consumedAt: null,
+            tokenExpiresAt: { gt: new Date() }
+        },
+        data: { consumedAt: new Date() }
+    });
+    return consumed.count === 1;
 }
 export const forgotPassword = async (_req, res) => {
     res.json({ message: 'Contact your PG administrator to reset your password.' });

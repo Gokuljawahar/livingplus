@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import { SecureImage } from '../components/SecureImage';
+import AIChatPanel from '../components/AIChatPanel';
 
 interface PGProperty {
   id: string;
@@ -295,6 +296,8 @@ export default function PGDiscovery() {
           </section>
         </div>
       )}
+
+      <AIChatPanel />
 
       {trackDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) { setTrackDialog(false); setTrackedBooking(null); } }}>

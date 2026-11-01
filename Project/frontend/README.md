@@ -27,4 +27,6 @@ npm run dev
 
 The local backend uses SQLite. Keep encryption settings in ignored `.env.local` files and set the same 64-character hexadecimal key as `ENCRYPTION_KEY` in the backend and `VITE_ENCRYPTION_KEY` in the frontend.
 
+Production deployments must set a unique `JWT_SECRET` of at least 32 bytes and configure an SMS provider for OTP delivery. Local development may omit the JWT secret; the backend generates a random key for that process.
+
 Seed fictional PG demo records with `npm run seed` from `Project/backend`.
