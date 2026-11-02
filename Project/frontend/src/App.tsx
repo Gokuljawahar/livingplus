@@ -1,8 +1,9 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import AppLayout from './components/layout/AppLayout';
+import { resolveAppHost } from './utils/pg-host';
 
 // Lazy load PG and account pages.
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -17,8 +18,9 @@ const ResidentPortal = lazy(() => import('./pages/ResidentPortal'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const TermsAndConditions = lazy(() => import('./pages/TermsAndConditions'));
 
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+const ProtectedRoute = ({ children, roles }: { children: React.ReactNode; roles?: string[] }) => {
   const { user, isLoading } = useAuth();
+  const location = useLocation();
 
   if (isLoading) {
     return (
@@ -29,7 +31,11 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   }
 
   if (!user) {
-    return <Navigate to="/" replace />;
+    const redirect = encodeURIComponent(`${location.pathname}${location.search}`);
+    return <Navigate to={`/login?redirect=${redirect}`} replace />;
+  }
+  if (roles && !roles.includes(user.role)) {
+    return <Navigate to={user.role === 'PG_TENANT' ? '/resident' : '/'} replace />;
   }
 
   return <>{children}</>;
@@ -37,6 +43,15 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
 function AppRoutes() {
   const { user, isLoading } = useAuth();
+  const host = resolveAppHost();
+  const isLocalPathMode = host.kind === 'public' && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+  const isPropertyHost = host.kind === 'property';
+  const isAdminHost = host.kind === 'platform-admin';
+  const ownerPath = isPropertyHost ? '/owner/manage' : '/pg/manage';
+
+  if (host.kind === 'unknown') {
+    return <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6 text-center"><section><h1 className="text-2xl font-bold text-slate-900">PG site not found</h1><p className="mt-2 text-sm text-slate-600">Check the PG address or contact the property owner.</p></section></main>;
+  }
 
   if (isLoading) {
     return null; // AppLayout handles the full-screen loader, we just wait here
@@ -49,25 +64,33 @@ function AppRoutes() {
       </div>
     }>
       <Routes>
-        <Route path="/login" element={user ? <Navigate to={user.role === 'SUPER_ADMIN' ? "/pg/operators" : "/pg/manage"} replace /> : <LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-          <Route path="/forgot-password" element={user ? <Navigate to={user.role === 'SUPER_ADMIN' ? "/pg/operators" : "/pg/manage"} replace /> : <ForgotPassword />} />
-        <Route path="/pg" element={<PGDiscovery />} />
-        <Route path="/pg/resident" element={<ResidentPortal />} />
-        <Route path="/" element={<PGDiscovery />} />
+        <Route path="/login" element={
+          host.kind === 'public' && !isLocalPathMode
+            ? <Navigate to="/" replace />
+            : user
+              ? <Navigate to={user.role === 'SUPER_ADMIN' ? '/pg/operators' : user.role === 'PG_TENANT' ? '/resident' : ownerPath} replace />
+              : <LoginPage />
+        } />
+        <Route path="/register" element={host.kind === 'public' ? <RegisterPage /> : <Navigate to={isPropertyHost ? '/' : '/pg/operators'} replace />} />
+        <Route path="/forgot-password" element={user ? <Navigate to={ownerPath} replace /> : (host.kind === 'public' || isLocalPathMode ? <ForgotPassword /> : <Navigate to="/login" replace />)} />
+        <Route path="/pg" element={host.kind === 'public' || isLocalPathMode ? <PGDiscovery /> : <Navigate to={isPropertyHost ? ownerPath : '/pg/operators'} replace />} />
+        <Route path="/resident" element={isPropertyHost || isLocalPathMode ? <ResidentPortal /> : <Navigate to="/" replace />} />
+        <Route path="/pg/resident" element={isLocalPathMode ? <ResidentPortal /> : <Navigate to={isPropertyHost ? '/resident' : '/'} replace />} />
+        <Route path="/" element={isPropertyHost ? <Navigate to={user ? user.role === 'PG_TENANT' ? '/resident' : ownerPath : '/login'} replace /> : isAdminHost ? <Navigate to="/pg/operators" replace /> : <PGDiscovery />} />
 
         {/* Legal Pages */}
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/terms" element={<TermsAndConditions />} />
 
-        <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-          <Route path="/dashboard" element={<Navigate to={user?.role === 'SUPER_ADMIN' ? "/pg/operators" : "/pg/manage"} replace />} />
-          <Route path="/pg/operators" element={user?.role === 'SUPER_ADMIN' ? <PGOperators /> : <Navigate to="/pg/manage" replace />} />
-          <Route path="/pg/manage" element={<PGManagement />} />
+        <Route element={<ProtectedRoute roles={['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN']}><AppLayout /></ProtectedRoute>}>
+          <Route path="/dashboard" element={<Navigate to={user?.role === 'SUPER_ADMIN' && isAdminHost ? '/pg/operators' : ownerPath} replace />} />
+          <Route path="/pg/operators" element={isAdminHost || isLocalPathMode ? <ProtectedRoute roles={['SUPER_ADMIN']}><PGOperators /></ProtectedRoute> : <Navigate to={ownerPath} replace />} />
+          <Route path="/owner/manage" element={isPropertyHost ? <PGManagement /> : <Navigate to={ownerPath} replace />} />
+          <Route path="/pg/manage" element={isLocalPathMode ? <PGManagement /> : isPropertyHost ? <Navigate to="/owner/manage" replace /> : <Navigate to="/" replace />} />
           <Route path="/change-password" element={<ChangePassword />} />
         </Route>
 
-        <Route path="*" element={<Navigate to={user ? (user.role === 'SUPER_ADMIN' ? "/pg/operators" : "/pg/manage") : "/"} replace />} />
+        <Route path="*" element={<Navigate to={user ? ownerPath : isPropertyHost ? '/login' : '/'} replace />} />
       </Routes>
     </Suspense>
   );

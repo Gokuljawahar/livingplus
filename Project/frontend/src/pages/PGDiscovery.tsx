@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { BedDouble, Building2, CalendarDays, CheckCircle2, IndianRupee, Loader2, MapPin, MessageCircle, Search, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
-import { useAuth } from '../context/AuthContext';
 import { SecureImage } from '../components/SecureImage';
 import AIChatPanel from '../components/AIChatPanel';
 
@@ -23,7 +22,6 @@ interface PGProperty {
 }
 
 export default function PGDiscovery() {
-  const { user } = useAuth();
   const [properties, setProperties] = useState<PGProperty[]>([]);
   const [search, setSearch] = useState('');
   const [genderFilter, setGenderFilter] = useState('');
@@ -129,8 +127,17 @@ export default function PGDiscovery() {
         bedId: selectedBed,
         phoneToken
       });
+      const selectedRoom = selectedProperty.rooms.find((room) => room.beds.some((bed) => bed.id === selectedBed));
+      const selectedBedDetails = selectedRoom?.beds.find((bed) => bed.id === selectedBed);
       setTrackForm({ bookingRef: response.data.bookingRef, phone: request.phone });
-      setTrackedBooking({ ...response.data, phone: request.phone, property: { name: selectedProperty.name } });
+      setTrackedBooking({
+        ...response.data,
+        phone: request.phone,
+        moveInDate: request.moveInDate,
+        property: { name: selectedProperty.name },
+        room: selectedRoom ? { roomNumber: selectedRoom.roomNumber } : null,
+        bedLabel: selectedBedDetails?.label || null
+      });
       setTrackDialog(true);
       toast.success(response.data.message || 'Booking request submitted');
       const listings = await api.get('/pg/properties');
@@ -179,8 +186,6 @@ export default function PGDiscovery() {
           </a>
           <div className="flex items-center gap-4">
             <button onClick={() => setTrackDialog(true)} className="text-sm font-semibold text-slate-600 hover:text-[#02224B]">Track booking</button>
-            <a href="/pg/resident" className="text-sm font-semibold text-slate-600 hover:text-[#02224B]">Resident login</a>
-            <a href={user ? '/pg/manage' : '/login?redirect=%2Fpg%2Fmanage'} className="text-sm font-semibold text-slate-600 hover:text-[#02224B]">Owner workspace</a>
           </div>
         </div>
       </header>
@@ -287,7 +292,7 @@ export default function PGDiscovery() {
                   <div className="mt-2 flex flex-col gap-2">
                     {!otpSent
                       ? <button type="button" disabled={otpLoading} onClick={() => void sendOtp()} className="border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60">Send verification code</button>
-                      : <div className="flex gap-2"><input value={otpCode} onChange={(event) => setOtpCode(event.target.value)} placeholder="6-digit code" inputMode="numeric" className="w-full border border-slate-300 bg-white px-3 py-2 text-sm" /><button type="button" disabled={otpLoading || !otpCode} onClick={() => void verifyOtp()} className="shrink-0 bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">Verify</button></div>}
+                      : <div className="flex gap-2"><input aria-label="6-digit verification code" value={otpCode} onChange={(event) => setOtpCode(event.target.value)} placeholder="6-digit code" inputMode="numeric" className="w-full border border-slate-300 bg-white px-3 py-2 text-sm" /><button type="button" disabled={otpLoading || !otpCode} onClick={() => void verifyOtp()} className="shrink-0 bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">Verify</button></div>}
                   </div>
                 )}
               </div>
@@ -308,7 +313,7 @@ export default function PGDiscovery() {
               <input required type="tel" value={trackForm.phone} onChange={(event) => setTrackForm({ ...trackForm, phone: event.target.value })} placeholder="Phone used for request" className="w-full border border-slate-300 px-3 py-2.5 text-sm" />
               <button disabled={trackLoading} className="flex w-full items-center justify-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{trackLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}Check status</button>
             </form>
-            {trackedBooking && <div className="mt-5 border-t border-slate-200 pt-4"><div className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-emerald-700" /><p className="font-semibold text-slate-900">{trackedBooking.status.replace('_', ' ')}</p></div>{trackedBooking.rejectionReason && <p className="mt-2 border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">Reason: {trackedBooking.rejectionReason}</p>}<p className="mt-2 text-sm text-slate-600">{trackedBooking.property?.name} · {trackedBooking.room ? `Room ${trackedBooking.room.roomNumber}, ${trackedBooking.bedLabel}` : 'Bed pending assignment'}</p><p className="mt-1 text-xs text-slate-500">Reference {trackedBooking.bookingRef} · Move-in {new Date(trackedBooking.moveInDate).toLocaleDateString()}</p>{trackedBooking.status === 'PENDING' && <button onClick={() => void cancelBooking()} className="mt-4 border border-red-200 px-3 py-2 text-sm font-semibold text-red-700">Cancel request</button>}</div>}
+            {trackedBooking && <div className="mt-5 border-t border-slate-200 pt-4"><div className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-emerald-700" /><p className="font-semibold text-slate-900">{trackedBooking.status.replace('_', ' ')}</p></div>{trackedBooking.rejectionReason && <p className="mt-2 border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">Reason: {trackedBooking.rejectionReason}</p>}<p className="mt-2 text-sm text-slate-600">{trackedBooking.property?.name} · {trackedBooking.room ? `Room ${trackedBooking.room.roomNumber}, ${trackedBooking.bedLabel}` : 'Bed pending assignment'}</p><p className="mt-1 text-xs text-slate-500">Reference {trackedBooking.bookingRef} · Move-in {trackedBooking.moveInDate && !Number.isNaN(new Date(trackedBooking.moveInDate).getTime()) ? new Date(trackedBooking.moveInDate).toLocaleDateString() : 'Not set'}</p>{trackedBooking.status === 'PENDING' && <button onClick={() => void cancelBooking()} className="mt-4 border border-red-200 px-3 py-2 text-sm font-semibold text-red-700">Cancel request</button>}</div>}
           </section>
         </div>
       )}

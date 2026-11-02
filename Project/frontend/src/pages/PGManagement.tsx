@@ -5,13 +5,15 @@ import api from '../api/axios';
 import { SecureImage } from '../components/SecureImage';
 import { MapPicker } from '../components/MapPicker';
 import { downloadXlsx } from '../utils/xlsx';
+import { pgHostUrl, resolveAppHost } from '../utils/pg-host';
 
 type Activity = { id: string; action: string; entityType?: string | null; entityId?: string | null; detail?: string | null; actorName?: string | null; createdAt: string; propertyId: string };
-type Property = { id: string; name: string; description?: string | null; address: string; locality: string; contactPhone?: string | null; city: string; latitude?: number | null; longitude?: number | null; genderPolicy: string; amenities: string[]; houseRules: string[]; photoUrls: string[]; rooms: { id: string; roomNumber: string; monthlyRent: number; depositAmount: number; maintenanceFee: number; utilitiesSurcharge: number; foodCharge: number; roomType: string; beds: { id: string; label: string; status: string; maintenanceNote?: string | null }[] }[] };
+type Property = { id: string; name: string; description?: string | null; address: string; locality: string; contactPhone?: string | null; upiId?: string | null; city: string; latitude?: number | null; longitude?: number | null; genderPolicy: string; amenities: string[]; houseRules: string[]; photoUrls: string[]; rooms: { id: string; roomNumber: string; monthlyRent: number; depositAmount: number; maintenanceFee: number; utilitiesSurcharge: number; foodCharge: number; roomType: string; beds: { id: string; label: string; status: string; maintenanceNote?: string | null }[] }[] };
 type Booking = { id: string; bookingRef: string; residentName: string; phone: string; moveInDate: string; status: string; rejectionReason?: string | null; property: { name: string; locality: string }; bed: { label: string; room: { roomNumber: string } } | null; bedId: string | null; tenant?: { id: string; status: string } | null };
 type Ticket = { id: string; title: string; description: string; category: string; priority: string; status: string; imageUrl?: string | null; assignedName?: string | null; property: { name: string }; tenant?: { name: string } | null };
 type Tenant = { id: string; name: string; phone: string; email?: string | null; status: string; monthlyRent: number; depositAmount: number; depositReceived: number; kycVerified?: boolean; foodOptOut?: boolean; noticeDate?: string | null; depositDeductions?: number; depositRefundAmount?: number | null; depositRefundStatus?: string; depositRefundReference?: string | null; checkoutNote?: string | null; permanentAddress?: string | null; bloodGroup?: string | null; institutionOrEmployer?: string | null; emergencyName?: string | null; emergencyPhone?: string | null; kycType?: string | null; kycDocumentUrl?: string | null; checkedInAt?: string | null; property: { id: string; name: string; locality: string }; bed?: { label: string; room: { roomNumber: string } } | null };
 type RentEntry = { id: string; entryType: string; period: string; amount: number; paidAmount: number; dueDate: string; status: string; method?: string | null; reference?: string | null; tenant: { id: string; name: string; phone: string; property: { id: string; name: string }; bed?: { label: string; room: { roomNumber: string } } | null } };
+type PaymentClaim = { id: string; amount: number; reference: string; status: string; responseNote?: string | null; createdAt: string; tenant: { name: string; phone: string }; rentEntry: { entryType: string; period: string; amount: number; paidAmount: number }; property: { name: string } };
 type Expense = { id: string; category: string; amount: number; spentOn: string; note?: string | null; property: { name: string } };
 type ElecBill = { id: string; period: string; totalAmount: number; status: string; splitJson: string; property: { name: string } };
 type Staff = { id: string; name: string; phone: string; email?: string | null; role: string; property: { id: string; name: string } };
@@ -21,12 +23,13 @@ type OwnerReport = { period: string; properties: number; totalBeds: number; occu
 const emptySummary: Summary = { properties: 0, totalBeds: 0, occupiedBeds: 0, occupancyRate: 0, pendingBookings: 0, openTickets: 0, rentOutstanding: 0, canManageStaff: false };
 
 export default function PGManagement() {
-  const [view, setView] = useState<'overview' | 'properties' | 'bookings' | 'tenants' | 'activity' | 'rent' | 'expenses' | 'utilities' | 'maintenance' | 'reports' | 'staff'>('overview');
+  const [view, setView] = useState<'overview' | 'properties' | 'bookings' | 'tenants' | 'activity' | 'rent' | 'payments' | 'expenses' | 'utilities' | 'maintenance' | 'reports' | 'staff'>('overview');
   const [properties, setProperties] = useState<Property[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [rentEntries, setRentEntries] = useState<RentEntry[]>([]);
+  const [paymentClaims, setPaymentClaims] = useState<PaymentClaim[]>([]);
   const [reminding, setReminding] = useState(false);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [expenseTotal, setExpenseTotal] = useState(0);
@@ -41,7 +44,7 @@ export default function PGManagement() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [propertyForm, setPropertyForm] = useState({ name: '', description: '', address: '', locality: '', contactPhone: '', city: 'Chennai', latitude: '', longitude: '', genderPolicy: 'ANY', amenities: '', houseRules: '', status: 'ACTIVE', bookingLockMinutes: '120', rentDay: '1', rentDueDay: '5' });
+  const [propertyForm, setPropertyForm] = useState({ name: '', description: '', address: '', locality: '', contactPhone: '', upiId: '', city: 'Chennai', latitude: '', longitude: '', genderPolicy: 'ANY', amenities: '', houseRules: '', status: 'ACTIVE', bookingLockMinutes: '120', rentDay: '1', rentDueDay: '5' });
   const [activity, setActivity] = useState<Activity[]>([]);
   const [tenantFilter, setTenantFilter] = useState('');
   const [reassignBed, setReassignBed] = useState<Record<string, string>>({});
@@ -75,12 +78,13 @@ export default function PGManagement() {
         setTenants(tenantResponse.data);
         try { const activityResponse = await api.get('/pg/owner/activity'); setActivity(activityResponse.data); } catch { setActivity([]); }
         if (summaryResponse.data.canManageStaff) {
-          const [rentResponse, expenseResponse, billResponse, reportResponse, staffResponse] = await Promise.all([
+          const [rentResponse, expenseResponse, billResponse, reportResponse, staffResponse, claimResponse] = await Promise.all([
             api.get('/pg/owner/rent'),
             api.get('/pg/owner/expenses'),
             api.get('/pg/owner/electricity/bills'),
             api.get('/pg/owner/reports'),
-            api.get('/pg/owner/staff')
+            api.get('/pg/owner/staff'),
+            api.get('/pg/owner/payment-claims')
           ]);
           setRentEntries(rentResponse.data);
           setExpenses(expenseResponse.data.entries || []);
@@ -88,6 +92,7 @@ export default function PGManagement() {
           setBills(billResponse.data || []);
           setReport(reportResponse.data);
           setStaff(staffResponse.data);
+          setPaymentClaims(claimResponse.data || []);
         } else {
           setRentEntries([]);
           setExpenses([]);
@@ -95,6 +100,7 @@ export default function PGManagement() {
           setBills([]);
           setReport(null);
           setStaff([]);
+          setPaymentClaims([]);
         }
         setSelectedPropertyId((current) => current || propertyResponse.data[0]?.id || '');
       } catch (error: any) {
@@ -110,6 +116,7 @@ export default function PGManagement() {
 
   const saveProperty = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const creatingProperty = !editingPropertyId;
     setSaving(true);
     try {
       const newPhotoUrls = await Promise.all(propertyPhotoFiles.map(async (file) => {
@@ -127,12 +134,17 @@ export default function PGManagement() {
       const response = editingPropertyId
         ? await api.patch(`/pg/owner/properties/${editingPropertyId}`, payload)
         : await api.post('/pg/owner/properties', payload);
+      if (creatingProperty && !response.data.slug) throw new Error('The property was created without a PG address');
       setSelectedPropertyId(response.data.id);
       setEditingPropertyId(null);
-      setPropertyForm({ name: '', description: '', address: '', locality: '', contactPhone: '', city: 'Chennai', latitude: '', longitude: '', genderPolicy: 'ANY', amenities: '', houseRules: '', status: 'ACTIVE', bookingLockMinutes: '120', rentDay: '1', rentDueDay: '5' });
+      setPropertyForm({ name: '', description: '', address: '', locality: '', contactPhone: '', upiId: '', city: 'Chennai', latitude: '', longitude: '', genderPolicy: 'ANY', amenities: '', houseRules: '', status: 'ACTIVE', bookingLockMinutes: '120', rentDay: '1', rentDueDay: '5' });
       setPropertyPhotoFiles([]);
       setExistingPhotoUrls([]);
       toast.success(editingPropertyId ? 'Property updated' : 'Property added');
+      if (creatingProperty && resolveAppHost().kind === 'property') {
+        window.location.assign(`${pgHostUrl(response.data.slug)}/login`);
+        return;
+      }
       refresh();
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Could not add property');
@@ -150,6 +162,7 @@ export default function PGManagement() {
       address: property.address,
       locality: property.locality,
       contactPhone: property.contactPhone || '',
+      upiId: property.upiId || '',
       city: property.city,
       latitude: property.latitude == null ? '' : String(property.latitude),
       longitude: property.longitude == null ? '' : String(property.longitude),
@@ -167,7 +180,7 @@ export default function PGManagement() {
 
   const startNewProperty = () => {
     setEditingPropertyId(null);
-    setPropertyForm({ name: '', description: '', address: '', locality: '', contactPhone: '', city: 'Chennai', latitude: '', longitude: '', genderPolicy: 'ANY', amenities: '', houseRules: '', status: 'ACTIVE', bookingLockMinutes: '120', rentDay: '1', rentDueDay: '5' });
+    setPropertyForm({ name: '', description: '', address: '', locality: '', contactPhone: '', upiId: '', city: 'Chennai', latitude: '', longitude: '', genderPolicy: 'ANY', amenities: '', houseRules: '', status: 'ACTIVE', bookingLockMinutes: '120', rentDay: '1', rentDueDay: '5' });
     setExistingPhotoUrls([]);
     setPropertyPhotoFiles([]);
   };
@@ -510,6 +523,18 @@ export default function PGManagement() {
     }
   };
 
+  const reviewPaymentClaim = async (claim: PaymentClaim, status: 'APPROVED' | 'REJECTED') => {
+    const responseNote = status === 'REJECTED' ? window.prompt('Reason for rejecting this payment reference?')?.trim() || '' : '';
+    if (status === 'REJECTED' && !responseNote) return;
+    try {
+      await api.patch(`/pg/owner/payment-claims/${claim.id}`, { status, responseNote });
+      toast.success(status === 'APPROVED' ? 'Payment verified and ledger updated' : 'Payment claim rejected');
+      refresh();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Could not review payment claim');
+    }
+  };
+
   const views = [
     { id: 'overview', label: 'Overview', icon: Building2 },
     { id: 'properties', label: 'Properties & Beds', icon: BedDouble },
@@ -519,6 +544,7 @@ export default function PGManagement() {
     { id: 'maintenance', label: 'Maintenance', icon: Wrench },
     ...(summary.canManageStaff ? [
       { id: 'rent' as const, label: 'Rent Ledger', icon: Wallet },
+      { id: 'payments' as const, label: 'Payment claims', icon: IndianRupee },
       { id: 'expenses' as const, label: 'Expenses', icon: IndianRupee },
       { id: 'utilities' as const, label: 'Utilities', icon: Zap },
       { id: 'reports' as const, label: 'Reports', icon: FileText },
@@ -537,6 +563,25 @@ export default function PGManagement() {
 
         {loading ? <div className="flex justify-center py-20"><Loader2 className="h-7 w-7 animate-spin text-[#02224B]" /></div> : (
           <>
+            {view === 'payments' && <section className="pt-6">
+              <h2 className="font-semibold">Resident payment claims</h2>
+              <div className="mt-3 divide-y divide-slate-200 border-y border-slate-200">
+                {paymentClaims.map((claim) => <article key={claim.id} className="flex flex-col gap-4 py-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{claim.tenant.name}</h3><span className={`text-xs font-semibold uppercase ${claim.status === 'PENDING' ? 'text-amber-700' : claim.status === 'APPROVED' ? 'text-emerald-700' : 'text-red-700'}`}>{claim.status}</span></div>
+                    <p className="mt-1 text-sm text-slate-600">{claim.property.name} · {claim.rentEntry.entryType} {claim.rentEntry.period} · ₹{claim.amount.toLocaleString('en-IN')}</p>
+                    <p className="mt-1 text-sm text-slate-500">UPI reference: {claim.reference} · Submitted {new Date(claim.createdAt).toLocaleString()}</p>
+                    {claim.responseNote && <p className="mt-1 text-sm text-red-700">{claim.responseNote}</p>}
+                  </div>
+                  {claim.status === 'PENDING' && <div className="flex gap-2">
+                    <button onClick={() => void reviewPaymentClaim(claim, 'REJECTED')} className="border border-red-200 px-3 py-2 text-sm font-semibold text-red-700">Reject</button>
+                    <button onClick={() => void reviewPaymentClaim(claim, 'APPROVED')} className="bg-emerald-700 px-3 py-2 text-sm font-semibold text-white">Verify and credit</button>
+                  </div>}
+                </article>)}
+                {!paymentClaims.length && <p className="py-8 text-center text-sm text-slate-500">No resident payment claims.</p>}
+              </div>
+            </section>}
+
             {view === 'overview' && <section className="pt-6">
               <div className="grid gap-px border border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">
                 {[
@@ -605,6 +650,7 @@ export default function PGManagement() {
                   {import.meta.env.VITE_GOOGLE_MAPS_API_KEY && <MapPicker apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY} defaultAddress={propertyForm.address} initialCoordinates={propertyForm.latitude && propertyForm.longitude ? { lat: Number(propertyForm.latitude), lng: Number(propertyForm.longitude) } : null} onAddressChange={(address) => setPropertyForm((current) => ({ ...current, address }))} onLocationSelect={(location) => setPropertyForm((current) => ({ ...current, address: location.address, latitude: String(location.lat), longitude: String(location.lng), city: location.city || current.city }))} />}
                   {import.meta.env.VITE_GOOGLE_MAPS_API_KEY && <MapPicker apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY} defaultAddress={propertyForm.address} initialCoordinates={propertyForm.latitude && propertyForm.longitude ? { lat: Number(propertyForm.latitude), lng: Number(propertyForm.longitude) } : null} onAddressChange={(address) => setPropertyForm((current) => ({ ...current, address }))} onLocationSelect={(location) => setPropertyForm((current) => ({ ...current, address: location.address, latitude: String(location.lat), longitude: String(location.lng), city: location.city || current.city }))} />}
                   <input type="tel" placeholder="Public WhatsApp contact (optional)" value={propertyForm.contactPhone} onChange={(event) => setPropertyForm({ ...propertyForm, contactPhone: event.target.value })} className="w-full border border-slate-300 bg-white px-3 py-2.5 text-sm" />
+                  <input type="text" placeholder="UPI ID for resident payments (optional)" value={propertyForm.upiId} onChange={(event) => setPropertyForm({ ...propertyForm, upiId: event.target.value })} className="w-full border border-slate-300 bg-white px-3 py-2.5 text-sm" />
                   <select value={propertyForm.genderPolicy} onChange={(event) => setPropertyForm({ ...propertyForm, genderPolicy: event.target.value })} className="w-full border border-slate-300 bg-white px-3 py-2.5 text-sm"><option value="ANY">All residents</option><option value="MEN">Men</option><option value="WOMEN">Women</option></select>
                   <div className="grid grid-cols-2 gap-3"><select value={propertyForm.status} onChange={(event) => setPropertyForm({ ...propertyForm, status: event.target.value })} className="min-w-0 border border-slate-300 bg-white px-3 py-2.5 text-sm"><option value="ACTIVE">Published</option><option value="INACTIVE">Unpublished</option></select><label className="min-w-0 text-xs text-slate-500">Booking hold (min)<input type="number" min="10" max="1440" value={propertyForm.bookingLockMinutes} onChange={(event) => setPropertyForm({ ...propertyForm, bookingLockMinutes: event.target.value })} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900" /></label></div>
                   <div className="grid grid-cols-2 gap-3"><label className="min-w-0 text-xs text-slate-500">Rent cycle day<input type="number" min="1" max="28" value={propertyForm.rentDay} onChange={(event) => setPropertyForm({ ...propertyForm, rentDay: event.target.value })} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900" /></label><label className="min-w-0 text-xs text-slate-500">Rent due day<input type="number" min="1" max="28" value={propertyForm.rentDueDay} onChange={(event) => setPropertyForm({ ...propertyForm, rentDueDay: event.target.value })} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900" /></label></div>

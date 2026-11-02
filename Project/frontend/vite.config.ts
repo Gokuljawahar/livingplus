@@ -9,8 +9,12 @@ export default defineConfig({
   ],
 
   server: {
+    proxy: {
+      '/api': { target: 'http://localhost:4000', changeOrigin: true },
+    },
     allowedHosts: [
       '.livingplus.com',
+      '.localhost',
       'livingplus.com',
       'www.livingplus.com',
       '.stitchtree.in',
@@ -22,6 +26,7 @@ export default defineConfig({
   preview: {
     allowedHosts: [
       '.livingplus.com',
+      '.localhost',
       'livingplus.com',
       'www.livingplus.com',
       '.stitchtree.in',

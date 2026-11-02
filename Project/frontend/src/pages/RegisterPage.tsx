@@ -4,19 +4,18 @@ import { PhoneInput } from '../components/PhoneInput';
 import { Building2, BedDouble, ClipboardList, Loader2, Eye, EyeOff } from 'lucide-react';
 import api from '../api/axios';
 import toast from 'react-hot-toast';
-import { useAuth } from '../context/AuthContext';
 import LogoLoader from '../components/LogoLoader';
 import logo from '../assets/logo_bg_white.png';
 import logoBlack from '../assets/logo_bg_black.png';
+import { pgHostUrl, resolveAppHost } from '../utils/pg-host';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
-  const { login, user } = useAuth();
 
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [showLoader, setShowLoader] = useState(false);
-  const [authData, setAuthData] = useState<{ token: string, user: any } | null>(null);
+  const [nextLoginUrl, setNextLoginUrl] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -37,10 +36,8 @@ export default function RegisterPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
-    if (user && !authData) {
-      navigate('/pg/manage', { replace: true });
-    }
-  }, [user, authData, navigate]);
+    if (resolveAppHost().kind !== 'public') navigate('/', { replace: true });
+  }, [navigate]);
 
   const handleContinue = () => {
     const newErrors: Record<string, string> = {};
@@ -99,11 +96,9 @@ export default function RegisterPage() {
         password: formData.password
       };
 
-      await api.post('/auth/register', payload);
-
-      // Auto-login (save credentials, but delay actual login until animation completes)
-      const res = await api.post('/auth/login', { phone: formattedPhone, password: formData.password });
-      setAuthData({ token: res.data.token, user: res.data.user });
+      const response = await api.post('/auth/register', payload);
+      if (!response.data.pgSlug) throw new Error('The property was created without a PG address');
+      setNextLoginUrl(`${pgHostUrl(response.data.pgSlug)}/login`);
 
       toast.success(
         <div>
@@ -123,10 +118,7 @@ export default function RegisterPage() {
   return (
     <>
       {showLoader && <LogoLoader onComplete={() => {
-        if (authData) {
-          login(authData.token, authData.user);
-          setTimeout(() => navigate('/pg/manage'), 0);
-        }
+        if (nextLoginUrl) window.location.assign(nextLoginUrl);
       }} />}
       <div className="min-h-screen lg:h-screen bg-slate-50 flex">
         {/* Left Side: Animated Illustration */}

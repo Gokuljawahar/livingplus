@@ -16,6 +16,8 @@ FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV DATABASE_URL="file:/data/livingplus.db"
+ENV UPLOAD_STORAGE=local
+ENV UPLOAD_DIR=/data/uploads
 VOLUME ["/data"]
 
 COPY --from=build /app/package.json ./package.json

@@ -51,6 +51,7 @@ export declare function listElectricityBills(db: any, propertyIds: string[], per
 export declare function setMealPreference(db: any, actor: {
     userId: string | null;
     phones: string[];
+    propertyId?: string;
 }, optOut: boolean): Promise<any>;
 export declare function ensureFoodEntries(db: any, tenant: any, period: string, dueDate: Date): Promise<void>;
 //# sourceMappingURL=pg-billing.d.ts.map

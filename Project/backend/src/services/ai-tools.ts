@@ -9,6 +9,7 @@ import { consumePhoneToken } from '../controllers/pg-auth.controller.js';
 import { logAudit } from './pg-audit.js';
 import { sendDueRentReminders } from './pg-rent-reminders.js';
 import { createExpense, listExpenses } from './pg-expenses.js';
+import { notifyWhatsAppTemplate } from './pg-notifications.js';
 
 const db = new Proxy({} as Record<string, any>, {
   get: (_target, property) => (prisma as any)[property]
@@ -20,6 +21,7 @@ export interface Actor {
   phones: string[];
   propertyIds: string[];
   isSuperAdmin: boolean;
+  propertyId?: string;
 }
 
 export async function actorFromRequest(req: any): Promise<Actor> {
@@ -30,17 +32,28 @@ export async function actorFromRequest(req: any): Promise<Actor> {
     : null;
   const digits = String(account?.phone || '').replace(/\D/g, '');
   const normalized = digits.length === 10 ? `91${digits}` : digits;
-  const phones = [...new Set([digits, normalized].filter(Boolean))];
+  const phoneVariants = digits.length > 10 ? digits.slice(-10) : digits;
+  const phones = [...new Set([digits, normalized, phoneVariants].filter(Boolean))];
   const isSuperAdmin = role === 'SUPER_ADMIN';
+  const hostPropertyId = typeof req.pgPropertyId === 'string' ? req.pgPropertyId : undefined;
   let propertyIds: string[] = [];
   if (isSuperAdmin) {
-    const all = await db.pGProperty.findMany({ select: { id: true } });
-    propertyIds = all.map((p: any) => p.id);
+    if (hostPropertyId) propertyIds = [hostPropertyId];
+    else {
+      const all = await db.pGProperty.findMany({ select: { id: true } });
+      propertyIds = all.map((p: any) => p.id);
+    }
+  } else if (role === 'PG_TENANT' && phones.length && hostPropertyId) {
+    const stays = await db.pGTenant.findMany({
+      where: { propertyId: hostPropertyId, phone: { in: phones }, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
+      select: { propertyId: true }
+    });
+    if (stays.length) propertyIds = [hostPropertyId];
   } else if (user.userId) {
     const access = await db.pGPropertyAccess.findMany({ where: { userId: String(user.userId) }, select: { propertyId: true } });
-    propertyIds = access.map((a: any) => a.propertyId);
+    propertyIds = access.map((a: any) => a.propertyId).filter((id: string) => !hostPropertyId || id === hostPropertyId);
   }
-  return { userId: user.userId ? String(user.userId) : null, role, phones, propertyIds, isSuperAdmin };
+  return { userId: user.userId ? String(user.userId) : null, role, phones, propertyIds, isSuperAdmin, ...(hostPropertyId ? { propertyId: hostPropertyId } : {}) };
 }
 
 export interface ToolExecutor {
@@ -53,9 +66,9 @@ export interface ToolExecutor {
 
 const str = (v: unknown) => String(v || '').trim();
 
-async function publicProperties() {
+async function publicProperties(where: Record<string, unknown> = {}) {
   return db.pGProperty.findMany({
-    where: { status: 'ACTIVE' },
+    where: { status: 'ACTIVE', ...where },
     include: { rooms: { where: { status: 'ACTIVE' }, include: { beds: true } } },
     orderBy: { createdAt: 'desc' }
   });
@@ -86,9 +99,9 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     parameters: { type: 'object', properties: { location: { type: 'string' }, budget_max: { type: 'number' }, gender: { type: 'string', enum: ['MEN', 'WOMEN', 'ANY'] }, room_type: { type: 'string' }, ac: { type: 'boolean' }, food_included: { type: 'boolean' }, amenities: { type: 'array', items: { type: 'string' } } } },
     requiresConfirmation: false,
     roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
-    execute: async (_actor, args = {}) => {
+    execute: async (actor, args = {}) => {
       const q = str(args.location).toLowerCase();
-      const properties = await publicProperties();
+      const properties = await publicProperties(actor.role === 'PG_TENANT' && actor.propertyId ? { id: actor.propertyId } : {});
       return properties
         .filter((p: any) => !q || `${p.name} ${p.locality} ${p.city} ${p.address}`.toLowerCase().includes(q))
         .filter((p: any) => !args.gender || p.genderPolicy === 'ANY' || p.genderPolicy === args.gender)
@@ -106,12 +119,15 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
 
   get_property_details: {
     description: 'Verified details, rules and current availability for one published property.',
-    parameters: { type: 'object', properties: { property_id: { type: 'string' } }, required: ['property_id'] },
+    parameters: { type: 'object', properties: { property_id: { type: 'string' } } },
     requiresConfirmation: false,
     roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
-    execute: async (_actor, args) => {
+    execute: async (actor, args) => {
+      const requestedPropertyId = String(args.property_id || actor.propertyId || '');
+      if (!requestedPropertyId) throw new Error('PROPERTY_REQUIRED');
+      if (['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'].includes(actor.role) && !actor.propertyIds.includes(requestedPropertyId)) throw new Error('FORBIDDEN');
       const property = await db.pGProperty.findFirst({
-        where: { id: String(args.property_id), status: 'ACTIVE' },
+        where: { id: requestedPropertyId, status: 'ACTIVE' },
         include: { rooms: { where: { status: 'ACTIVE' }, include: { beds: true } } }
       });
       if (!property) throw new Error('PROPERTY_NOT_FOUND');
@@ -124,9 +140,12 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     parameters: { type: 'object', properties: { property_id: { type: 'string' }, room_id: { type: 'string' } }, required: ['property_id'] },
     requiresConfirmation: false,
     roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
-    execute: async (_actor, args) => {
+    execute: async (actor, args) => {
+      const requestedPropertyId = actor.role === 'PG_TENANT' && actor.propertyId ? actor.propertyId : String(args.property_id || '');
+      if (!requestedPropertyId) throw new Error('PROPERTY_REQUIRED');
+      if (['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'].includes(actor.role) && !actor.propertyIds.includes(requestedPropertyId)) throw new Error('FORBIDDEN');
       const rooms = await db.pGRoom.findMany({
-        where: { propertyId: String(args.property_id), status: 'ACTIVE', ...(args.room_id ? { id: String(args.room_id) } : {}) },
+        where: { propertyId: requestedPropertyId, status: 'ACTIVE', ...(args.room_id ? { id: String(args.room_id) } : {}) },
         include: { beds: true }
       });
       return rooms.map((room: any) => ({
@@ -158,6 +177,10 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
         const existing = await db.pGBooking.findUnique({ where: { idempotencyKey: idemKey } });
         if (existing) return { booking_ref: existing.bookingRef, status: existing.status, move_in_date: existing.moveInDate, deduped: true };
       }
+      if (actor.role === 'PG_TENANT' && actor.propertyId) {
+        const bed = await db.pGBed.findUnique({ where: { id: String(args.bed_id) }, select: { room: { select: { propertyId: true } } } });
+        if (!bed || bed.room.propertyId !== actor.propertyId) throw new Error('FORBIDDEN');
+      }
       if (!await consumePhoneToken(normalized, String(args.phone_token))) throw new Error('PHONE_NOT_VERIFIED');
       const booking = await db.$transaction(async (tx: any) => {
         const bed = await tx.pGBed.findFirst({
@@ -187,13 +210,15 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     parameters: { type: 'object', properties: { booking_ref: { type: 'string' }, phone: { type: 'string' } }, required: ['booking_ref', 'phone'] },
     requiresConfirmation: false,
     roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
-    execute: async (_actor, args) => {
+    execute: async (actor, args) => {
       const booking = await db.pGBooking.findUnique({
         where: { bookingRef: String(args.booking_ref) },
         include: { property: { select: { name: true, locality: true } }, bed: { include: { room: { select: { roomNumber: true } } } } }
       });
       const digits = String(args.phone).replace(/\D/g, '');
-      if (!booking || booking.phone.replace(/\D/g, '') !== digits) throw new Error('BOOKING_NOT_FOUND');
+      if (!booking || booking.phone.replace(/\D/g, '') !== digits ||
+        (actor.role === 'PG_TENANT' && actor.propertyId && booking.propertyId !== actor.propertyId) ||
+        (['PG_OWNER', 'PG_WARDEN'].includes(actor.role) && !actor.propertyIds.includes(booking.propertyId))) throw new Error('BOOKING_NOT_FOUND');
       return {
         booking_ref: booking.bookingRef, status: booking.status, resident_name: booking.residentName,
         move_in_date: booking.moveInDate, property: booking.property?.name,
@@ -203,32 +228,84 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     }
   },
 
+  get_my_stay: {
+    description: 'Show the signed-in resident’s stay, room and rent balance on the current PG host. Residents only.',
+    parameters: { type: 'object', properties: {} },
+    requiresConfirmation: false,
+    roles: ['PG_TENANT'],
+    execute: async (actor) => {
+      if (!actor.propertyId || !actor.phones.length || !actor.propertyIds.includes(actor.propertyId)) throw new Error('RESIDENT_HOST_REQUIRED');
+      const tenant = await db.pGTenant.findFirst({
+        where: { propertyId: actor.propertyId, phone: { in: actor.phones }, status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'RESERVED'] } },
+        include: {
+          property: { select: { name: true, locality: true, city: true } },
+          bed: { include: { room: { select: { roomNumber: true, roomType: true } } } },
+          rentEntries: { where: { status: { in: ['DUE', 'PARTIAL', 'OVERDUE'] } }, orderBy: { dueDate: 'asc' }, take: 20 }
+        }
+      });
+      if (!tenant) throw new Error('NO_TENANT_RECORD');
+      return {
+        resident: tenant.name,
+        property: tenant.property.name,
+        locality: tenant.property.locality,
+        city: tenant.property.city,
+        room: tenant.bed ? `Room ${tenant.bed.room.roomNumber}, ${tenant.bed.label} (${tenant.bed.room.roomType})` : null,
+        status: tenant.status,
+        monthly_rent: tenant.monthlyRent,
+        outstanding_total: tenant.rentEntries.reduce((total: number, entry: any) => total + Math.max(0, entry.amount - entry.paidAmount), 0),
+        outstanding_entries: tenant.rentEntries.map((entry: any) => ({ period: entry.period, type: entry.entryType, amount_due: Math.max(0, entry.amount - entry.paidAmount), status: entry.status, due_date: entry.dueDate }))
+      };
+    }
+  },
+
+  get_my_maintenance_requests: {
+    description: 'List the signed-in resident’s maintenance requests and statuses on the current PG host.',
+    parameters: { type: 'object', properties: {} },
+    requiresConfirmation: false,
+    roles: ['PG_TENANT'],
+    execute: async (actor) => {
+      if (!actor.propertyId || !actor.phones.length || !actor.propertyIds.includes(actor.propertyId)) throw new Error('RESIDENT_HOST_REQUIRED');
+      const tenant = await db.pGTenant.findFirst({
+        where: { propertyId: actor.propertyId, phone: { in: actor.phones } },
+        select: { id: true }
+      });
+      if (!tenant) throw new Error('NO_TENANT_RECORD');
+      return db.pGMaintenanceTicket.findMany({
+        where: { propertyId: actor.propertyId, tenantId: tenant.id },
+        select: { title: true, description: true, category: true, status: true, priority: true, createdAt: true, updatedAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 25
+      });
+    }
+  },
+
   create_maintenance_ticket: {
-    description: 'File a maintenance ticket for an authenticated resident’s property.',
+    description: 'File a maintenance ticket for the resident’s own active stay on this PG host.',
     parameters: {
       type: 'object',
       properties: {
-        property_id: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
+        property_id: { type: 'string', description: 'Optional; the current resident PG host is used automatically.' }, title: { type: 'string' }, description: { type: 'string' },
         category: { type: 'string' }, image_key: { type: 'string' }
       },
-      required: ['property_id', 'title', 'description']
+      required: ['title', 'description']
     },
     requiresConfirmation: true,
-    roles: ['PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+    roles: ['PG_TENANT'],
     execute: async (actor, args) => {
-      const property = await db.pGProperty.findFirst({ where: { id: String(args.property_id), status: 'ACTIVE' }, select: { id: true } });
-      if (!property) throw new Error('PROPERTY_NOT_FOUND');
-      const tenant = actor.phones.length
-        ? await db.pGTenant.findFirst({ where: { propertyId: property.id, phone: { in: actor.phones }, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } }, select: { id: true } })
-        : null;
+      const propertyId = actor.propertyId;
+      if (!propertyId || !actor.propertyIds.includes(propertyId) || (args.property_id && String(args.property_id) !== propertyId) || !actor.phones.length) throw new Error('FORBIDDEN');
+      const tenant = await db.pGTenant.findFirst({ where: { propertyId, phone: { in: actor.phones }, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } }, select: { id: true, bedId: true } });
+      if (!tenant) throw new Error('NO_TENANT_RECORD');
+      const category = str(args.category || 'OTHER').toUpperCase();
+      if (!['PLUMBING', 'ELECTRICAL', 'APPLIANCE', 'CLEANING', 'SAFETY', 'PEST', 'OTHER'].includes(category)) throw new Error('INVALID_CATEGORY');
       const ticket = await db.pGMaintenanceTicket.create({
         data: {
-          propertyId: property.id, tenantId: tenant?.id || null, title: str(args.title).slice(0, 120),
-          description: str(args.description).slice(0, 2000), category: str(args.category || 'OTHER').toUpperCase() || 'OTHER',
+          propertyId, tenantId: tenant.id, bedId: tenant.bedId, title: str(args.title).slice(0, 120),
+          description: str(args.description).slice(0, 2000), category,
           imageUrl: str(args.image_key) || null
         }
       });
-      logAudit(property.id, actor.userId, 'TICKET_CREATED_VIA_AI', 'PGMaintenanceTicket', ticket.id, ticket.title);
+      logAudit(propertyId, actor.userId, 'TICKET_CREATED_VIA_AI', 'PGMaintenanceTicket', ticket.id, ticket.title);
       return { ticket_id: ticket.id, status: ticket.status, category: ticket.category };
     }
   },
@@ -405,14 +482,31 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
       if (process.env.ENABLE_WHATSAPP_CLOUD_API !== 'true') {
         return { sent: false, skipped: 'channel-disabled' };
       }
-      logAudit(actor.propertyIds[0] || '', actor.userId, 'NOTIFICATION_QUEUED_VIA_AI', undefined, undefined, `${args.template} -> ${str(args.recipient_phone)}`);
-      return { sent: false, skipped: 'transport-not-connected' };
+      const eventByTemplate: Record<string, 'BOOKING_RECEIVED' | 'BOOKING_APPROVED' | 'BOOKING_REJECTED' | 'CHECK_IN_REMINDER' | 'RENT_DUE'> = {
+        booking_received: 'BOOKING_RECEIVED', booking_approved: 'BOOKING_APPROVED', booking_rejected: 'BOOKING_REJECTED',
+        check_in_reminder: 'CHECK_IN_REMINDER', rent_due: 'RENT_DUE'
+      };
+      const event = eventByTemplate[String(args.template)];
+      const digits = str(args.recipient_phone).replace(/\D/g, '');
+      if (!event || !digits || !actor.propertyIds.length) throw new Error('FORBIDDEN');
+      const phoneVariants = [...new Set([digits, digits.length === 10 ? `91${digits}` : digits, digits.length > 10 ? digits.slice(-10) : digits])];
+      const [tenant, booking] = await Promise.all([
+        db.pGTenant.findFirst({ where: { propertyId: { in: actor.propertyIds }, phone: { in: phoneVariants } }, select: { id: true, propertyId: true } }),
+        db.pGBooking.findFirst({ where: { propertyId: { in: actor.propertyIds }, phone: { in: phoneVariants } }, select: { id: true, propertyId: true } })
+      ]);
+      const recipient = tenant || booking;
+      if (!recipient) throw new Error('RECIPIENT_OUTSIDE_PROPERTY_SCOPE');
+      const result = await notifyWhatsAppTemplate(event, digits);
+      if (result.sent) logAudit(recipient.propertyId, actor.userId, 'NOTIFICATION_SENT_VIA_AI', tenant ? 'PGTenant' : 'PGBooking', recipient.id, String(args.template));
+      return result;
     }
   }
 };
 
 export function toolDefinitionsFor(role: string): { name: string; description: string; parameters: Record<string, unknown> }[] {
   return Object.entries(toolCatalogue)
-    .filter(([, tool]) => tool.roles.includes(role) || tool.roles.includes('GUEST'))
+    .filter(([name, tool]) => tool.roles.includes(role) && (name !== 'send_notification' || (
+      process.env.ENABLE_WHATSAPP_CLOUD_API === 'true' && Boolean(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID)
+    )))
     .map(([name, tool]) => ({ name, description: tool.description, parameters: tool.parameters }));
 }

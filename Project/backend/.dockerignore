@@ -8,5 +8,6 @@ npm-debug.log
 *.db
 *.db-*
 uploads
+private-uploads
 coverage
 tests/tmp-*

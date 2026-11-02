@@ -148,10 +148,10 @@ export async function listElectricityBills(db: any, propertyIds: string[], perio
   });
 }
 
-export async function setMealPreference(db: any, actor: { userId: string | null; phones: string[] }, optOut: boolean): Promise<any> {
-  if (!actor.phones.length) throw new Error('NO_TENANT_RECORD');
+export async function setMealPreference(db: any, actor: { userId: string | null; phones: string[]; propertyId?: string }, optOut: boolean): Promise<any> {
+  if (!actor.phones.length || !actor.propertyId) throw new Error('NO_TENANT_RECORD');
   const tenant = await db.pGTenant.findFirst({
-    where: { phone: { in: actor.phones }, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
+    where: { propertyId: actor.propertyId, phone: { in: actor.phones }, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
     select: { id: true, name: true, propertyId: true, foodOptOut: true }
   });
   if (!tenant) throw new Error('NO_TENANT_RECORD');

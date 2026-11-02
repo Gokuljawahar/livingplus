@@ -30,7 +30,7 @@ export const postChat = async (req: Request, res: Response): Promise<any> => {
   if (rateLimited(key)) return res.status(429).json({ message: 'Too many AI requests. Slow down and retry.' });
 
   const message = String(req.body.message || '').trim().slice(0, 2000);
-  if (!message && !req.body.confirmationId) return res.status(400).json({ message: 'A message is required' });
+  if (!message && !req.body.confirmationId && !req.body.cancelConfirmationId) return res.status(400).json({ message: 'A message is required' });
 
   let imageDataUrl: string | undefined;
   if (req.body.imageDataUrl) {
@@ -53,7 +53,8 @@ export const postChat = async (req: Request, res: Response): Promise<any> => {
       message,
       imageDataUrl,
       sessionId: req.body.sessionId ? String(req.body.sessionId) : undefined,
-      confirmationId: req.body.confirmationId ? String(req.body.confirmationId) : undefined
+      confirmationId: req.body.confirmationId ? String(req.body.confirmationId) : undefined,
+      cancelConfirmationId: req.body.cancelConfirmationId ? String(req.body.cancelConfirmationId) : undefined
     });
     res.json(result);
   } catch (error: any) {

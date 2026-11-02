@@ -25,7 +25,7 @@ export const postChat = async (req, res) => {
     if (rateLimited(key))
         return res.status(429).json({ message: 'Too many AI requests. Slow down and retry.' });
     const message = String(req.body.message || '').trim().slice(0, 2000);
-    if (!message && !req.body.confirmationId)
+    if (!message && !req.body.confirmationId && !req.body.cancelConfirmationId)
         return res.status(400).json({ message: 'A message is required' });
     let imageDataUrl;
     if (req.body.imageDataUrl) {
@@ -47,7 +47,8 @@ export const postChat = async (req, res) => {
             message,
             imageDataUrl,
             sessionId: req.body.sessionId ? String(req.body.sessionId) : undefined,
-            confirmationId: req.body.confirmationId ? String(req.body.confirmationId) : undefined
+            confirmationId: req.body.confirmationId ? String(req.body.confirmationId) : undefined,
+            cancelConfirmationId: req.body.cancelConfirmationId ? String(req.body.cancelConfirmationId) : undefined
         });
         res.json(result);
     }

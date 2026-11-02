@@ -9,6 +9,7 @@ datasource db {
 
 model User {
   id         String   @id @default(uuid())
+  slug         String?  @unique
   email      String?  @unique
   phone      String?  @unique
   password   String
@@ -22,6 +23,7 @@ model User {
 
 model PGProperty {
   id           String   @id @default(uuid())
+  slug         String?  @unique
   name         String
   description  String?
   address      String
@@ -40,6 +42,7 @@ model PGProperty {
   bookingLockMinutes Int @default(120)
   rentDay      Int      @default(1)
   rentDueDay   Int      @default(5)
+  upiId        String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -51,6 +54,8 @@ model PGProperty {
   maintenanceTickets PGMaintenanceTicket[]
   expenses           PGExpense[]
   electricityBills   PGElectricityBill[]
+  paymentClaims      PGPaymentClaim[]
+  residentNotifications PGResidentNotification[]
 }
 
 model PGPropertyAccess {
@@ -171,6 +176,8 @@ model PGTenant {
   booking               PGBooking?   @relation(fields: [bookingId], references: [id], onDelete: SetNull)
   rentEntries           PGRentEntry[]
   maintenanceTickets    PGMaintenanceTicket[]
+  paymentClaims         PGPaymentClaim[]
+  notifications         PGResidentNotification[]
 
   @@index([propertyId, status])
 }
@@ -193,6 +200,7 @@ model PGRentEntry {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   tenant      PGTenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  paymentClaims PGPaymentClaim[]
 
   @@unique([tenantId, period, entryType])
   @@index([period, status])
@@ -216,6 +224,45 @@ model PGMaintenanceTicket {
   tenant      PGTenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
   @@index([propertyId, status, priority])
+}
+
+model PGPaymentClaim {
+  id            String      @id @default(uuid())
+  propertyId    String
+  tenantId      String
+  rentEntryId   String
+  amount        Float
+  reference     String
+  status        String      @default("PENDING")
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  responseNote  String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  property      PGProperty  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  tenant        PGTenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rentEntry     PGRentEntry @relation(fields: [rentEntryId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, reference])
+  @@index([propertyId, status, createdAt])
+  @@index([tenantId, status])
+}
+
+model PGResidentNotification {
+  id         String     @id @default(uuid())
+  propertyId String
+  tenantId   String
+  type       String
+  title      String
+  message    String
+  entityId   String?
+  readAt     DateTime?
+  createdAt  DateTime   @default(now())
+  property   PGProperty @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  tenant     PGTenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, readAt, createdAt])
+  @@index([propertyId, type, createdAt])
 }
 
 model PGExpense {
@@ -252,6 +299,7 @@ model PGElectricityBill {
 model OtpCode {
   id           String    @id @default(uuid())
   phone        String
+  propertyId   String?
   purpose      String    @default("BOOKING")
   codeHash     String
   verifiedToken String?  @unique

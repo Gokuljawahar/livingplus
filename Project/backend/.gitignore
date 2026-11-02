@@ -10,6 +10,7 @@ node_modules
 *.db
 *.db-journal
 uploads/*
+private-uploads/
 
 # Logs
 logs

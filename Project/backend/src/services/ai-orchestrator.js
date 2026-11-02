@@ -17,15 +17,17 @@ function roleSystemPrompt(role) {
         'Use backend tools for every operational fact: properties, availability, rent, bookings.',
         'Never invent availability, prices, booking references or payment outcomes.',
         'If constraints are missing, ask one focused question instead of guessing.',
-        'If the user attached a maintenance photo, use what you see to propose create_maintenance_ticket with an interpreted title, category and description. If the photo is blurry or unrelated, ask for a clearer photo instead of guessing.',
         'If a request is outside the caller’s role or property scope, refuse briefly and offer what you can do.',
-        'Every tool available to you in this conversation is already authorized for this caller. Never tell the user a listed tool is unavailable to their role. When a tool fits the request, call it with concrete arguments instead of answering from general knowledge or asking the user to do it elsewhere. When an argument such as a property ID is missing, either look it up with a search tool first or ask one focused question, then call the tool.',
-        'For actions that need confirmation (booking requests, tickets, expenses, notifications), call the tool as soon as you have the details. The system pauses for user confirmation automatically, so never substitute a prose confirmation question for the tool call.'
+        'Use only tools explicitly supplied for this persona. Do not infer access from the conversation or act on a different property. When an argument such as a property ID is missing, look it up with an authorized tool or ask one focused question.',
+        'For actions that need confirmation, call the tool as soon as the details are complete. The system pauses for explicit user confirmation.'
     ];
     if (role === 'PG_OWNER' || role === 'SUPER_ADMIN' || role === 'PG_WARDEN') {
         return [...shared, 'You serve operations staff. Summarize occupancy, dues and property expenses from tool results with period and scope. You may log property expenses and send rent reminders or notifications through their tools, always pausing for explicit confirmation first. Never mark rent paid or approve tenants yourself; direct those to the workspace workflows.'].join('\n');
     }
-    return [...shared, 'You serve residents and guests. Help discover PGs, check availability, prepare booking requests and maintenance reports. Booking and ticket creation need explicit confirmation.'].join('\n');
+    if (role === 'PG_TENANT') {
+        return [...shared, 'You serve a resident on one specific PG host. For questions about room, stay, rent or dues, call get_my_stay immediately. For ticket history, call get_my_maintenance_requests. For a complaint, gather a short title, details and category, then call create_maintenance_ticket; the authenticated host supplies the PG, so omit property_id. If the resident attaches a clear, relevant maintenance photo, use it to help describe the issue. For meal charges, use set_meal_preference only after explicit confirmation. Never ask which PG the resident is staying in or ask for internal IDs. Never access other residents, other PGs, owner finances or staff operations.'].join('\n');
+    }
+    return [...shared, 'You serve visitors. Help discover PGs, check availability and booking status, and prepare booking requests only after collecting move-in details and phone verification. Visitors cannot create maintenance tickets; direct current residents to their authenticated resident portal for that.'].join('\n');
 }
 function previewFor(tool, args) {
     if (tool === 'create_booking_request') {
@@ -58,17 +60,32 @@ export async function runChat(req, provider, input) {
     const actor = await actorFromRequest(req);
     const role = ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN', 'PG_TENANT'].includes(actor.role) ? actor.role : 'GUEST';
     const userKey = actor.userId || `guest:${req.ip || 'unknown'}`;
+    if (input.cancelConfirmationId) {
+        const pending = pendingConfirmations.get(input.cancelConfirmationId);
+        if (!pending || pending.userKey !== userKey || pending.role !== role || pending.propertyId !== actor.propertyId || pending.expiresAt < Date.now()) {
+            pendingConfirmations.delete(input.cancelConfirmationId);
+            return { reply: 'That confirmation is no longer active. Nothing was changed.', sessionId: input.sessionId || '' };
+        }
+        pendingConfirmations.delete(input.cancelConfirmationId);
+        if (input.sessionId) {
+            await db.conversationSession.updateMany({
+                where: { id: input.sessionId, ...(actor.userId ? { userId: actor.userId } : {}) },
+                data: { stateJson: '[]' }
+            }).catch(() => undefined);
+        }
+        return { reply: 'Canceled. Nothing was changed.', sessionId: input.sessionId || '' };
+    }
     // Confirmation resume path: execute a previously previewed sensitive call.
     if (input.confirmationId) {
         const pending = pendingConfirmations.get(input.confirmationId);
-        if (!pending || pending.userKey !== userKey || pending.expiresAt < Date.now()) {
+        if (!pending || pending.userKey !== userKey || pending.role !== role || pending.propertyId !== actor.propertyId || pending.expiresAt < Date.now()) {
             pendingConfirmations.delete(input.confirmationId);
             return { reply: 'That confirmation expired. Please ask again and I will prepare it fresh.', sessionId: input.sessionId || '' };
         }
         pendingConfirmations.delete(input.confirmationId);
         const tool = toolCatalogue[pending.tool];
-        if (!tool)
-            return { reply: 'That confirmation is no longer valid. Please ask again.', sessionId: input.sessionId || '' };
+        if (!tool || !tool.roles.includes(role))
+            return { reply: 'That confirmation is no longer valid for this persona. Please ask again.', sessionId: input.sessionId || '' };
         try {
             const execArgs = pending.tool === 'create_booking_request' ? { ...pending.args, idempotency_key: pending.idemKey } : pending.args;
             const result = await tool.execute(actor, execArgs);
@@ -109,7 +126,7 @@ export async function runChat(req, provider, input) {
         }
         for (const call of message.tool_calls) {
             const tool = toolCatalogue[call.name];
-            if (!tool || (!tool.roles.includes(role) && !tool.roles.includes('GUEST'))) {
+            if (!tool || !tool.roles.includes(role)) {
                 messages.push({ role: 'tool', tool_call_id: call.id, content: `ERROR: tool ${call.name} is not available to role ${role}.` });
                 continue;
             }
@@ -123,7 +140,7 @@ export async function runChat(req, provider, input) {
             }
             if (tool.requiresConfirmation) {
                 const confirmationId = `cfm_${randomUUID().replace(/-/g, '')}`;
-                pendingConfirmations.set(confirmationId, { userKey, tool: call.name, args, preview: previewFor(call.name, args), expiresAt: Date.now() + CONFIRM_TTL_MS, idemKey: `idem_${confirmationId}` });
+                pendingConfirmations.set(confirmationId, { userKey, role, ...(actor.propertyId ? { propertyId: actor.propertyId } : {}), tool: call.name, args, preview: previewFor(call.name, args), expiresAt: Date.now() + CONFIRM_TTL_MS, idemKey: `idem_${confirmationId}` });
                 const saved = await persistSession(session, actor, [...history, { role: 'user', content: input.message }], true);
                 return {
                     reply: `Before I proceed: ${previewFor(call.name, args)} Reply to confirm and I will run it.`,

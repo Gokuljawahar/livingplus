@@ -129,10 +129,10 @@ export async function listElectricityBills(db, propertyIds, period) {
     });
 }
 export async function setMealPreference(db, actor, optOut) {
-    if (!actor.phones.length)
+    if (!actor.phones.length || !actor.propertyId)
         throw new Error('NO_TENANT_RECORD');
     const tenant = await db.pGTenant.findFirst({
-        where: { phone: { in: actor.phones }, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
+        where: { propertyId: actor.propertyId, phone: { in: actor.phones }, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
         select: { id: true, name: true, propertyId: true, foodOptOut: true }
     });
     if (!tenant)

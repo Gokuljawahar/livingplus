@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useSidebar } from '../../context/SidebarContext';
 import { SecureImage } from '../SecureImage';
+import { resolveAppHost } from '../../utils/pg-host';
 
 export default function Header() {
   const { user, logout } = useAuth();
@@ -30,15 +31,13 @@ export default function Header() {
         >
           <Menu className="w-6 h-6" />
         </button>
-        <Link to="/pg" className="flex items-center gap-2 font-semibold text-[#02224B]">
+        <span className="flex items-center gap-2 font-semibold text-[#02224B]">
           <Building2 className="h-5 w-5" />
           PG Operations
-        </Link>
+        </span>
       </div>
 
       <div className="flex items-center gap-2 md:gap-4">
-        <Link to="/pg" className="hidden sm:block text-sm font-medium text-slate-500 hover:text-[#02224B]">Find a PG</Link>
-
         {/* User Dropdown */}
         <div className="relative" ref={dropdownRef}>
           <div
@@ -72,7 +71,7 @@ export default function Header() {
               </div>
 
               <Link
-                to="/pg/manage"
+                to={resolveAppHost().kind === 'property' ? '/owner/manage' : '/pg/manage'}
                 onClick={() => setShowDropdown(false)}
                 className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 hover:bg-[#02224B]/5 hover:text-[#02224B] transition-colors"
               >

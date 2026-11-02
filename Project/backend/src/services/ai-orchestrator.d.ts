@@ -17,6 +17,7 @@ export declare function runChat(req: any, provider: ModelProvider, input: {
     message: string;
     sessionId?: string | undefined;
     confirmationId?: string | undefined;
+    cancelConfirmationId?: string | undefined;
     imageDataUrl?: string | undefined;
 }): Promise<ChatResult>;
 //# sourceMappingURL=ai-orchestrator.d.ts.map

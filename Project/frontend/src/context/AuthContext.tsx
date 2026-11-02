@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { OWNER_TOKEN_KEY, OWNER_USER_KEY, RESIDENT_TOKEN_KEY, RESIDENT_USER_KEY } from '../utils/session';
 
 interface User {
   id: string;
@@ -13,7 +14,7 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   login: (token: string, user: User) => void;
-  logout: () => void;
+  logout: (role?: 'PG_OWNER' | 'PG_TENANT') => void;
   updateUser: (newUser: User) => void;
   isLoading: boolean;
 }
@@ -26,8 +27,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const savedToken = localStorage.getItem('token');
-    const savedUser = localStorage.getItem('user');
+    const residentRoute = window.location.pathname === '/resident' || window.location.pathname.startsWith('/pg/resident');
+    let savedToken = localStorage.getItem(residentRoute ? RESIDENT_TOKEN_KEY : OWNER_TOKEN_KEY);
+    let savedUser = localStorage.getItem(residentRoute ? RESIDENT_USER_KEY : OWNER_USER_KEY);
+    const legacyToken = localStorage.getItem('token');
+    const legacyUser = localStorage.getItem('user');
+    if ((!savedToken || !savedUser) && legacyToken && legacyUser) {
+      try {
+        const legacyAccount = JSON.parse(legacyUser) as User;
+        const resident = legacyAccount.role === 'PG_TENANT';
+        const tokenKey = resident ? RESIDENT_TOKEN_KEY : OWNER_TOKEN_KEY;
+        const userKey = resident ? RESIDENT_USER_KEY : OWNER_USER_KEY;
+        localStorage.setItem(tokenKey, legacyToken);
+        localStorage.setItem(userKey, legacyUser);
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        if (residentRoute === resident) {
+          savedToken = legacyToken;
+          savedUser = legacyUser;
+        }
+      } catch {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      }
+    }
     if (savedToken && savedUser) {
       try {
         const parsedUser = JSON.parse(savedUser);
@@ -50,22 +73,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = (newToken: string, newUser: User) => {
+    const resident = newUser.role === 'PG_TENANT';
+    const tokenKey = resident ? RESIDENT_TOKEN_KEY : OWNER_TOKEN_KEY;
+    const userKey = resident ? RESIDENT_USER_KEY : OWNER_USER_KEY;
+    localStorage.setItem(tokenKey, newToken);
+    localStorage.setItem(userKey, JSON.stringify(newUser));
     setToken(newToken);
     setUser(newUser);
-    localStorage.setItem('token', newToken);
-    localStorage.setItem('user', JSON.stringify(newUser));
   };
 
-  const logout = () => {
+  const logout = (role?: 'PG_OWNER' | 'PG_TENANT') => {
+    const resident = (role || user?.role) === 'PG_TENANT';
     setToken(null);
     setUser(null);
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    localStorage.removeItem(resident ? RESIDENT_TOKEN_KEY : OWNER_TOKEN_KEY);
+    localStorage.removeItem(resident ? RESIDENT_USER_KEY : OWNER_USER_KEY);
   };
 
   const updateUser = (updatedUser: User) => {
     setUser(updatedUser);
-    localStorage.setItem('user', JSON.stringify(updatedUser));
+    const userKey = updatedUser.role === 'PG_TENANT' ? RESIDENT_USER_KEY : OWNER_USER_KEY;
+    localStorage.setItem(userKey, JSON.stringify(updatedUser));
   };
 
   return (

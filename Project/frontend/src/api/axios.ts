@@ -1,10 +1,11 @@
 import axios from 'axios';
 import { encrypt, decrypt } from '../utils/crypto';
+import { resolveAppHost } from '../utils/pg-host';
+import { OWNER_TOKEN_KEY, OWNER_USER_KEY, RESIDENT_TOKEN_KEY, RESIDENT_USER_KEY } from '../utils/session';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
-export const API_URL = `${API_BASE_URL}/api`;
-// export const API_BASE_URL = 'https://www.livingplus.com';
-// export const API_URL = `${API_BASE_URL}/api`;
+const configuredApiBase = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+export const API_BASE_URL = configuredApiBase;
+export const API_URL = configuredApiBase ? `${configuredApiBase}/api` : '/api';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -16,10 +17,14 @@ const api = axios.create({
 });
 
 api.interceptors.request.use(async (config) => {
-  const token = localStorage.getItem('token');
+  const isResidentRoute = window.location.pathname === '/resident' || window.location.pathname.startsWith('/pg/resident');
+  const isResidentRequest = isResidentRoute || config.url?.includes('/pg/tenant/') || (config.data && !(config.data instanceof FormData) && config.data.purpose === 'TENANT_LOGIN');
+  const token = localStorage.getItem(isResidentRequest ? RESIDENT_TOKEN_KEY : OWNER_TOKEN_KEY);
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  const hostContext = resolveAppHost();
+  if (hostContext.kind === 'property') config.headers['X-PG-Slug'] = hostContext.slug;
 
   // Encrypt request body (skip FormData)
   if (config.data !== undefined && config.data !== null && !(config.data instanceof FormData)) {
@@ -45,7 +50,10 @@ api.interceptors.response.use(
   },
   async (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
+      localStorage.removeItem(OWNER_TOKEN_KEY);
+      localStorage.removeItem(OWNER_USER_KEY);
+      localStorage.removeItem(RESIDENT_TOKEN_KEY);
+      localStorage.removeItem(RESIDENT_USER_KEY);
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }

@@ -9,7 +9,7 @@
     "build": "tsc",
     "start": "node src/index.js",
     "seed": "tsx prisma/seed-pg.ts",
-    "test": "tsx --test tests/ai-scenarios.test.ts"
+    "test": "tsx --test tests/ai-scenarios.test.ts tests/pg-host.test.ts"
   },
   "prisma": {
     "schema": "./prisma/schema.prisma",

@@ -6,6 +6,7 @@ const prisma = new PrismaClient() as any;
 const demoProperties = [
   {
     id: 'pg-demo-perungudi-women',
+    slug: 'palm-grove-womens-residence',
     name: 'Palm Grove Women\'s Residence',
     locality: 'Perungudi',
     address: '14, Lake View Road',
@@ -15,6 +16,7 @@ const demoProperties = [
   },
   {
     id: 'pg-demo-thoraipakkam-men',
+    slug: 'harbour-point-mens-pg',
     name: 'Harbour Point Men\'s PG',
     locality: 'Sholinganallur',
     address: '22, Rajiv Gandhi Salai',
@@ -24,6 +26,7 @@ const demoProperties = [
   },
   {
     id: 'pg-demo-guindy-coliving',
+    slug: 'cedar-house-coliving',
     name: 'Cedar House Co-Living',
     locality: 'Thoraipakkam',
     address: '8, Rajiv Gandhi Salai',
@@ -33,6 +36,7 @@ const demoProperties = [
   },
   {
     id: 'pg-demo-anna-nagar',
+    slug: 'northstar-student-living',
     name: 'Northstar Student Living',
     locality: 'Velachery',
     address: '31, 100 Feet Road',
@@ -57,6 +61,7 @@ async function main() {
     await prisma.pGProperty.upsert({
       where: { id: item.id },
       update: {
+        slug: item.slug,
         name: item.name,
         address: item.address,
         locality: item.locality,
@@ -67,6 +72,7 @@ async function main() {
       },
       create: {
         id: item.id,
+        slug: item.slug,
         name: item.name,
         address: item.address,
         locality: item.locality,

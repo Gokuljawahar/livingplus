@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { createHash, randomInt, randomUUID, timingSafeEqual } from 'crypto';
 import { prisma } from '../app.js';
 import { getJwtSecret } from '../utils/auth-config.js';
+import { createUniquePgSlug } from '../utils/pg-slug.js';
 
 function normalizePhone(phone: string): string {
   const digits = phone.replace(/\D/g, '');
@@ -21,20 +22,21 @@ function toUserResponse(user: any) {
   };
 }
 
-function createToken(user: { id: string; role: string }): string {
-  return jwt.sign({ userId: user.id, role: user.role }, getJwtSecret(), { expiresIn: '1d' });
+function createToken(user: { id: string; role: string }, propertyId?: string): string {
+  return jwt.sign({ userId: user.id, role: user.role, ...(propertyId ? { propertyId } : {}) }, getJwtSecret(), { expiresIn: '1d' });
 }
 
 export const login = async (req: Request, res: Response): Promise<any> => {
   const { email, phone, password } = req.body;
   const loginId = String(phone || email || '').trim();
+  const propertyId = (req as any).pgPropertyId as string | undefined;
   if (!loginId || !password) return res.status(400).json({ message: 'Phone or email and password are required' });
 
   try {
     if (email === process.env.ADMIN_USERNAME && password === process.env.ADMIN_PASSWORD) {
       const user = { id: 'env-admin', role: 'SUPER_ADMIN' };
       return res.json({
-        token: createToken(user),
+        token: createToken(user, propertyId),
         user: { id: user.id, email: process.env.ADMIN_USERNAME, name: 'Super Admin', role: user.role, profileImage: null }
       });
     }
@@ -53,7 +55,19 @@ export const login = async (req: Request, res: Response): Promise<any> => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    res.json({ token: createToken(user), user: toUserResponse(user) });
+    if (propertyId && user.role !== 'SUPER_ADMIN') {
+      const propertyAccess = await prisma.pGPropertyAccess.findFirst({
+        where: {
+          propertyId,
+          userId: user.id,
+          role: user.role === 'PG_WARDEN' ? 'WARDEN' : 'OWNER'
+        },
+        select: { id: true }
+      });
+      if (!propertyAccess) return res.status(403).json({ message: 'This account does not have access to this PG' });
+    }
+
+    res.json({ token: createToken(user, propertyId), user: toUserResponse(user) });
   } catch (error) {
     console.error('PG login error:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -63,6 +77,7 @@ export const login = async (req: Request, res: Response): Promise<any> => {
 export const register = async (req: Request, res: Response): Promise<any> => {
   const { name, email, phone, password, propertyName, propertyAddress, locality, contactPhone, city, genderPolicy, amenities, houseRules } = req.body;
   const normalizedPhone = normalizePhone(String(phone || ''));
+  const pgSlug = (req as any).pgSlug as string | undefined;
   if (!name?.trim() || !propertyName?.trim() || !propertyAddress?.trim() || !locality?.trim() || normalizedPhone.length < 10 || !password) {
     return res.status(400).json({ message: 'Owner, PG name, phone, address, locality and password are required' });
   }
@@ -90,8 +105,10 @@ export const register = async (req: Request, res: Response): Promise<any> => {
           role: 'PG_OWNER'
         }
       });
+      const slug = pgSlug || await createUniquePgSlug(tx, propertyName);
       const property = await tx.pGProperty.create({
         data: {
+          slug,
           name: propertyName.trim(),
           address: propertyAddress.trim(),
           locality: locality.trim(),
@@ -108,8 +125,7 @@ export const register = async (req: Request, res: Response): Promise<any> => {
 
     res.status(201).json({
       message: 'PG owner account created',
-      token: createToken(created.user),
-      user: toUserResponse(created.user),
+      pgSlug: created.property.slug,
       property: created.property
     });
   } catch (error: any) {
@@ -141,18 +157,22 @@ async function sendSms(phone: string, message: string): Promise<string | null> {
 export const requestOtp = async (req: Request, res: Response): Promise<any> => {
   const phone = normalizePhone(String(req.body.phone || ''));
   const purpose = ['BOOKING', 'TENANT_LOGIN'].includes(String(req.body.purpose)) ? String(req.body.purpose) : 'BOOKING';
+  const propertyId = (req as any).pgPropertyId as string | undefined;
   if (phone.length < 10) return res.status(400).json({ message: 'A valid phone number is required' });
+  if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production') {
+    return res.status(400).json({ message: 'Open your PG-specific resident portal to sign in' });
+  }
 
   try {
     const recent = await prisma.otpCode.count({
-      where: { phone, purpose, consumedAt: null, createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) } }
+      where: { phone, purpose, propertyId: propertyId || null, consumedAt: null, createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) } }
     });
     if (recent >= 3) return res.status(429).json({ message: 'Too many codes requested. Try again in 10 minutes.' });
 
     const code = String(randomInt(100000, 1000000));
     await sendSms(phone, `Your LivingPlus verification code is ${code}. It expires in 5 minutes.`);
     await prisma.otpCode.create({
-      data: { phone, purpose, codeHash: hashOtp(code), expiresAt: new Date(Date.now() + 5 * 60 * 1000) }
+      data: { phone, propertyId: propertyId || null, purpose, codeHash: hashOtp(code), expiresAt: new Date(Date.now() + 5 * 60 * 1000) }
     });
     res.json({ message: 'Verification code sent', ...(process.env.SMS_API_URL || process.env.NODE_ENV === 'production' ? {} : { devCode: code }) });
   } catch (error) {
@@ -165,11 +185,15 @@ export const verifyOtp = async (req: Request, res: Response): Promise<any> => {
   const phone = normalizePhone(String(req.body.phone || ''));
   const purpose = ['BOOKING', 'TENANT_LOGIN'].includes(String(req.body.purpose)) ? String(req.body.purpose) : 'BOOKING';
   const code = String(req.body.code || '').trim();
+  const propertyId = (req as any).pgPropertyId as string | undefined;
   if (!code) return res.status(400).json({ message: 'Verification code is required' });
+  if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production') {
+    return res.status(400).json({ message: 'Open your PG-specific resident portal to sign in' });
+  }
 
   try {
     const record = await prisma.otpCode.findFirst({
-      where: { phone, purpose, consumedAt: null },
+      where: { phone, purpose, propertyId: propertyId || null, consumedAt: null },
       orderBy: { createdAt: 'desc' }
     });
     if (!record || record.expiresAt < new Date()) return res.status(400).json({ message: 'Code expired. Request a new one.' });
@@ -191,8 +215,12 @@ export const verifyOtp = async (req: Request, res: Response): Promise<any> => {
     if (purpose === 'TENANT_LOGIN') {
       const digits = phone.startsWith('91') && phone.length === 12 ? phone.slice(2) : phone;
       const tenant = await prisma.pGTenant.findFirst({
-        where: { phone: { in: [...new Set([phone, digits])] }, status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'RESERVED'] } },
-        select: { id: true, name: true }
+        where: {
+          phone: { in: [...new Set([phone, digits])] },
+          status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'RESERVED'] },
+          ...(propertyId ? { propertyId } : {})
+        },
+        select: { id: true, name: true, propertyId: true }
       });
       if (!tenant) return res.status(404).json({ message: 'No active stay found for this phone number' });
       let user = await prisma.user.findFirst({ where: { phone } });
@@ -201,7 +229,8 @@ export const verifyOtp = async (req: Request, res: Response): Promise<any> => {
           data: { name: tenant.name, phone, password: await bcrypt.hash(randomUUID(), 10), role: 'PG_TENANT' }
         });
       }
-      return res.json({ token: createToken(user), user: toUserResponse(user) });
+      if (user.role !== 'PG_TENANT') return res.status(403).json({ message: 'This account cannot sign in as a resident' });
+      return res.json({ token: createToken(user, propertyId || tenant.propertyId), user: toUserResponse(user) });
     }
     res.json({ phoneToken: verifiedToken });
   } catch (error) {
@@ -210,12 +239,13 @@ export const verifyOtp = async (req: Request, res: Response): Promise<any> => {
   }
 };
 
-export async function consumePhoneToken(phone: string, token: string | undefined, purpose = 'BOOKING'): Promise<boolean> {
+export async function consumePhoneToken(phone: string, token: string | undefined, purpose = 'BOOKING', propertyId?: string): Promise<boolean> {
   if (!token) return false;
   const consumed = await prisma.otpCode.updateMany({
     where: {
       verifiedToken: token,
       phone,
+      propertyId: propertyId || null,
       purpose,
       consumedAt: null,
       tokenExpiresAt: { gt: new Date() }

@@ -6,12 +6,14 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 const DB_FILE = './tests/tmp-ai-scenarios.db';
 // Prisma resolves sqlite `file:` paths against the schema directory, so the
 // engine file lives at ./prisma/tests/... while unlink runs against cwd.
 const DB_FS = './prisma/tests/tmp-ai-scenarios.db';
+const UPLOAD_TEST_DIR = path.resolve('./tests/tmp-local-uploads');
 process.env.DATABASE_URL = `file:${DB_FILE}`;
 process.env.ENABLE_AI_ORCHESTRATOR = 'true';
 process.env.META_MODEL_API_KEY = 'test-key';
@@ -20,6 +22,8 @@ process.env.META_MODEL_NAME = 'muse-spark-1.3';
 process.env.MODEL_API_TIMEOUT_MS = '5000';
 process.env.ENCRYPTION_KEY = 'ab'.repeat(32);
 process.env.JWT_SECRET = 'test-secret-for-pg-scenario-suite-32-bytes';
+process.env.UPLOAD_STORAGE = 'local';
+process.env.UPLOAD_DIR = UPLOAD_TEST_DIR;
 
 let prisma: any;
 let tools: any;
@@ -30,7 +34,11 @@ let reminders: any;
 let ids: any = {};
 
 const guestReq = () => ({ user: {}, ip: '127.0.0.1' }) as any;
-const userReq = (user: any) => ({ user: { userId: user.id, role: user.role }, ip: '127.0.0.1' }) as any;
+const userReq = (user: any) => ({
+  user: { userId: user.id, role: user.role, ...(user.role === 'PG_TENANT' ? { propertyId: ids.prop.id } : {}) },
+  ...(user.role === 'PG_TENANT' ? { pgPropertyId: ids.prop.id } : {}),
+  ip: '127.0.0.1'
+}) as any;
 const guestActor = { userId: null, role: 'GUEST', phones: [], propertyIds: [], isSuperAdmin: false };
 
 // Scripted stand-in for the Meta model: each turn returns the next step.
@@ -113,6 +121,7 @@ before(async () => {
 after(async () => {
   await prisma?.$disconnect();
   for (const f of [DB_FS, `${DB_FS}-journal`]) { try { fs.unlinkSync(f); } catch { /* best effort */ } }
+  fs.rmSync(UPLOAD_TEST_DIR, { recursive: true, force: true });
 });
 
 describe('discovery and availability (guest)', () => {
@@ -140,6 +149,202 @@ describe('discovery and availability (guest)', () => {
     const byRoom = Object.fromEntries(res.map((r: any) => [r.room_number, r]));
     assert.deepEqual(byRoom['101'].beds.map((b: any) => b.status), ['AVAILABLE', 'AVAILABLE', 'AVAILABLE']);
     assert.deepEqual(byRoom['102'].beds.map((b: any) => b.status), ['OCCUPIED', 'AVAILABLE']);
+  });
+});
+
+describe('resident maintenance requests', () => {
+  it('creates and lists only tickets for the resident stay on the current PG', async () => {
+    const { createTenantTicket, listTenantTickets, listOwnerTickets } = await import('../src/controllers/pg.controller.js');
+    const request = {
+      user: { userId: ids.tenantUser.id, role: 'PG_TENANT', propertyId: ids.prop.id },
+      pgPropertyId: ids.prop.id,
+      body: { tenantId: ids.tenant.id, title: 'Bathroom tap leaking', description: 'Water is dripping under the sink.', category: 'PLUMBING', priority: 'URGENT', propertyId: ids.other.id }
+    } as any;
+    const response = {
+      statusCode: 200,
+      body: undefined as any,
+      status(code: number) { this.statusCode = code; return this; },
+      json(body: unknown) { this.body = body; }
+    };
+
+    await createTenantTicket(request, response as any);
+
+    assert.equal(response.statusCode, 201);
+    assert.equal(response.body.propertyId, ids.prop.id);
+    assert.equal(response.body.tenantId, ids.tenant.id);
+    assert.equal(response.body.bedId, ids.tenant.bedId);
+    assert.equal(response.body.status, 'OPEN');
+    assert.equal(response.body.priority, 'NORMAL');
+    const createdTicketId = response.body.id;
+
+    await listTenantTickets(request, response as any);
+    assert.ok(response.body.some((ticket: any) => ticket.id === createdTicketId));
+    assert.ok(response.body.every((ticket: any) => ticket.propertyId === ids.prop.id && ticket.tenantId === ids.tenant.id));
+
+    const ownerRequest = {
+      user: { userId: ids.owner.id, role: 'PG_OWNER', propertyId: ids.prop.id },
+      pgPropertyId: ids.prop.id
+    } as any;
+    await listOwnerTickets(ownerRequest, response as any);
+    assert.ok(response.body.some((ticket: any) => ticket.id === createdTicketId));
+  });
+
+  it('rejects another resident stay and a different PG host', async () => {
+    const { createTenantTicket } = await import('../src/controllers/pg.controller.js');
+    const otherTenant = await prisma.pGTenant.create({
+      data: { propertyId: ids.other.id, name: 'Other Resident', phone: '9400000004', moveInDate: new Date('2026-10-01'), monthlyRent: 5000, status: 'ACTIVE' }
+    });
+    const response = {
+      statusCode: 200,
+      body: undefined as any,
+      status(code: number) { this.statusCode = code; return this; },
+      json(body: unknown) { this.body = body; }
+    };
+    const request = {
+      user: { userId: ids.tenantUser.id, role: 'PG_TENANT', propertyId: ids.prop.id },
+      pgPropertyId: ids.prop.id,
+      body: { tenantId: otherTenant.id, title: 'Private issue', description: 'Should not be accepted.' }
+    } as any;
+
+    await createTenantTicket(request, response as any);
+    assert.equal(response.statusCode, 404);
+
+    request.pgPropertyId = ids.other.id;
+    await createTenantTicket(request, response as any);
+    assert.equal(response.statusCode, 403);
+  });
+
+  it('does not replay a resident ticket confirmation on another PG host', async () => {
+    const title = 'Cross-host resident confirmation';
+    const prepared = await orchestrator.runChat(userReq(ids.tenantUser), stubProvider([
+      { calls: [{ name: 'create_maintenance_ticket', args: { title, description: 'Private resident issue', category: 'OTHER' } }] }
+    ]), { message: 'File a maintenance request' });
+    assert.ok(prepared.needsConfirmation);
+
+    const wrongHostRequest = {
+      ...userReq(ids.tenantUser),
+      pgPropertyId: ids.other.id,
+      user: { userId: ids.tenantUser.id, role: 'PG_TENANT', propertyId: ids.other.id }
+    } as any;
+    const result = await orchestrator.runChat(wrongHostRequest, stubProvider([]), {
+      message: 'confirm', sessionId: prepared.sessionId, confirmationId: prepared.needsConfirmation.confirmationId
+    });
+    assert.match(result.reply, /expired/i);
+    assert.equal(await prisma.pGMaintenanceTicket.count({ where: { title } }), 0);
+  });
+});
+
+describe('resident profile, payments, and notifications', () => {
+  const createResponse = () => ({
+    statusCode: 200,
+    body: undefined as any,
+    status(code: number) { this.statusCode = code; return this; },
+    json(body: unknown) { this.body = body; }
+  });
+
+  it('lets residents update only their own profile and resets KYC verification for new documents', async () => {
+    const { updateResidentProfile } = await import('../src/controllers/pg.controller.js');
+    const request = {
+      user: { userId: ids.tenantUser.id, role: 'PG_TENANT', propertyId: ids.prop.id },
+      pgPropertyId: ids.prop.id,
+      params: { tenantId: ids.tenant.id },
+      body: { permanentAddress: 'Updated address', emergencyName: 'Emergency Contact', kycVerified: true, status: 'CHECKED_OUT' }
+    } as any;
+    const response = createResponse();
+
+    await updateResidentProfile(request, response as any);
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.permanentAddress, 'Updated address');
+    assert.equal(response.body.status, 'ACTIVE');
+    assert.equal(response.body.kycVerified, false);
+
+    request.body = { kycDocumentUrl: 'local/not-a-valid-document.pdf' };
+    await updateResidentProfile(request, response as any);
+    assert.equal(response.statusCode, 400);
+  });
+
+  it('requires owner confirmation before crediting a resident UPI claim and notifies the resident', async () => {
+    const { createResidentPaymentClaim, listOwnerPaymentClaims, reviewPaymentClaim, listResidentNotifications, markResidentNotificationRead } = await import('../src/controllers/pg.controller.js');
+    let paymentOwner: any;
+    let paymentResident: any;
+    let paymentProperty: any;
+    try {
+      paymentOwner = await prisma.user.create({ data: { phone: '9912345677', password: 'x', name: 'Payment Owner', role: 'PG_OWNER' } });
+      paymentResident = await prisma.user.create({ data: { phone: '9912345678', password: 'x', name: 'Payment Resident', role: 'PG_TENANT' } });
+      paymentProperty = await prisma.pGProperty.create({ data: { name: 'Payment Test House', address: '1 Payment Road', locality: 'Test', upiId: 'spec-house@upi' } });
+      await prisma.pGPropertyAccess.create({ data: { propertyId: paymentProperty.id, userId: paymentOwner.id, role: 'OWNER' } });
+      const tenant = await prisma.pGTenant.create({ data: { propertyId: paymentProperty.id, name: 'Payment Resident', phone: paymentResident.phone, moveInDate: new Date('2026-10-01'), monthlyRent: 8000, status: 'ACTIVE' } });
+      const entry = await prisma.pGRentEntry.create({ data: { tenantId: tenant.id, period: '2026-11', entryType: 'RENT', amount: 8000, dueDate: new Date('2026-11-05'), status: 'DUE' } });
+      const residentRequest = {
+        user: { userId: paymentResident.id, role: 'PG_TENANT', propertyId: paymentProperty.id },
+        pgPropertyId: paymentProperty.id,
+        body: { tenantId: tenant.id, rentEntryId: entry.id, amount: 125, reference: 'UPIREF125001' }
+      } as any;
+      let response = createResponse();
+
+      await createResidentPaymentClaim(residentRequest, response as any);
+
+      assert.equal(response.statusCode, 201);
+      assert.equal(response.body.upiId, 'spec-house@upi');
+      const claimId = response.body.id;
+      assert.equal((await prisma.pGRentEntry.findUnique({ where: { id: entry.id } })).paidAmount, 0);
+
+      const ownerRequest = {
+        user: { userId: paymentOwner.id, role: 'PG_OWNER', propertyId: paymentProperty.id },
+        pgPropertyId: paymentProperty.id
+      } as any;
+      response = createResponse();
+      await listOwnerPaymentClaims(ownerRequest, response as any);
+      assert.ok(response.body.some((claim: any) => claim.id === claimId));
+
+      ownerRequest.params = { claimId };
+      ownerRequest.body = { status: 'APPROVED' };
+      response = createResponse();
+      await reviewPaymentClaim(ownerRequest, response as any);
+      assert.equal(response.statusCode, 200);
+      assert.equal((await prisma.pGRentEntry.findUnique({ where: { id: entry.id } })).paidAmount, 125);
+
+      response = createResponse();
+      await listResidentNotifications(residentRequest, response as any);
+      assert.equal(response.body.unreadCount, 1);
+      assert.equal(response.body.notifications[0].type, 'PAYMENT_CLAIM');
+
+      const notificationId = response.body.notifications[0].id;
+      residentRequest.params = { notificationId };
+      response = createResponse();
+      await markResidentNotificationRead(residentRequest, response as any);
+      assert.equal(response.statusCode, 200);
+      response = createResponse();
+      await listResidentNotifications(residentRequest, response as any);
+      assert.equal(response.body.unreadCount, 0);
+    } finally {
+      if (paymentProperty) await prisma.pGProperty.deleteMany({ where: { id: paymentProperty.id } });
+      if (paymentOwner) await prisma.user.deleteMany({ where: { id: paymentOwner.id } });
+      if (paymentResident) await prisma.user.deleteMany({ where: { id: paymentResident.id } });
+    }
+  });
+
+  it('notifies a resident when the owner changes a complaint status', async () => {
+    const { updateMaintenanceStatus, listResidentNotifications } = await import('../src/controllers/pg.controller.js');
+    const ownerRequest = {
+      user: { userId: ids.owner.id, role: 'PG_OWNER', propertyId: ids.prop.id },
+      pgPropertyId: ids.prop.id,
+      params: { ticketId: ids.ticket.id },
+      body: { status: 'IN_PROGRESS' }
+    } as any;
+    const response = createResponse();
+
+    await updateMaintenanceStatus(ownerRequest, response as any);
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.status, 'IN_PROGRESS');
+    const residentRequest = {
+      user: { userId: ids.tenantUser.id, role: 'PG_TENANT', propertyId: ids.prop.id },
+      pgPropertyId: ids.prop.id
+    } as any;
+    await listResidentNotifications(residentRequest, response as any);
+    assert.ok(response.body.notifications.some((notification: any) => notification.type === 'MAINTENANCE_STATUS' && notification.entityId === ids.ticket.id));
   });
 });
 
@@ -221,14 +426,49 @@ describe('booking through the AI assistant (guest)', () => {
 });
 
 describe('authorization and owner insights', () => {
-  it('hides owner-only tools from guests', async () => {
-    const names = tools.toolDefinitionsFor('GUEST').map((t: any) => t.name);
+  it('exposes only the tools authorized for each persona', async () => {
+    const guestNames = tools.toolDefinitionsFor('GUEST').map((t: any) => t.name);
+    const residentNames = tools.toolDefinitionsFor('PG_TENANT').map((t: any) => t.name);
+    const ownerNames = tools.toolDefinitionsFor('PG_OWNER').map((t: any) => t.name);
+    const wardenNames = tools.toolDefinitionsFor('PG_WARDEN').map((t: any) => t.name);
     for (const open of ['search_properties', 'get_property_details', 'check_bed_availability', 'get_booking_status', 'create_booking_request']) {
-      assert.ok(names.includes(open), `guest should see ${open}`);
+      assert.ok(guestNames.includes(open), `guest should see ${open}`);
     }
     for (const closed of ['get_pending_rent', 'get_occupancy_report', 'update_maintenance_status', 'send_notification']) {
-      assert.ok(!names.includes(closed), `guest must not see ${closed}`);
+      assert.ok(!guestNames.includes(closed), `guest must not see ${closed}`);
     }
+    assert.ok(!guestNames.includes('create_maintenance_ticket'));
+    for (const residentTool of ['get_my_stay', 'get_my_maintenance_requests', 'create_maintenance_ticket', 'set_meal_preference']) assert.ok(residentNames.includes(residentTool));
+    for (const ownerOnly of ['get_pending_rent', 'get_occupancy_report', 'log_expense', 'send_rent_reminders']) assert.ok(!residentNames.includes(ownerOnly));
+    assert.ok(!ownerNames.includes('create_booking_request'));
+    assert.ok(!ownerNames.includes('set_meal_preference'));
+    assert.ok(!wardenNames.includes('create_booking_request'));
+    assert.ok(!wardenNames.includes('set_meal_preference'));
+    if (process.env.ENABLE_WHATSAPP_CLOUD_API !== 'true' || !process.env.WHATSAPP_TOKEN || !process.env.WHATSAPP_PHONE_NUMBER_ID) {
+      assert.ok(!ownerNames.includes('send_notification'));
+      assert.ok(!residentNames.includes('send_notification'));
+    }
+  });
+
+  it('binds resident AI context to the property host and rejects an unscoped resident', async () => {
+    const resident = await tools.actorFromRequest(userReq(ids.tenantUser));
+    assert.deepEqual(resident.propertyIds, [ids.prop.id]);
+    assert.equal(resident.propertyId, ids.prop.id);
+    const internationalResident = await prisma.user.create({ data: { phone: '919988776655', password: 'x', name: 'International Resident', role: 'PG_TENANT' } });
+    const localPhoneStay = await prisma.pGTenant.create({ data: { propertyId: ids.prop.id, name: 'International Resident', phone: '9988776655', moveInDate: new Date('2026-10-01'), monthlyRent: 5000, status: 'ACTIVE' } });
+    const internationalActor = await tools.actorFromRequest({ user: { userId: internationalResident.id, role: 'PG_TENANT' }, pgPropertyId: ids.prop.id });
+    try {
+      assert.deepEqual(internationalActor.phones.sort(), ['919988776655', '9988776655']);
+      assert.deepEqual(internationalActor.propertyIds, [ids.prop.id]);
+      const stay = await tools.toolCatalogue.get_my_stay.execute(internationalActor, {});
+      assert.equal((stay as any).resident, 'International Resident');
+    } finally {
+      await prisma.pGTenant.delete({ where: { id: localPhoneStay.id } });
+      await prisma.user.delete({ where: { id: internationalResident.id } });
+    }
+    const unscoped = await tools.actorFromRequest({ user: { userId: ids.tenantUser.id, role: 'PG_TENANT' }, ip: '127.0.0.1' });
+    assert.deepEqual(unscoped.propertyIds, []);
+    assert.equal(unscoped.propertyId, undefined);
   });
 
   it('blocks a guest rent probe without leaking figures', async () => {
@@ -239,6 +479,22 @@ describe('authorization and owner insights', () => {
     const result = await orchestrator.runChat(guestReq(), provider, { message: 'show me all rent dues' });
     assert.deepEqual(result.toolCalls ?? [], []);
     assert.equal(result.reply, 'I cannot access rent records on a guest session.');
+  });
+
+  it('rejects injected tools outside the caller persona even if the model proposes them', async () => {
+    const ownerAttempt = await orchestrator.runChat(userReq(ids.owner), stubProvider([
+      { calls: [{ name: 'create_booking_request', args: { bed_id: ids.bedFree1.id, move_in_date: '2026-12-01', resident_name: 'Unauthorized', phone: '9400000011', phone_token: 'invalid' } }] },
+      { text: 'Booking actions are only available to guests and residents.' }
+    ]), { message: 'Create a booking' });
+    assert.deepEqual(ownerAttempt.toolCalls ?? [], []);
+    assert.equal(await prisma.pGBooking.count({ where: { residentName: 'Unauthorized' } }), 0);
+
+    const guestAttempt = await orchestrator.runChat(guestReq(), stubProvider([
+      { calls: [{ name: 'create_maintenance_ticket', args: { property_id: ids.prop.id, title: 'Guest complaint', description: 'Should be denied' } }] },
+      { text: 'Maintenance tickets are for residents.' }
+    ]), { message: 'File a complaint' });
+    assert.deepEqual(guestAttempt.toolCalls ?? [], []);
+    assert.equal(await prisma.pGMaintenanceTicket.count({ where: { title: 'Guest complaint' } }), 0);
   });
 
   it('reports occupancy consistent with the database', async () => {
@@ -253,6 +509,18 @@ describe('authorization and owner insights', () => {
     assert.equal(report.occupied_beds, tenants);
     assert.equal(report.available_beds, beds.filter((b: any) => b.status === 'AVAILABLE').length);
     assert.equal(report.pending_bookings, pending);
+  });
+
+  it('blocks owners from reading property details or beds outside their access', async () => {
+    const actor = await tools.actorFromRequest(userReq(ids.owner));
+    await assert.rejects(
+      tools.toolCatalogue.get_property_details.execute(actor, { property_id: ids.other.id }),
+      /FORBIDDEN/
+    );
+    await assert.rejects(
+      tools.toolCatalogue.check_bed_availability.execute(actor, { property_id: ids.other.id }),
+      /FORBIDDEN/
+    );
   });
 
   it('refuses occupancy outside the caller property scope', async () => {
@@ -309,6 +577,25 @@ describe('maintenance and messaging tools', () => {
 });
 
 describe('orchestrator behaviour', () => {
+  it('cancels a pending action and prevents confirmation replay', async () => {
+    const prepared = await orchestrator.runChat(userReq(ids.owner), stubProvider([
+      { calls: [{ name: 'log_expense', args: { property_id: ids.prop.id, category: 'MAINTENANCE', amount: 123, spent_on: '2026-11-02', note: 'cancel test' } }] }
+    ]), { message: 'prepare an expense' });
+    assert.ok(prepared.needsConfirmation);
+
+    const cancelled = await orchestrator.runChat(userReq(ids.owner), stubProvider([]), {
+      message: '', sessionId: prepared.sessionId, cancelConfirmationId: prepared.needsConfirmation.confirmationId
+    });
+    assert.match(cancelled.reply, /Canceled/);
+    assert.equal(await prisma.pGExpense.count({ where: { propertyId: ids.prop.id, note: 'cancel test' } }), 0);
+
+    const replay = await orchestrator.runChat(userReq(ids.owner), stubProvider([]), {
+      message: 'yes', sessionId: prepared.sessionId, confirmationId: prepared.needsConfirmation.confirmationId
+    });
+    assert.match(replay.reply, /expired/i);
+    assert.equal(await prisma.pGExpense.count({ where: { propertyId: ids.prop.id, note: 'cancel test' } }), 0);
+  });
+
   it('returns plain answers and keeps session context', async () => {
     const first = await orchestrator.runChat(guestReq(), stubProvider([{ text: 'Which locality are you looking in?' }]), { message: 'find me a PG' });
     assert.equal(first.reply, 'Which locality are you looking in?');
@@ -789,6 +1076,91 @@ describe('S3 image access', () => {
   });
 });
 
+describe('local filesystem media storage', () => {
+  it('stores uploads privately and serves authorized gallery/KYC previews without S3', async () => {
+    const { default: app } = await import('../src/app.js');
+    const jwt = (await import('jsonwebtoken')).default;
+    const privateTenant = await prisma.pGTenant.create({
+      data: {
+        propertyId: ids.prop.id, name: 'Local KYC Tenant', phone: '9650001234',
+        moveInDate: new Date(), monthlyRent: 1000, status: 'ACTIVE'
+      }
+    });
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise<void>((resolve) => server.on('listening', resolve));
+    const port = (server.address() as any).port;
+    const key = Buffer.from(process.env.ENCRYPTION_KEY as string, 'hex');
+    const ownerToken = jwt.sign({ userId: ids.owner.id, role: 'PG_OWNER' }, process.env.JWT_SECRET as string);
+    const outsiderToken = jwt.sign({ userId: ids.outsider.id, role: 'PG_OWNER' }, process.env.JWT_SECRET as string);
+    const decryptBody = async (response: Response) => {
+      const wrapper = await response.json() as { data: string };
+      const combined = Buffer.from(wrapper.data, 'base64');
+      const decipher = crypto.createDecipheriv('aes-256-cbc', key, combined.subarray(0, 16));
+      return JSON.parse(Buffer.concat([decipher.update(combined.subarray(16)), decipher.final()]).toString('utf8'));
+    };
+
+    try {
+      const image = new FormData();
+      image.append('image', new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')], { type: 'image/png' }), 'gallery.png');
+      const imageResponse = await fetch(`http://127.0.0.1:${port}/api/upload-s3`, {
+        method: 'POST', headers: { Authorization: `Bearer ${ownerToken}` }, body: image
+      });
+      assert.equal(imageResponse.status, 200);
+      const { fileKey: galleryKey } = await imageResponse.json() as { fileKey: string };
+      assert.match(galleryKey, /^local\/[0-9a-f-]+\.webp$/i);
+      const imageId = galleryKey.split('/')[1]!.replace(/\.webp$/, '');
+      assert.ok(fs.existsSync(path.join(UPLOAD_TEST_DIR, `${imageId}.webp`)));
+      await prisma.pGProperty.update({ where: { id: ids.prop.id }, data: { photoUrls: [galleryKey] } });
+
+      const pdf = new FormData();
+      pdf.append('image', new Blob([Buffer.from('%PDF-1.7\nLocal QA document\n%%EOF')], { type: 'application/pdf' }), 'identity.pdf');
+      const pdfResponse = await fetch(`http://127.0.0.1:${port}/api/upload-s3`, {
+        method: 'POST', headers: { Authorization: `Bearer ${ownerToken}` }, body: pdf
+      });
+      assert.equal(pdfResponse.status, 200);
+      const { fileKey: kycKey } = await pdfResponse.json() as { fileKey: string };
+      const pdfId = kycKey.split('/')[1]!.replace(/\.pdf$/, '');
+      assert.ok(fs.existsSync(path.join(UPLOAD_TEST_DIR, `${pdfId}.pdf`)));
+      await prisma.pGTenant.update({ where: { id: privateTenant.id }, data: { kycDocumentUrl: kycKey } });
+
+      const galleryResponse = await fetch(`http://127.0.0.1:${port}/api/view-image/bulk`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ keys: [galleryKey, kycKey, 'local/not-a-real-key.webp'] })
+      });
+      const gallery = await decryptBody(galleryResponse);
+      assert.equal(galleryResponse.status, 200);
+      assert.ok(gallery.urls[galleryKey]?.includes('/api/local-media/'));
+      assert.equal(gallery.urls[kycKey], undefined);
+      const imagePreview = await fetch(gallery.urls[galleryKey]);
+      assert.equal(imagePreview.status, 200);
+      assert.match(imagePreview.headers.get('content-type') || '', /image\/webp/);
+      assert.equal(imagePreview.headers.get('cache-control'), 'private, no-store');
+
+      const authorizedKyc = await fetch(`http://127.0.0.1:${port}/api/view-image/${encodeURIComponent(kycKey)}`, {
+        headers: { Authorization: `Bearer ${ownerToken}` }
+      });
+      const { viewUrl } = await decryptBody(authorizedKyc);
+      assert.equal(authorizedKyc.status, 200);
+      const pdfPreview = await fetch(viewUrl);
+      assert.equal(pdfPreview.status, 200);
+      assert.match(pdfPreview.headers.get('content-type') || '', /application\/pdf/);
+      assert.match(await pdfPreview.text(), /Local QA document/);
+
+      const deniedKyc = await fetch(`http://127.0.0.1:${port}/api/view-image/${encodeURIComponent(kycKey)}`, {
+        headers: { Authorization: `Bearer ${outsiderToken}` }
+      });
+      assert.equal(deniedKyc.status, 403);
+      const tampered = await fetch(viewUrl.slice(0, -1) + (viewUrl.endsWith('a') ? 'b' : 'a'));
+      assert.equal(tampered.status, 403);
+    } finally {
+      server.close();
+      await prisma.pGProperty.update({ where: { id: ids.prop.id }, data: { photoUrls: [] } });
+      await prisma.pGTenant.delete({ where: { id: privateTenant.id } });
+      fs.rmSync(UPLOAD_TEST_DIR, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('check-in billing consistency', () => {
   it('uses the scheduled rent calculation and creates each current-period entry once', async () => {
     const property = await prisma.pGProperty.create({
@@ -1064,6 +1436,11 @@ describe('electricity billing and food charges', () => {
     assert.equal((await prisma.pGTenant.findFirst({ where: { name: 'Spec Tenant' } })).foodOptOut, true);
     await assert.rejects(
       tools.toolCatalogue.set_meal_preference.execute(guestActor, { opt_out: false }),
+      /NO_TENANT_RECORD/);
+    const otherHostActor = await tools.actorFromRequest({ ...userReq(ids.tenantUser), pgPropertyId: ids.other.id });
+    assert.deepEqual(otherHostActor.propertyIds, []);
+    await assert.rejects(
+      tools.toolCatalogue.set_meal_preference.execute(otherHostActor, { opt_out: false }),
       /NO_TENANT_RECORD/);
   });
 

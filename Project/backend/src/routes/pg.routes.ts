@@ -31,6 +31,15 @@ import {
   approveElectricityBill,
   listOwnerTenants,
   listOwnerTickets,
+  listTenantTickets,
+  createTenantTicket,
+  updateResidentProfile,
+  listResidentNotifications,
+  markResidentNotificationRead,
+  createResidentPaymentClaim,
+  listResidentPaymentClaims,
+  listOwnerPaymentClaims,
+  reviewPaymentClaim,
   markDepositRefunded,
   listProperties,
   listPropertyStaff,
@@ -65,6 +74,13 @@ router.get('/ai/status', getAiStatus);
 router.post('/ai/chat', optionalAuthenticate, postChat);
 router.post('/ai/transcribe', voiceUpload.single('audio'), postTranscribe);
 router.get('/tenant/stays', authenticate, listTenantStays);
+router.get('/tenant/maintenance', authenticate, listTenantTickets);
+router.post('/tenant/maintenance', authenticate, createTenantTicket);
+router.patch('/tenant/:tenantId/profile', authenticate, updateResidentProfile);
+router.get('/tenant/notifications', authenticate, listResidentNotifications);
+router.patch('/tenant/notifications/:notificationId/read', authenticate, markResidentNotificationRead);
+router.get('/tenant/payment-claims', authenticate, listResidentPaymentClaims);
+router.post('/tenant/payment-claims', authenticate, createResidentPaymentClaim);
 router.post('/tenant/:tenantId/notice', authenticate, submitTenantNotice);
 router.post('/tenant/:tenantId/notice-cancel', authenticate, cancelTenantNotice);
 router.get('/owner/activity', authenticate, listAuditLogs);
@@ -99,6 +115,8 @@ router.get('/owner/electricity/bills', authenticate, listElectricityBills);
 router.post('/owner/electricity/bills', authenticate, proposeElectricityBill);
 router.post('/owner/electricity/bills/:billId/approve', authenticate, approveElectricityBill);
 router.patch('/owner/rent/:entryId/payment', authenticate, recordRentPayment);
+router.get('/owner/payment-claims', authenticate, listOwnerPaymentClaims);
+router.patch('/owner/payment-claims/:claimId', authenticate, reviewPaymentClaim);
 router.get('/owner/summary', authenticate, getOwnerSummary);
 router.get('/owner/reports', authenticate, getOwnerReport);
 router.get('/owner/maintenance', authenticate, listOwnerTickets);

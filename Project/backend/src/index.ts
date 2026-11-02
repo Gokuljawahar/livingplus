@@ -10,11 +10,15 @@ dotenv.config({ path: path.resolve(__dirname, '../.env.local'), override: true }
 
 getJwtSecret();
 
-const [{ default: app, prisma }, { startMonthlyRentScheduler }, { startRentReminderScheduler }] = await Promise.all([
+const [{ default: app, prisma }, { startMonthlyRentScheduler }, { startRentReminderScheduler }, { assignMissingPgSlugs }] = await Promise.all([
   import('./app.js'),
   import('./services/pg-rent-scheduler.js'),
-  import('./services/pg-rent-reminders.js')
+  import('./services/pg-rent-reminders.js'),
+  import('./utils/pg-slug.js')
 ]);
+
+const backfilledSlugs = await assignMissingPgSlugs(prisma);
+if (backfilledSlugs) console.log(`[PG host routing] Assigned ${backfilledSlugs} property slugs`);
 
 const PORT = process.env.PORT || 4000;
 

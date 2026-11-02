@@ -1,7 +1,10 @@
 import { useRef, useState } from 'react';
 import { ImagePlus, Loader2, MessageCircle, Mic, Send, Square, X } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
+import { useAuth } from '../context/AuthContext';
 
 type ChatMsg = { from: 'user' | 'assistant'; text: string };
 
@@ -73,6 +76,7 @@ async function blobToWav16k(blob: Blob): Promise<Blob> {
 }
 
 export default function AIChatPanel() {
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
@@ -88,19 +92,21 @@ export default function AIChatPanel() {
   const chunksRef = useRef<Blob[]>([]);
   const stopTimerRef = useRef<number | null>(null);
 
-  const send = async (confirmationId?: string) => {
+  const send = async (confirmationId?: string, cancelConfirmationId?: string) => {
     const text = input.trim();
-    if ((!text && !confirmationId) || busy) return;
+    if ((!text && !confirmationId && !cancelConfirmationId) || busy) return;
     setBusy(true);
     if (text) setMessages((current) => [...current, { from: 'user', text: photo ? `${text} [photo attached]` : text }]);
     const imageDataUrl = photo;
     setInput('');
     setPhoto(null);
     try {
-      const response = await api.post('/pg/ai/chat', { message: text, sessionId: sessionId || undefined, confirmationId, imageDataUrl: imageDataUrl || undefined });
+      const response = await api.post('/pg/ai/chat', { message: text, sessionId: sessionId || undefined, confirmationId, cancelConfirmationId, imageDataUrl: imageDataUrl || undefined });
       if (response.data.sessionId) setSessionId(response.data.sessionId);
       setPending(response.data.needsConfirmation || null);
-      setMessages((current) => [...current, { from: 'assistant', text: response.data.reply }]);
+      setMessages((current) => cancelConfirmationId
+        ? [{ from: 'assistant', text: response.data.reply }]
+        : [...current, { from: 'assistant', text: response.data.reply }]);
     } catch (error: unknown) {
       const failure = (error as { response?: { status?: number; data?: { message?: string } } })?.response;
       if (failure?.status === 503) {
@@ -198,9 +204,30 @@ export default function AIChatPanel() {
         <button onClick={() => setOpen(false)} aria-label="Close assistant" className="p-1 hover:bg-white/10"><X className="h-4 w-4" /></button>
       </header>
       <div className="flex-1 space-y-3 overflow-y-auto p-4 text-sm">
-        {!messages.length && <p className="text-slate-500">Ask about PGs, availability, your booking, or — for owners — occupancy and dues. Example: “men’s PG near Sholinganallur under ₹9000 with food”. Attach a photo for maintenance issues, or tap the mic for a voice note.</p>}
+        {!messages.length && <p className="text-slate-500">{user?.role === 'PG_TENANT'
+          ? 'Ask about your stay, rent balance or maintenance requests. You can also ask to report an issue or change your meal preference.'
+          : ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'].includes(user?.role || '')
+            ? 'Ask about occupancy, outstanding rent, expenses or operations. The assistant will ask before any action.'
+            : 'Ask about PGs, availability, or your booking. You can also prepare a booking request, attach an issue photo, or record a voice note.'}</p>}
         {messages.map((msg, i) => (
-          <p key={i} className={`max-w-[85%] px-3 py-2 ${msg.from === 'user' ? 'ml-auto bg-[#02224B] text-white' : 'bg-slate-100 text-slate-800'}`}>{msg.text}</p>
+          <div key={i} className={`max-w-[90%] px-3 py-2 ${msg.from === 'user' ? 'ml-auto bg-[#02224B] text-white' : 'bg-slate-100 text-slate-800'}`}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+                h1: ({ children }) => <h3 className="mb-2 text-base font-semibold">{children}</h3>,
+                h2: ({ children }) => <h3 className="mb-2 text-sm font-semibold">{children}</h3>,
+                h3: ({ children }) => <h3 className="mb-1 font-semibold">{children}</h3>,
+                ul: ({ children }) => <ul className="mb-2 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>,
+                ol: ({ children }) => <ol className="mb-2 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>,
+                li: ({ children }) => <li className="pl-0.5">{children}</li>,
+                strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                code: ({ children }) => <code className="rounded bg-black/5 px-1 py-0.5 text-[0.92em]">{children}</code>
+              }}
+            >
+              {msg.text}
+            </ReactMarkdown>
+          </div>
         ))}
         {(busy || transcribing) && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
       </div>
@@ -222,7 +249,7 @@ export default function AIChatPanel() {
           <p className="text-amber-900">{pending.preview}</p>
           <div className="mt-2 flex gap-2">
             <button onClick={() => { setPending(null); void send(pending.confirmationId); }} className="bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white">Confirm</button>
-            <button onClick={() => setPending(null)} className="border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Cancel</button>
+            <button onClick={() => void send(undefined, pending.confirmationId)} className="border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Cancel</button>
           </div>
         </div>
       )}

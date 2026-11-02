@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../app.js';
+import { createUniquePgSlug } from '../utils/pg-slug.js';
 const db = new Proxy({}, {
     get: (_target, property) => prisma[property]
 });
@@ -58,6 +59,7 @@ export const createPgOperator = async (req, res) => {
             });
             const property = await tx.pGProperty.create({
                 data: {
+                    slug: await createUniquePgSlug(tx, propertyName),
                     name: propertyName.trim(),
                     address: address.trim(),
                     locality: locality.trim(),

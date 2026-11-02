@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import { LogIn, Lock, Loader2, Eye, EyeOff, X, Phone, MessageCircle } from 'lucide-react';
 import logo from '../assets/logo_bg_black.png';
+import { resolveAppHost } from '../utils/pg-host';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -27,9 +28,12 @@ export default function LoginPage() {
       login(response.data.token, loggedUser);
 
       const searchParams = new URLSearchParams(location.search);
+      const host = resolveAppHost();
       const defaultUrl = loggedUser?.role === 'SUPER_ADMIN'
         ? '/pg/operators'
-        : '/pg/manage';
+        : loggedUser?.role === 'PG_TENANT'
+          ? '/resident'
+          : host.kind === 'property' ? '/owner/manage' : '/pg/manage';
       const redirectUrl = searchParams.get('redirect') || defaultUrl;
 
       navigate(redirectUrl, { replace: true });
