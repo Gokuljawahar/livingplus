@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { createPgOperator, deletePgOperatorProperty, listPgOperators } from '../controllers/pg-admin.controller.js';
-import { cancelBookingRequest, checkInTenant, checkOutTenant, createBookingRequest, createMaintenanceTicket, createProperty, createPropertyStaff, createRentEntry, createRoom, deleteProperty, getPublicConfig, listTenantStays, submitTenantNotice, cancelTenantNotice, listAuditLogs, getOwnerReport, getOwnerSummary, getPublicBookingStatus, listOwnerBookings, listOwnerProperties, listOwnerRentEntries, sendRentReminders, listOwnerExpenses, createOwnerExpense, deleteOwnerExpense, listElectricityBills, proposeElectricityBill, approveElectricityBill, listOwnerTenants, listOwnerTickets, listTenantTickets, createTenantTicket, updateResidentProfile, listResidentNotifications, markResidentNotificationRead, createResidentPaymentClaim, listResidentPaymentClaims, listOwnerPaymentClaims, reviewPaymentClaim, markDepositRefunded, listProperties, listPropertyStaff, recordRentPayment, removePropertyStaff, updateBedStatus, updateBookingStatus, updateMaintenanceStatus, updateProperty, updateTenantProfile } from '../controllers/pg.controller.js';
+import { cancelBookingRequest, checkInTenant, checkOutTenant, createBookingRequest, createMaintenanceTicket, createProperty, createPropertyStaff, createRentEntry, createRoom, deleteProperty, getPublicConfig, listTenantStays, submitTenantNotice, cancelTenantNotice, listAuditLogs, getOwnerReport, getOwnerSummary, getPublicBookingStatus, listGuestBookings, listOwnerBookings, listOwnerProperties, listOwnerRentEntries, sendRentReminders, listOwnerExpenses, createOwnerExpense, deleteOwnerExpense, listElectricityBills, proposeElectricityBill, approveElectricityBill, listOwnerTenants, listOwnerTickets, listTenantTickets, createTenantTicket, updateResidentProfile, listResidentNotifications, markResidentNotificationRead, createResidentPaymentClaim, listResidentPaymentClaims, listOwnerPaymentClaims, reviewPaymentClaim, markDepositRefunded, listProperties, listPropertyStaff, recordRentPayment, removePropertyStaff, updateBedStatus, updateBookingStatus, updateMaintenanceStatus, updateProperty, updateTenantProfile } from '../controllers/pg.controller.js';
 import multer from 'multer';
 import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware.js';
 import { getAiStatus, postChat, postTranscribe } from '../controllers/ai.controller.js';
@@ -31,6 +31,7 @@ router.post('/tenant/:tenantId/notice', authenticate, submitTenantNotice);
 router.post('/tenant/:tenantId/notice-cancel', authenticate, cancelTenantNotice);
 router.get('/owner/activity', authenticate, listAuditLogs);
 router.get('/properties', listProperties);
+router.get('/bookings/mine', listGuestBookings);
 router.post('/bookings', createBookingRequest);
 router.post('/bookings/:bookingRef/cancel', cancelBookingRequest);
 router.get('/bookings/:bookingRef/status', getPublicBookingStatus);

@@ -19,6 +19,7 @@ import {
   getOwnerReport,
   getOwnerSummary,
   getPublicBookingStatus,
+  listGuestBookings,
   listOwnerBookings,
   listOwnerProperties,
   listOwnerRentEntries,
@@ -85,6 +86,7 @@ router.post('/tenant/:tenantId/notice', authenticate, submitTenantNotice);
 router.post('/tenant/:tenantId/notice-cancel', authenticate, cancelTenantNotice);
 router.get('/owner/activity', authenticate, listAuditLogs);
 router.get('/properties', listProperties);
+router.get('/bookings/mine', listGuestBookings);
 router.post('/bookings', createBookingRequest);
 router.post('/bookings/:bookingRef/cancel', cancelBookingRequest);
 router.get('/bookings/:bookingRef/status', getPublicBookingStatus);

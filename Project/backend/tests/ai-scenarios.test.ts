@@ -153,6 +153,26 @@ describe('discovery and availability (guest)', () => {
 });
 
 describe('resident maintenance requests', () => {
+  it('updates property forms with blank or numeric coordinates', async () => {
+    const { updateProperty } = await import('../src/controllers/pg.controller.js');
+    const response = {
+      statusCode: 200, body: undefined as any,
+      status(code: number) { this.statusCode = code; return this; },
+      json(body: unknown) { this.body = body; }
+    };
+    const request = { ...userReq(ids.owner), params: { propertyId: ids.prop.id }, body: { latitude: '', longitude: '' } } as any;
+    await updateProperty(request, response as any);
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.latitude, null);
+    request.body = { latitude: '13.01', longitude: '80.22' };
+    await updateProperty(request, response as any);
+    assert.equal(response.body.latitude, 13.01);
+    assert.equal(response.body.longitude, 80.22);
+    request.body = { latitude: '91' };
+    await updateProperty(request, response as any);
+    assert.equal(response.statusCode, 400);
+  });
+
   it('creates and lists only tickets for the resident stay on the current PG', async () => {
     const { createTenantTicket, listTenantTickets, listOwnerTickets } = await import('../src/controllers/pg.controller.js');
     const request = {

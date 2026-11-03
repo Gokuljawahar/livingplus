@@ -21,6 +21,33 @@ function toUserResponse(user) {
 function createToken(user, propertyId) {
     return jwt.sign({ userId: user.id, role: user.role, ...(propertyId ? { propertyId } : {}) }, getJwtSecret(), { expiresIn: '1d' });
 }
+/**
+ * Single phone sign-in: if this number has an active stay, attach its resident
+ * session (same proof of ownership as a resident OTP). Returns null when there
+ * is no stay, or { forbidden: true } when the number belongs to a staff account.
+ */
+async function residentSessionForPhone(phone, propertyId) {
+    const digits = phone.startsWith('91') && phone.length === 12 ? phone.slice(2) : phone;
+    const tenant = await prisma.pGTenant.findFirst({
+        where: {
+            phone: { in: [...new Set([phone, digits])] },
+            status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'RESERVED'] },
+            ...(propertyId ? { propertyId } : {})
+        },
+        select: { id: true, name: true, propertyId: true }
+    });
+    if (!tenant)
+        return null;
+    let user = await prisma.user.findFirst({ where: { phone } });
+    if (!user) {
+        user = await prisma.user.create({
+            data: { name: tenant.name, phone, password: await bcrypt.hash(randomUUID(), 10), role: 'PG_TENANT' }
+        });
+    }
+    if (user.role !== 'PG_TENANT')
+        return { forbidden: true };
+    return { token: createToken(user, propertyId || tenant.propertyId), user: toUserResponse(user) };
+}
 export const login = async (req, res) => {
     const { email, phone, password } = req.body;
     const loginId = String(phone || email || '').trim();
@@ -157,10 +184,15 @@ export const requestOtp = async (req, res) => {
     }
     try {
         const recent = await prisma.otpCode.count({
-            where: { phone, purpose, propertyId: propertyId || null, consumedAt: null, createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) } }
+            where: { phone, purpose, propertyId: propertyId || null, consumedAt: null, verifiedToken: null, createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) } }
         });
         if (recent >= 3)
             return res.status(429).json({ message: 'Too many codes requested. Try again in 10 minutes.' });
+        // Retire older pending codes so only the newest code works.
+        await prisma.otpCode.updateMany({
+            where: { phone, purpose, propertyId: propertyId || null, consumedAt: null, verifiedToken: null },
+            data: { consumedAt: new Date() }
+        });
         const code = String(randomInt(100000, 1000000));
         await sendSms(phone, `Your LivingPlus verification code is ${code}. It expires in 5 minutes.`);
         await prisma.otpCode.create({
@@ -204,28 +236,18 @@ export const verifyOtp = async (req, res) => {
             data: { verifiedToken, tokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000) }
         });
         if (purpose === 'TENANT_LOGIN') {
-            const digits = phone.startsWith('91') && phone.length === 12 ? phone.slice(2) : phone;
-            const tenant = await prisma.pGTenant.findFirst({
-                where: {
-                    phone: { in: [...new Set([phone, digits])] },
-                    status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'RESERVED'] },
-                    ...(propertyId ? { propertyId } : {})
-                },
-                select: { id: true, name: true, propertyId: true }
-            });
-            if (!tenant)
+            const resident = await residentSessionForPhone(phone, propertyId);
+            if (!resident)
                 return res.status(404).json({ message: 'No active stay found for this phone number' });
-            let user = await prisma.user.findFirst({ where: { phone } });
-            if (!user) {
-                user = await prisma.user.create({
-                    data: { name: tenant.name, phone, password: await bcrypt.hash(randomUUID(), 10), role: 'PG_TENANT' }
-                });
-            }
-            if (user.role !== 'PG_TENANT')
+            if ('forbidden' in resident)
                 return res.status(403).json({ message: 'This account cannot sign in as a resident' });
-            return res.json({ token: createToken(user, propertyId || tenant.propertyId), user: toUserResponse(user) });
+            return res.json({ token: resident.token, user: resident.user });
         }
-        res.json({ phoneToken: verifiedToken });
+        const resident = await residentSessionForPhone(phone, propertyId);
+        res.json({
+            phoneToken: verifiedToken,
+            ...(!resident || 'forbidden' in resident ? {} : { resident })
+        });
     }
     catch (error) {
         console.error('PG OTP verify error:', error);

@@ -10,6 +10,7 @@ export declare const updateBedStatus: (req: Request, res: Response) => Promise<a
 export declare const createBookingRequest: (req: Request, res: Response) => Promise<any>;
 export declare const cancelBookingRequest: (req: Request, res: Response) => Promise<any>;
 export declare const getPublicBookingStatus: (req: Request, res: Response) => Promise<any>;
+export declare const listGuestBookings: (req: Request, res: Response) => Promise<any>;
 export declare const listOwnerBookings: (req: Request, res: Response) => Promise<any>;
 export declare const updateBookingStatus: (req: Request, res: Response) => Promise<any>;
 export declare const checkInTenant: (req: Request, res: Response) => Promise<any>;

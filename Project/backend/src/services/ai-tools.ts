@@ -43,17 +43,20 @@ export async function actorFromRequest(req: any): Promise<Actor> {
       const all = await db.pGProperty.findMany({ select: { id: true } });
       propertyIds = all.map((p: any) => p.id);
     }
-  } else if (role === 'PG_TENANT' && phones.length && hostPropertyId) {
+  } else if (role === 'PG_TENANT' && phones.length && (hostPropertyId || user.propertyId)) {
+    const tenantPropertyId = hostPropertyId || String(user.propertyId);
     const stays = await db.pGTenant.findMany({
-      where: { propertyId: hostPropertyId, phone: { in: phones }, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
+      where: { propertyId: tenantPropertyId, phone: { in: phones }, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
       select: { propertyId: true }
     });
-    if (stays.length) propertyIds = [hostPropertyId];
+    if (stays.length) propertyIds = [tenantPropertyId];
   } else if (user.userId) {
     const access = await db.pGPropertyAccess.findMany({ where: { userId: String(user.userId) }, select: { propertyId: true } });
     propertyIds = access.map((a: any) => a.propertyId).filter((id: string) => !hostPropertyId || id === hostPropertyId);
   }
-  return { userId: user.userId ? String(user.userId) : null, role, phones, propertyIds, isSuperAdmin, ...(hostPropertyId ? { propertyId: hostPropertyId } : {}) };
+  const tokenPropertyId = typeof user.propertyId === 'string' ? user.propertyId : undefined;
+  const effectivePropertyId = hostPropertyId || (role === 'PG_TENANT' ? tokenPropertyId : undefined);
+  return { userId: user.userId ? String(user.userId) : null, role, phones, propertyIds, isSuperAdmin, ...(effectivePropertyId ? { propertyId: effectivePropertyId } : {}) };
 }
 
 export interface ToolExecutor {

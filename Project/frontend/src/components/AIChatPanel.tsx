@@ -1,10 +1,20 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ImagePlus, Loader2, MessageCircle, Mic, Send, Square, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
+import { OWNER_USER_KEY, RESIDENT_USER_KEY } from '../utils/session';
+
+function readStoredRole(key: string): string | null {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+    return typeof parsed?.role === 'string' ? parsed.role : null;
+  } catch {
+    return null;
+  }
+}
 
 type ChatMsg = { from: 'user' | 'assistant'; text: string };
 
@@ -75,8 +85,70 @@ async function blobToWav16k(blob: Blob): Promise<Blob> {
   }
 }
 
-export default function AIChatPanel() {
+type AssistantPersona = 'guest' | 'resident' | 'warden' | 'owner' | 'superadmin';
+
+// Welcome text and input hint stay in one place per persona so the panel
+// always describes what that role's agent can actually see and do.
+const PERSONA_COPY: Record<AssistantPersona, { welcome: string; placeholder: string }> = {
+  guest: {
+    welcome: 'Looking for a PG? Ask me to search by area, budget, or room type, compare stays, or start a booking request. Already applied? Track it under My requests.',
+    placeholder: 'Search PGs by area, budget, or room type…'
+  },
+  resident: {
+    welcome: 'Ask about your own stay, rent balance or maintenance requests on your PG. You can also report an issue or change your meal preference. I can only ever see your stay — never other residents or owner finances.',
+    placeholder: 'Ask about your stay, rent, or maintenance…'
+  },
+  warden: {
+    welcome: 'Ask about occupancy, bookings, maintenance or expenses on your assigned properties. The assistant will ask before any action. Dues detail lives in the owner rent ledger, which I cannot see.',
+    placeholder: 'Ask about occupancy, bookings, or maintenance…'
+  },
+  owner: {
+    welcome: 'Ask about occupancy, outstanding rent, expenses or operations across your properties. The assistant will ask before any action.',
+    placeholder: 'Ask about occupancy, rent, or expenses…'
+  },
+  superadmin: {
+    welcome: 'Ask about occupancy, dues, expenses or operations across every property. The assistant will ask before any action.',
+    placeholder: 'Ask about anything across all properties…'
+  }
+};
+
+interface AIChatPanelProps {
+  /** Text-only assistant: hides photo reports and voice notes until onboarding. */
+  limited?: boolean;
+  /** Hides the floating bubble; the parent opens the panel via openRequest. */
+  hideLauncher?: boolean;
+  /** Open the panel (and prefill the box) with a search query. */
+  openRequest?: { query: string; nonce: number } | null;
+}
+
+export default function AIChatPanel({ limited = false, hideLauncher = false, openRequest = null }: AIChatPanelProps) {
   const { user } = useAuth();
+  // The global auth context only loads on full page load, so after SPA
+  // navigation it can still hold a previous session (e.g. an owner account
+  // while viewing the resident portal). Resolve the persona from the stored
+  // session for this page instead, so residents never see owner wording.
+  const path = window.location.pathname;
+  const isResidentPage = path === '/resident' || path.startsWith('/pg/resident');
+  const residentRole = user?.role === 'PG_TENANT' ? user.role : readStoredRole(RESIDENT_USER_KEY);
+  const ownerRole = user?.role && user.role !== 'PG_TENANT' ? user.role : readStoredRole(OWNER_USER_KEY);
+
+  const staffPersona: AssistantPersona | null =
+    ownerRole === 'PG_OWNER' ? 'owner'
+    : ownerRole === 'PG_WARDEN' ? 'warden'
+    : ownerRole === 'SUPER_ADMIN' ? 'superadmin'
+    : null;
+
+  let persona: AssistantPersona = 'guest';
+  if (isResidentPage) {
+    persona = residentRole === 'PG_TENANT' ? 'resident' : 'guest';
+  } else if (residentRole === 'PG_TENANT' && !ownerRole) {
+    persona = 'resident';
+  } else if (staffPersona) {
+    persona = staffPersona;
+  } else if (residentRole === 'PG_TENANT') {
+    persona = 'resident';
+  }
+  const copy = PERSONA_COPY[persona];
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
@@ -88,6 +160,7 @@ export default function AIChatPanel() {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const stopTimerRef = useRef<number | null>(null);
@@ -189,7 +262,24 @@ export default function AIChatPanel() {
     }
   };
 
+  // Opening from the global search is derived state, applied during render
+  // (the documented alternative to a setState-in-effect).
+  const [lastNonce, setLastNonce] = useState(0);
+  if (openRequest && openRequest.nonce !== lastNonce) {
+    setLastNonce(openRequest.nonce);
+    setOpen(true);
+    if (openRequest.query.trim()) setInput(openRequest.query.trim());
+  }
+
+  useEffect(() => {
+    if (lastNonce > 0 && open) {
+      const timer = window.setTimeout(() => inputRef.current?.focus(), 50);
+      return () => window.clearTimeout(timer);
+    }
+  }, [lastNonce, open]);
+
   if (!open) {
+    if (hideLauncher) return null;
     return (
       <button onClick={() => setOpen(true)} aria-label="Open PG assistant" className="fixed bottom-5 right-5 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-[#02224B] text-white shadow-lg hover:bg-[#0A3B75]">
         <MessageCircle className="h-5 w-5" />
@@ -204,11 +294,16 @@ export default function AIChatPanel() {
         <button onClick={() => setOpen(false)} aria-label="Close assistant" className="p-1 hover:bg-white/10"><X className="h-4 w-4" /></button>
       </header>
       <div className="flex-1 space-y-3 overflow-y-auto p-4 text-sm">
-        {!messages.length && <p className="text-slate-500">{user?.role === 'PG_TENANT'
-          ? 'Ask about your stay, rent balance or maintenance requests. You can also ask to report an issue or change your meal preference.'
-          : ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'].includes(user?.role || '')
-            ? 'Ask about occupancy, outstanding rent, expenses or operations. The assistant will ask before any action.'
-            : 'Ask about PGs, availability, or your booking. You can also prepare a booking request, attach an issue photo, or record a voice note.'}</p>}
+        {!messages.length && (
+          <>
+            <p className="text-slate-500">{copy.welcome}</p>
+            {limited && (
+              <p className="border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                Browsing as a guest — onboard as a resident to unlock photo issue reports and voice notes.
+              </p>
+            )}
+          </>
+        )}
         {messages.map((msg, i) => (
           <div key={i} className={`max-w-[90%] px-3 py-2 ${msg.from === 'user' ? 'ml-auto bg-[#02224B] text-white' : 'bg-slate-100 text-slate-800'}`}>
             <ReactMarkdown
@@ -255,11 +350,15 @@ export default function AIChatPanel() {
       )}
       <form onSubmit={(e) => { e.preventDefault(); void send(); }} className="flex gap-2 border-t border-slate-200 p-3">
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { void attachPhoto(e.target.files?.[0]); e.target.value = ''; }} />
-        <button type="button" onClick={() => fileRef.current?.click()} aria-label="Attach a photo" className="px-2 text-slate-500 hover:text-slate-800"><ImagePlus className="h-4 w-4" /></button>
-        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask about PGs…" className="w-full border border-slate-300 px-3 py-2 text-sm" />
-        <button type="button" onClick={() => void toggleRecording()} aria-label={recording ? 'Stop recording' : 'Record a voice note'} className={`px-2 ${recording ? 'text-red-600' : 'text-slate-500 hover:text-slate-800'}`}>
-          {recording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-        </button>
+        {!limited && (
+          <button type="button" onClick={() => fileRef.current?.click()} aria-label="Attach a photo" className="px-2 text-slate-500 hover:text-slate-800"><ImagePlus className="h-4 w-4" /></button>
+        )}
+        <input ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} placeholder={copy.placeholder} aria-label={copy.placeholder} className="w-full border border-slate-300 px-3 py-2 text-sm" />
+        {!limited && (
+          <button type="button" onClick={() => void toggleRecording()} aria-label={recording ? 'Stop recording' : 'Record a voice note'} className={`px-2 ${recording ? 'text-red-600' : 'text-slate-500 hover:text-slate-800'}`}>
+            {recording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+          </button>
+        )}
         <button disabled={busy} aria-label="Send" className="bg-[#02224B] px-3 text-white disabled:opacity-60"><Send className="h-4 w-4" /></button>
       </form>
     </section>

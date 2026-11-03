@@ -20,7 +20,7 @@ export function resolvePgHost(db: any) {
     let propertyId: string | undefined;
     if (slug) {
       const property = await db.pGProperty.findFirst({
-        where: { slug, status: 'ACTIVE' },
+        where: { slug },
         select: { id: true }
       });
       if (!property) {

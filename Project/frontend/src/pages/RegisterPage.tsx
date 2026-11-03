@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { PhoneInput } from '../components/PhoneInput';
-import { Building2, BedDouble, ClipboardList, Loader2, Eye, EyeOff } from 'lucide-react';
+import { Building2, BedDouble, ClipboardList, Loader2 } from 'lucide-react';
+import PasswordInput from '../components/PasswordInput';
 import api from '../api/axios';
 import toast from 'react-hot-toast';
 import LogoLoader from '../components/LogoLoader';
@@ -32,8 +33,6 @@ export default function RegisterPage() {
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
     if (resolveAppHost().kind !== 'public') navigate('/', { replace: true });
@@ -312,37 +311,31 @@ export default function RegisterPage() {
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Set Password</label>
-                    <div className="relative">
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={formData.password}
-                        onChange={(e) => {
-                          setFormData({ ...formData, password: e.target.value });
-                          if (errors.password) setErrors({ ...errors, password: '' });
-                        }}
-                        className={`w-full border border-slate-200 bg-slate-50 px-4 py-3 pr-11 focus:border-[#02224B] focus:ring-[#02224B] ${errors.password ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
-                        placeholder="••••••••"
-                      />
-                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                        {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                      </button>
-                    </div>
+                    <PasswordInput
+                      value={formData.password}
+                      autoComplete="new-password"
+                      ariaLabel="Set password"
+                      onChange={(value) => {
+                        setFormData({ ...formData, password: value });
+                        if (errors.password) setErrors({ ...errors, password: '' });
+                      }}
+                      inputClassName={`border border-slate-200 px-4 ${errors.password ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'focus:border-[#02224B] focus:ring-[#02224B]'}`}
+                    />
                     {errors.password ? <p className="mt-1 text-xs text-red-500">{errors.password}</p> : <p className="mt-1 text-xs text-slate-400">Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special</p>}
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Confirm Password</label>
-                    <div className="relative">
-                      <input type={showConfirmPassword ? 'text' : 'password'} value={formData.confirmPassword} onChange={(e) => {
-                        setFormData({ ...formData, confirmPassword: e.target.value });
+                    <PasswordInput
+                      value={formData.confirmPassword}
+                      autoComplete="new-password"
+                      ariaLabel="Confirm password"
+                      onChange={(value) => {
+                        setFormData({ ...formData, confirmPassword: value });
                         if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: '' });
-                      }} className={`w-full border border-slate-200 bg-slate-50 px-4 py-3 pr-11 focus:border-[#02224B] focus:ring-[#02224B] ${errors.confirmPassword ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
-                        placeholder="••••••••"
-                      />
-                      <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                        {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                      </button>
-                    </div>
+                      }}
+                      inputClassName={`border border-slate-200 px-4 ${errors.confirmPassword ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'focus:border-[#02224B] focus:ring-[#02224B]'}`}
+                    />
                     {errors.confirmPassword && (
                       <p className="mt-1 text-xs text-red-500">{errors.confirmPassword}</p>
                     )}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BedDouble, Building2, Check, ClipboardList, Clock, Download, FileText, IndianRupee, Loader2, Plus, Users, Wallet, Wrench, X, Zap } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
@@ -6,6 +6,7 @@ import { SecureImage } from '../components/SecureImage';
 import { MapPicker } from '../components/MapPicker';
 import { downloadXlsx } from '../utils/xlsx';
 import { pgHostUrl, resolveAppHost } from '../utils/pg-host';
+import { useSidebar } from '../context/SidebarContext';
 
 type Activity = { id: string; action: string; entityType?: string | null; entityId?: string | null; detail?: string | null; actorName?: string | null; createdAt: string; propertyId: string };
 type Property = { id: string; name: string; description?: string | null; address: string; locality: string; contactPhone?: string | null; upiId?: string | null; city: string; latitude?: number | null; longitude?: number | null; genderPolicy: string; amenities: string[]; houseRules: string[]; photoUrls: string[]; rooms: { id: string; roomNumber: string; monthlyRent: number; depositAmount: number; maintenanceFee: number; utilitiesSurcharge: number; foodCharge: number; roomType: string; beds: { id: string; label: string; status: string; maintenanceNote?: string | null }[] }[] };
@@ -30,6 +31,8 @@ export default function PGManagement() {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [rentEntries, setRentEntries] = useState<RentEntry[]>([]);
   const [paymentClaims, setPaymentClaims] = useState<PaymentClaim[]>([]);
+  const [rejectingClaimId, setRejectingClaimId] = useState('');
+  const [claimRejectionReason, setClaimRejectionReason] = useState('');
   const [reminding, setReminding] = useState(false);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [expenseTotal, setExpenseTotal] = useState(0);
@@ -194,6 +197,13 @@ export default function PGManagement() {
         startNewProperty();
       }
       toast.success('Property deleted');
+      const host = resolveAppHost();
+      if (host.kind === 'property') {
+        const destination = new URL(window.location.origin);
+        destination.hostname = destination.hostname.slice(host.slug.length + 1);
+        window.location.assign(destination.href);
+        return;
+      }
       refresh();
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Could not delete property');
@@ -524,18 +534,20 @@ export default function PGManagement() {
   };
 
   const reviewPaymentClaim = async (claim: PaymentClaim, status: 'APPROVED' | 'REJECTED') => {
-    const responseNote = status === 'REJECTED' ? window.prompt('Reason for rejecting this payment reference?')?.trim() || '' : '';
+    const responseNote = status === 'REJECTED' ? claimRejectionReason.trim() : '';
     if (status === 'REJECTED' && !responseNote) return;
     try {
       await api.patch(`/pg/owner/payment-claims/${claim.id}`, { status, responseNote });
       toast.success(status === 'APPROVED' ? 'Payment verified and ledger updated' : 'Payment claim rejected');
+      setRejectingClaimId('');
+      setClaimRejectionReason('');
       refresh();
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Could not review payment claim');
     }
   };
 
-  const views = [
+  const views = useMemo(() => [
     { id: 'overview', label: 'Overview', icon: Building2 },
     { id: 'properties', label: 'Properties & Beds', icon: BedDouble },
     { id: 'bookings', label: 'Bookings', icon: ClipboardList },
@@ -550,15 +562,19 @@ export default function PGManagement() {
       { id: 'reports' as const, label: 'Reports', icon: FileText },
       { id: 'staff' as const, label: 'Staff', icon: Users }
     ] : [])
-  ] as const;
+  ] as const, [summary.canManageStaff]);
+
+  const { setSectionNav } = useSidebar();
+
+  useEffect(() => {
+    setSectionNav(views.map(({ id, label, icon }) => ({ id, label, icon, active: id === view, onSelect: () => setView(id) })));
+    return () => setSectionNav(null);
+  }, [views, view, setSectionNav]);
 
   return (
       <div className="space-y-6 text-slate-900">
-        <div className="flex flex-col gap-5 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-5 border-b border-slate-200 pb-5">
           <div><p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-700">Property operations</p><h1 className="mt-1 text-2xl font-bold text-[#02224B]">Owner workspace</h1></div>
-          <nav className="flex gap-1 overflow-x-auto" aria-label="PG operations">
-            {views.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setView(id)} className={`inline-flex shrink-0 items-center gap-2 border-b-2 px-3 py-2 text-sm font-semibold ${view === id ? 'border-[#FEB109] text-[#02224B]' : 'border-transparent text-slate-500 hover:text-slate-900'}`}><Icon className="h-4 w-4" />{label}</button>)}
-          </nav>
         </div>
 
         {loading ? <div className="flex justify-center py-20"><Loader2 className="h-7 w-7 animate-spin text-[#02224B]" /></div> : (
@@ -573,10 +589,16 @@ export default function PGManagement() {
                     <p className="mt-1 text-sm text-slate-500">UPI reference: {claim.reference} · Submitted {new Date(claim.createdAt).toLocaleString()}</p>
                     {claim.responseNote && <p className="mt-1 text-sm text-red-700">{claim.responseNote}</p>}
                   </div>
-                  {claim.status === 'PENDING' && <div className="flex gap-2">
-                    <button onClick={() => void reviewPaymentClaim(claim, 'REJECTED')} className="border border-red-200 px-3 py-2 text-sm font-semibold text-red-700">Reject</button>
+                  {claim.status === 'PENDING' && rejectingClaimId !== claim.id && <div className="flex gap-2">
+                    <button onClick={() => { setRejectingClaimId(claim.id); setClaimRejectionReason(''); }} className="border border-red-200 px-3 py-2 text-sm font-semibold text-red-700">Reject</button>
                     <button onClick={() => void reviewPaymentClaim(claim, 'APPROVED')} className="bg-emerald-700 px-3 py-2 text-sm font-semibold text-white">Verify and credit</button>
                   </div>}
+                  {claim.status === 'PENDING' && rejectingClaimId === claim.id && <form onSubmit={(event) => { event.preventDefault(); void reviewPaymentClaim(claim, 'REJECTED'); }} className="flex min-w-0 flex-col gap-2 md:w-80">
+                    <label className="text-sm text-slate-700">Reason for rejecting payment
+                      <input required maxLength={300} value={claimRejectionReason} onChange={(event) => setClaimRejectionReason(event.target.value)} className="mt-1 block w-full border border-slate-300 px-3 py-2" />
+                    </label>
+                    <div className="flex gap-2"><button className="bg-red-700 px-3 py-2 text-sm font-semibold text-white">Confirm rejection</button><button type="button" onClick={() => setRejectingClaimId('')} className="border border-slate-300 px-3 py-2 text-sm">Cancel</button></div>
+                  </form>}
                 </article>)}
                 {!paymentClaims.length && <p className="py-8 text-center text-sm text-slate-500">No resident payment claims.</p>}
               </div>

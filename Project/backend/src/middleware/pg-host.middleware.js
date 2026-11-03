@@ -16,7 +16,7 @@ export function resolvePgHost(db) {
         let propertyId;
         if (slug) {
             const property = await db.pGProperty.findFirst({
-                where: { slug, status: 'ACTIVE' },
+                where: { slug },
                 select: { id: true }
             });
             if (!property) {

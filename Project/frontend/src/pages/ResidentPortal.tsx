@@ -4,6 +4,8 @@ import toast from 'react-hot-toast';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import { RESIDENT_TOKEN_KEY } from '../utils/session';
+import { resolveAppHost } from '../utils/pg-host';
+import { useOtpCooldown } from '../hooks/useOtpCooldown';
 import AIChatPanel from '../components/AIChatPanel';
 
 type Stay = {
@@ -32,6 +34,8 @@ export default function ResidentPortal() {
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const { cooldown, startCooldown } = useOtpCooldown();
+  const [activeTab, setActiveTab] = useState<'stays' | 'maintenance' | 'notifications' | 'profile'>('stays');
   const [stays, setStays] = useState<Stay[]>([]);
   const [tickets, setTickets] = useState<MaintenanceTicket[]>([]);
   const [ticketFormFor, setTicketFormFor] = useState('');
@@ -46,6 +50,8 @@ export default function ResidentPortal() {
   const [paymentFormFor, setPaymentFormFor] = useState('');
   const [paymentForm, setPaymentForm] = useState({ tenantId: '', rentEntryId: '', amount: '', reference: '' });
   const [submittingPayment, setSubmittingPayment] = useState(false);
+  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
+  const canFindPg = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname) || resolveAppHost().kind === 'public';
 
   useEffect(() => {
     if (step !== 'portal') return;
@@ -96,6 +102,7 @@ export default function ResidentPortal() {
       if (response.data.devCode) toast.success(`Demo code: ${response.data.devCode}`);
       else toast.success('Code sent');
       setStep('code');
+      startCooldown();
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Could not send code');
     } finally {
@@ -258,12 +265,20 @@ export default function ResidentPortal() {
           <p className="text-xs font-bold uppercase text-amber-700">Resident access</p>
           <h1 className="mt-1 text-xl font-bold text-[#02224B]">Resident login</h1>
           <p className="mt-1 text-sm text-slate-500">Log in with the phone number on your stay. No password needed.</p>
-          {step === 'phone' ? (
+          {step === 'phone' ? (<>
             <form onSubmit={requestCode} className="mt-5 space-y-3">
               <input required type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" className="w-full border border-slate-300 px-3 py-2.5 text-sm" />
-              <button disabled={loading} className="flex w-full items-center justify-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{loading && <Loader2 className="h-4 w-4 animate-spin" />}Send code</button>
+              <button disabled={loading || cooldown > 0} className="flex w-full items-center justify-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{loading && <Loader2 className="h-4 w-4 animate-spin" />}{cooldown > 0 ? `Resend in ${cooldown}s` : 'Send code'}</button>
             </form>
-          ) : (
+            {canFindPg && (
+              <p className="mt-5 border-t border-slate-100 pt-4 text-center text-sm text-slate-500">
+                Not onboarded yet?{' '}
+                <a href="/pg" className="font-bold text-[#02224B] hover:underline">
+                  Browse PGs as a guest
+                </a>
+              </p>
+            )}
+          </>) : (
             <form onSubmit={verifyCode} className="mt-5 space-y-3">
               <input required aria-label="6-digit verification code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="6-digit code" inputMode="numeric" className="w-full border border-slate-300 px-3 py-2.5 text-sm" />
               <button disabled={loading} className="flex w-full items-center justify-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{loading && <Loader2 className="h-4 w-4 animate-spin" />}Verify & open my stays</button>
@@ -275,29 +290,46 @@ export default function ResidentPortal() {
     );
   }
 
+  const tabs = [
+    { id: 'stays', label: 'My stays', badge: stays.length > 1 ? stays.length : 0 },
+    { id: 'maintenance', label: 'Maintenance', badge: 0 },
+    { id: 'notifications', label: 'Notifications', badge: unreadCount },
+    { id: 'profile', label: 'Profile', badge: 0 }
+  ] as const;
+
   return (
-    <main className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-4">
-          <span className="flex items-center gap-2 font-semibold text-[#02224B]"><Building2 className="h-5 w-5" /> My stays</span>
-          <div className="flex items-center gap-4">
-            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600" aria-label={`${notifications.filter((notification) => !notification.readAt).length} unread notifications`}><Bell className="h-4 w-4" />{notifications.filter((notification) => !notification.readAt).length}</span>
-            <button onClick={logout} className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600"><LogOut className="h-4 w-4" />Sign out</button>
+    <main className="min-h-screen bg-slate-100 text-slate-900">
+      <header className="bg-[#02224B] text-white">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+          <span className="flex items-center gap-2 text-lg font-bold"><Building2 className="h-5 w-5 text-[#FEB109]" /> My stays</span>
+          {stays[0] && <span className="hidden items-center gap-1.5 text-sm font-medium text-blue-100 md:inline-flex"><UserRound className="h-4 w-4" />{stays[0].name}</span>}
+          <div className="ml-auto flex items-center gap-3 text-sm">
+            <span className="inline-flex items-center gap-1.5 font-semibold text-blue-100" aria-label={`${unreadCount} unread notifications`}><Bell className="h-4 w-4" />{unreadCount}</span>
+            {canFindPg ? <a href="/pg" className="font-semibold text-blue-100 hover:text-white">Find a PG</a> : null}
+            <button onClick={logout} className="inline-flex items-center gap-1 font-semibold text-blue-100 hover:text-white"><LogOut className="h-4 w-4" />Sign out</button>
           </div>
         </div>
-      </header>
-      <section className="mx-auto max-w-5xl space-y-4 px-5 py-8">
-        {notifications.length > 0 && <section className="border-y border-slate-200 bg-white px-5 py-4">
-          <h2 className="flex items-center gap-2 font-semibold text-slate-900"><Bell className="h-4 w-4" />Notifications</h2>
-          <div className="mt-2 divide-y divide-slate-100">
-            {notifications.slice(0, 8).map((notification) => <article key={notification.id} className={`flex items-start justify-between gap-4 py-3 ${notification.readAt ? 'opacity-70' : ''}`}>
-              <div><p className="font-medium text-slate-800">{notification.title}</p><p className="mt-1 text-sm text-slate-600">{notification.message}</p><p className="mt-1 text-xs text-slate-400">{new Date(notification.createdAt).toLocaleString()}</p></div>
-              {!notification.readAt && <button onClick={() => void markNotificationRead(notification.id)} aria-label="Mark notification as read" title="Mark as read" className="shrink-0 p-2 text-slate-500 hover:bg-slate-100"><Check className="h-4 w-4" /></button>}
-            </article>)}
+        <nav className="border-t border-white/10" aria-label="Resident sections">
+          <div className="mx-auto flex max-w-5xl items-center gap-1 overflow-x-auto px-4 text-sm" role="tablist">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                role="tab"
+                aria-selected={activeTab === tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex shrink-0 items-center gap-1.5 px-3 py-2 font-semibold ${activeTab === tab.id ? 'text-[#FEB109] underline underline-offset-4' : 'text-blue-100 hover:text-white'}`}
+              >
+                {tab.label}
+                {tab.badge > 0 && <span className="bg-[#FEB109] px-1.5 py-0.5 text-[11px] font-bold text-[#02224B]">{tab.badge}</span>}
+              </button>
+            ))}
           </div>
-        </section>}
-        {!stays.length && <p className="border-y border-slate-200 py-10 text-center text-sm text-slate-500">No stays found for this number.</p>}
-        {stays.map((stay) => (
+        </nav>
+      </header>
+      <section className="mx-auto max-w-5xl px-4 py-6">
+        {activeTab === 'stays' && (<div className="space-y-4">
+          {!stays.length && <p className="border border-slate-200 bg-white py-10 text-center text-sm text-slate-500">No stays found for this number.</p>}
+          {stays.map((stay) => (
           <article key={stay.id} className="border border-slate-200 bg-white p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -343,11 +375,20 @@ export default function ResidentPortal() {
                 </article>)}
               </div>
             </section>}
-            <section className="mt-5 border-t border-slate-100 pt-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><h3 className="font-semibold text-slate-900">Resident profile & KYC</h3><p className="mt-1 text-xs text-slate-500">KYC documents remain private and require PG verification.</p></div>
-                {profileEditingFor !== stay.id && <button onClick={() => editProfile(stay)} className="inline-flex items-center gap-1.5 border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"><UserRound className="h-4 w-4" />Edit profile</button>}
-              </div>
+          </article>
+          ))}
+        </div>)}
+        {activeTab === 'profile' && (<div className="space-y-4">
+          {!stays.length && <p className="border border-slate-200 bg-white py-10 text-center text-sm text-slate-500">No stays found for this number.</p>}
+          {stays.map((stay) => (
+          <article key={stay.id} className="border border-slate-200 bg-white p-5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-100 pb-3">
+              <h2 className="text-lg font-semibold text-[#02224B]">{stay.property.name}</h2>
+              <p className="text-xs font-semibold uppercase text-slate-500">{stay.status.replace('_', ' ')}{stay.bed ? ` · Room ${stay.bed.room.roomNumber}, ${stay.bed.label}` : ''}</p>
+            </div>
+            <section className="pt-4">
+              <div><h3 className="font-semibold text-slate-900">Resident profile & KYC</h3><p className="mt-1 text-xs text-slate-500">KYC documents remain private and require PG verification.</p></div>
+                {profileEditingFor !== stay.id && <div className="mt-3 flex justify-end"><button onClick={() => editProfile(stay)} className="inline-flex items-center gap-1.5 border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"><UserRound className="h-4 w-4" />Edit profile</button></div>}
               <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-600">
                 {stay.permanentAddress && <span>{stay.permanentAddress}</span>}{stay.institutionOrEmployer && <span>{stay.institutionOrEmployer}</span>}{stay.emergencyName && <span>Emergency contact: {stay.emergencyName}{stay.emergencyPhone ? ` · ${stay.emergencyPhone}` : ''}</span>}
                 <span>KYC {stay.kycVerified ? 'verified' : stay.kycDocumentUrl ? 'submitted, awaiting review' : 'not submitted'}</span>
@@ -363,8 +404,19 @@ export default function ResidentPortal() {
                 <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={profileForm.foodOptOut} onChange={(event) => setProfileForm({ ...profileForm, foodOptOut: event.target.checked })} />Opt out of included food</label>
                 <div className="flex gap-2 sm:col-span-2"><button disabled={savingProfile} className="bg-[#02224B] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{savingProfile ? 'Saving…' : 'Save profile'}</button><button type="button" onClick={() => setProfileEditingFor('')} className="border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600">Cancel</button></div>
               </form>}
-            </section>
-            <section className="mt-5 border-t border-slate-100 pt-4">
+              </section>
+            </article>
+          ))}
+        </div>)}
+        {activeTab === 'maintenance' && (<div className="space-y-4">
+          {!stays.length && <p className="border border-slate-200 bg-white py-10 text-center text-sm text-slate-500">No stays found for this number.</p>}
+          {stays.map((stay) => (
+          <article key={stay.id} className="border border-slate-200 bg-white p-5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-100 pb-3">
+              <h2 className="text-lg font-semibold text-[#02224B]">{stay.property.name}</h2>
+              <p className="text-xs font-semibold uppercase text-slate-500">{stay.status.replace('_', ' ')}{stay.bed ? ` · Room ${stay.bed.room.roomNumber}, ${stay.bed.label}` : ''}</p>
+            </div>
+            <section className="pt-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h3 className="flex items-center gap-2 font-semibold text-slate-900"><Wrench className="h-4 w-4 text-slate-500" />Maintenance requests</h3>
                 {['ACTIVE', 'NOTICE_PERIOD'].includes(stay.status) && ticketFormFor !== stay.id && <button onClick={() => openTicketForm(stay.id)} className="inline-flex items-center gap-1.5 border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"><Plus className="h-4 w-4" />Report an issue</button>}
@@ -400,9 +452,25 @@ export default function ResidentPortal() {
                 </div>
               </form>}
               {!['ACTIVE', 'NOTICE_PERIOD'].includes(stay.status) && <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-500"><AlertCircle className="h-3.5 w-3.5" />New requests are available during an active stay.</p>}
+              </section>
+            </article>
+          ))}
+        </div>)}
+        {activeTab === 'notifications' && (<div className="space-y-4">
+          {notifications.length > 0 ? (
+            <section className="border border-slate-200 bg-white px-5 py-4">
+              <h2 className="flex items-center gap-2 font-semibold text-slate-900"><Bell className="h-4 w-4" />Notifications</h2>
+              <div className="mt-2 divide-y divide-slate-100">
+                {notifications.slice(0, 8).map((notification) => <article key={notification.id} className={`flex items-start justify-between gap-4 py-3 ${notification.readAt ? 'opacity-70' : ''}`}>
+                  <div><p className="font-medium text-slate-800">{notification.title}</p><p className="mt-1 text-sm text-slate-600">{notification.message}</p><p className="mt-1 text-xs text-slate-400">{new Date(notification.createdAt).toLocaleString()}</p></div>
+                  {!notification.readAt && <button onClick={() => void markNotificationRead(notification.id)} aria-label="Mark notification as read" title="Mark as read" className="shrink-0 p-2 text-slate-500 hover:bg-slate-100"><Check className="h-4 w-4" /></button>}
+                </article>)}
+              </div>
             </section>
-          </article>
-        ))}
+          ) : (
+            <p className="border border-slate-200 bg-white py-10 text-center text-sm text-slate-500">No notifications yet.</p>
+          )}
+        </div>)}
       </section>
       <AIChatPanel />
     </main>

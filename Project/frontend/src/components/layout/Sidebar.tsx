@@ -8,7 +8,7 @@ import { resolveAppHost } from '../../utils/pg-host';
 export default function Sidebar() {
   const location = useLocation();
   const { logout, user } = useAuth();
-  const { isOpen, close } = useSidebar();
+  const { isOpen, close, sectionNav } = useSidebar();
   
   const navItems: any[] = [
     { icon: BedDouble, label: 'PG Operations', path: resolveAppHost().kind === 'property' ? '/owner/manage' : '/pg/manage' }
@@ -131,6 +131,30 @@ export default function Sidebar() {
               );
             })}
           </div>
+
+          {sectionNav && (
+            <div className="space-y-1">
+              <p className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Workspace</p>
+              {sectionNav.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    item.onSelect();
+                    if (window.innerWidth < 1024) close();
+                  }}
+                  aria-current={item.active ? 'page' : undefined}
+                  className={`flex w-full items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                    item.active
+                      ? 'bg-amber-50/50 text-[#02224B] font-semibold border-r-4 border-[#FEB109] rounded-r-none'
+                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                  }`}
+                >
+                  <item.icon className="w-5 h-5" />
+                  <span className="whitespace-nowrap">{item.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
 
           {user?.role === 'SUPER_ADMIN' && (
             <div className="space-y-1">

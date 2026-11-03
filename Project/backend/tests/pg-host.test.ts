@@ -30,6 +30,22 @@ describe('PG host resolution', () => {
 });
 
 describe('PG host middleware', () => {
+  it('keeps an unpublished property host available for authorized management', async () => {
+    const request = { hostname: 'green-house.localhost', get: () => undefined } as any;
+    const middleware = resolvePgHost({
+      pGProperty: {
+        findFirst: async ({ where }: any) => {
+          assert.deepEqual(where, { slug: 'green-house' });
+          return { id: 'unpublished-property-id' };
+        }
+      }
+    });
+    let nextCalled = false;
+    await middleware(request, { status: () => assert.fail('Existing unpublished hosts must still resolve') } as any, () => { nextCalled = true; });
+    assert.equal(nextCalled, true);
+    assert.equal(request.pgPropertyId, 'unpublished-property-id');
+  });
+
   it('resolves a validated development slug header to its active property', async () => {
     const request = {
       hostname: 'localhost',

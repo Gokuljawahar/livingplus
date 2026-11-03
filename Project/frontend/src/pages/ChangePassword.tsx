@@ -3,7 +3,8 @@ import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
-import { Lock, Loader2, ArrowLeft, ShieldCheck } from 'lucide-react';
+import { Lock, Loader2, ArrowLeft } from 'lucide-react';
+import PasswordInput from '../components/PasswordInput';
 
 export default function ChangePassword() {
   const [formData, setFormData] = useState({
@@ -56,48 +57,33 @@ export default function ChangePassword() {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Current Password</label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-              <input
-                type="password"
-                required
-                value={formData.currentPassword}
-                onChange={(e) => setFormData({...formData, currentPassword: e.target.value})}
-                className="w-full bg-slate-50 border-slate-100 rounded-xl py-3 pl-11 pr-4 text-sm focus:ring-2 focus:ring-[#02224B] transition-all"
-                placeholder="••••••••"
-              />
-            </div>
+            <PasswordInput
+              value={formData.currentPassword}
+              autoComplete="current-password"
+              ariaLabel="Current password"
+              onChange={(value) => setFormData({...formData, currentPassword: value})}
+            />
           </div>
 
           <div className="space-y-4 pt-4 border-t border-slate-50">
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">New Password</label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                <input
-                  type="password"
-                  required
-                  value={formData.newPassword}
-                  onChange={(e) => setFormData({...formData, newPassword: e.target.value})}
-                  className="w-full bg-slate-50 border-slate-100 rounded-xl py-3 pl-11 pr-4 text-sm focus:ring-2 focus:ring-[#02224B] transition-all"
-                  placeholder="••••••••"
-                />
-              </div>
+              <PasswordInput
+                value={formData.newPassword}
+                autoComplete="new-password"
+                ariaLabel="New password"
+                onChange={(value) => setFormData({...formData, newPassword: value})}
+              />
             </div>
 
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Confirm New Password</label>
-              <div className="relative">
-                <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                <input
-                  type="password"
-                  required
-                  value={formData.confirmPassword}
-                  onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
-                  className="w-full bg-slate-50 border-slate-100 rounded-xl py-3 pl-11 pr-4 text-sm focus:ring-2 focus:ring-[#02224B] transition-all"
-                  placeholder="••••••••"
-                />
-              </div>
+              <PasswordInput
+                value={formData.confirmPassword}
+                autoComplete="new-password"
+                ariaLabel="Confirm new password"
+                onChange={(value) => setFormData({...formData, confirmPassword: value})}
+              />
             </div>
           </div>
 

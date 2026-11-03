@@ -2,14 +2,14 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
-import { LogIn, Lock, Loader2, Eye, EyeOff, X, Phone, MessageCircle } from 'lucide-react';
+import { LogIn, Loader2, X, Phone, MessageCircle } from 'lucide-react';
+import PasswordInput from '../components/PasswordInput';
 import logo from '../assets/logo_bg_black.png';
 import { resolveAppHost } from '../utils/pg-host';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showSupportModal, setShowSupportModal] = useState(false);
@@ -75,27 +75,15 @@ export default function LoginPage() {
 
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Password</label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                <input
-                  type={showPassword ? "text" : "password"}
-                  required
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    if (error) setError('');
-                  }}
-                  className={`w-full bg-slate-50 border-slate-100 rounded-xl py-3 pl-11 pr-12 text-sm focus:ring-2 focus:bg-white transition-all ${error ? 'focus:ring-red-500 border-red-200' : 'focus:ring-[#02224B]'}`}
-                  placeholder="••••••••"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 transition-colors"
-                >
-                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
-              </div>
+              <PasswordInput
+                value={password}
+                autoComplete="current-password"
+                onChange={(value) => {
+                  setPassword(value);
+                  if (error) setError('');
+                }}
+                inputClassName={error ? 'focus:ring-red-500 border-red-200' : 'focus:ring-[#02224B]'}
+              />
               {error && (
                 <p className="text-red-500 text-xs mt-2 font-medium">{error}</p>
               )}

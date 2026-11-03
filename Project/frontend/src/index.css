@@ -38,6 +38,13 @@
 }
 
 @layer utilities {
+  /* Hide the browser-native password reveal/clear buttons (Edge/Chrome show
+     their own eye next to our custom toggle, which renders as two eyes). */
+  input[type='password']::-ms-reveal,
+  input[type='password']::-ms-clear {
+    display: none;
+  }
+
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }

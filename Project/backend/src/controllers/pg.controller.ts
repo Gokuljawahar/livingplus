@@ -9,6 +9,7 @@ import { sendDueRentReminders } from '../services/pg-rent-reminders.js';
 import { createExpense, deleteExpense, listExpenses } from '../services/pg-expenses.js';
 import { calculateMonthlyRent, ensureFoodEntries } from '../services/pg-billing.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
+import { buildGuestBookingWhere } from '../utils/guest-bookings.js';
 
 function phoneVariants(phone: string): string[] {
   const digits = String(phone || '').replace(/\D/g, '');
@@ -40,7 +41,7 @@ async function createResidentNotification(dbClient: any, input: { propertyId: st
 
 async function residentScope(req: Request) {
   const user = currentUser(req);
-  const propertyId = requestPropertyId(req);
+  const propertyId = requestPropertyId(req) || user?.propertyId;
   if (!user || user.role !== 'PG_TENANT' || !propertyId || (user.propertyId && user.propertyId !== propertyId)) return null;
   const account = await db.user.findUnique({ where: { id: user.id }, select: { phone: true } });
   const tenants = account?.phone ? await db.pGTenant.findMany({
@@ -242,6 +243,19 @@ export const updateProperty = async (req: Request, res: Response): Promise<any> 
   if (typeof data.address === 'string') data.address = data.address.trim();
   if (typeof data.locality === 'string') data.locality = data.locality.trim();
   if (typeof data.contactPhone === 'string') data.contactPhone = data.contactPhone.replace(/\D/g, '') || null;
+  for (const [field, limit] of [['latitude', 90], ['longitude', 180]] as const) {
+    if (data[field] === undefined) continue;
+    const raw = data[field];
+    if (raw === null || (typeof raw === 'string' && !raw.trim())) {
+      data[field] = null;
+      continue;
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value) || Math.abs(value) > limit) {
+      return res.status(400).json({ message: `Invalid ${field}` });
+    }
+    data[field] = value;
+  }
   if (data.upiId !== undefined) {
     const upiId = String(data.upiId || '').trim();
     if (upiId && !/^[a-zA-Z0-9._-]{2,100}@[a-zA-Z0-9.-]{2,60}$/.test(upiId)) {
@@ -471,6 +485,37 @@ export const getPublicBookingStatus = async (req: Request, res: Response): Promi
   } catch (error) {
     console.error('PG public booking status error:', error);
     res.status(500).json({ message: 'Failed to fetch booking status' });
+  }
+};
+
+export const listGuestBookings = async (req: Request, res: Response): Promise<any> => {
+  const where = buildGuestBookingWhere(req.query.phone, requestPropertyId(req));
+  if (!where) return res.status(400).json({ message: 'A valid phone number is required' });
+
+  try {
+    await releaseExpiredBookingHolds();
+    const bookings = await db.pGBooking.findMany({
+      where,
+      include: {
+        property: { select: { name: true, address: true, locality: true, city: true } },
+        bed: { include: { room: { select: { roomNumber: true } } } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(bookings.map((booking: any) => ({
+      id: booking.id,
+      bookingRef: booking.bookingRef,
+      status: booking.status,
+      rejectionReason: booking.rejectionReason || null,
+      residentName: booking.residentName,
+      moveInDate: booking.moveInDate,
+      property: booking.property,
+      room: booking.bed?.room || null,
+      bedLabel: booking.bed?.label || null
+    })));
+  } catch (error) {
+    console.error('PG guest booking list error:', error);
+    res.status(500).json({ message: 'Failed to fetch your booking requests' });
   }
 };
 
@@ -1254,7 +1299,7 @@ export const getOwnerSummary = async (req: Request, res: Response): Promise<any>
     if (!user) return res.status(401).json({ message: 'Unauthorized' });
     const propertyIds = await accessiblePropertyIds(req);
     const ownerPropertyIds = await accessiblePropertyIds(req, ['OWNER']);
-    const canManageStaff = user.role === 'SUPER_ADMIN' || ownerPropertyIds.length > 0;
+    const canManageStaff = user.role === 'SUPER_ADMIN' || user.role === 'PG_OWNER' || ownerPropertyIds.length > 0;
     const propertyId = req.query.propertyId ? String(req.query.propertyId) : undefined;
     if (propertyId && !propertyIds.includes(propertyId)) {
       return res.status(403).json({ message: 'You do not have access to this property' });
@@ -1308,7 +1353,7 @@ export const listOwnerTickets = async (req: Request, res: Response): Promise<any
 
 export const listTenantTickets = async (req: Request, res: Response): Promise<any> => {
   const user = currentUser(req);
-  const propertyId = requestPropertyId(req);
+  const propertyId = requestPropertyId(req) || user?.propertyId;
   if (!user || user.role !== 'PG_TENANT') return res.status(403).json({ message: 'Resident access is required' });
   if (!propertyId || (user.propertyId && user.propertyId !== propertyId)) {
     return res.status(403).json({ message: 'This resident session belongs to a different PG' });
@@ -1334,7 +1379,7 @@ export const listTenantTickets = async (req: Request, res: Response): Promise<an
 
 export const createTenantTicket = async (req: Request, res: Response): Promise<any> => {
   const user = currentUser(req);
-  const propertyId = requestPropertyId(req);
+  const propertyId = requestPropertyId(req) || user?.propertyId;
   const { tenantId, title, description, category } = req.body;
   if (!user || user.role !== 'PG_TENANT') return res.status(403).json({ message: 'Resident access is required' });
   if (!propertyId || (user.propertyId && user.propertyId !== propertyId)) {

@@ -28,7 +28,7 @@ export const authenticate = (req, res, next) => {
         const decoded = jwt.verify(token, getJwtSecret());
         const hostPropertyId = req.pgPropertyId;
         const tokenPropertyId = typeof decoded.propertyId === 'string' ? decoded.propertyId : undefined;
-        if (tokenPropertyId !== hostPropertyId && (tokenPropertyId || hostPropertyId) && decoded.role !== 'SUPER_ADMIN') {
+        if (hostPropertyId && tokenPropertyId !== hostPropertyId && decoded.role !== 'SUPER_ADMIN') {
             res.status(403).json({ message: 'This session is not valid for this PG host' });
             return;
         }
