@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
-import { AlertCircle, Bell, Building2, Check, Download, Loader2, LogOut, Plus, ReceiptIndianRupee, Send, UserRound, Wrench } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertCircle, ArrowLeftRight, Bell, Building2, Check, Download, History, Loader2, LogOut, Menu, Plus, ReceiptIndianRupee, Send, UserRound, UtensilsCrossed, Wallet, Wrench } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
+import { SidebarProvider, useSidebar } from '../context/SidebarContext';
+import Sidebar from '../components/layout/Sidebar';
 import { RESIDENT_TOKEN_KEY } from '../utils/session';
 import { resolveAppHost } from '../utils/pg-host';
 import { useOtpCooldown } from '../hooks/useOtpCooldown';
@@ -11,6 +13,7 @@ import RoomChange from '../components/RoomChange';
 import FoodPreferences from '../components/FoodPreferences';
 import MoneyOverview from '../components/MoneyOverview';
 import StayServices from '../components/StayServices';
+import SplitAuthLayout from '../components/SplitAuthLayout';
 
 type Stay = {
   id: string; name: string; status: string; monthlyRent: number; depositAmount: number;
@@ -35,7 +38,16 @@ type ResidentNotification = { id: string; type: string; title: string; message: 
 type PaymentClaim = { id: string; tenantId: string; rentEntryId: string; amount: number; reference: string; status: string; responseNote?: string | null; createdAt: string; rentEntry: { id: string; entryType: string; period: string } };
 
 export default function ResidentPortal() {
+  return (
+    <SidebarProvider>
+      <ResidentPortalView />
+    </SidebarProvider>
+  );
+}
+
+function ResidentPortalView() {
   const { login, logout: clearSession } = useAuth();
+  const { setSectionNav, toggle } = useSidebar();
   const [step, setStep] = useState<'phone' | 'code' | 'portal'>(() => (localStorage.getItem(RESIDENT_TOKEN_KEY) ? 'portal' : 'phone'));
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
@@ -264,13 +276,41 @@ export default function ResidentPortal() {
     setStep('phone');
   };
 
+  const sections = useMemo(() => [
+    { id: 'stays', label: 'My stays', icon: Building2 },
+    { id: 'money', label: 'Money', icon: Wallet },
+    { id: 'food', label: 'Food', icon: UtensilsCrossed },
+    { id: 'services', label: 'Services', icon: History },
+    { id: 'maintenance', label: 'Maintenance', icon: Wrench },
+    { id: 'roomchange', label: 'Room change', icon: ArrowLeftRight },
+    { id: 'notifications', label: 'Notifications', icon: Bell },
+    { id: 'profile', label: 'Profile', icon: UserRound }
+  ] as const, []);
+
+  useEffect(() => {
+    if (step !== 'portal') return;
+    setSectionNav(sections.map(({ id, label, icon }) => ({ id, label, icon, active: id === activeTab, onSelect: () => setActiveTab(id as typeof activeTab) })));
+    return () => setSectionNav(null);
+  }, [sections, activeTab, step, setSectionNav]);
+
   if (step !== 'portal') {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
-        <section className="w-full max-w-md bg-white p-6 shadow-xl">
+      <SplitAuthLayout
+        panelTitle="Your stay, in your pocket"
+        panelCopy="Sign in with the phone number on your stay. Rent, food, maintenance and room requests, all in one place."
+        bullets={[
+          { icon: Building2, heading: 'Your stays', text: 'Rooms, rent and deposits' },
+          { icon: ReceiptIndianRupee, heading: 'Money clarity', text: 'Dues and verifications' },
+          { icon: Wrench, heading: 'Get help fast', text: 'Maintenance and room changes' }
+        ]}
+        mobileTitle="Resident login"
+        mobileSubtitle="Log in with the phone number on your stay."
+      >
+        <div className="hidden lg:block">
           <p className="text-xs font-bold uppercase text-amber-700">Resident access</p>
-          <h1 className="mt-1 text-xl font-bold text-[#02224B]">Resident login</h1>
-          <p className="mt-1 text-sm text-slate-500">Log in with the phone number on your stay. No password needed.</p>
+          <h1 className="mt-1 text-2xl font-bold text-[#02224B]">Resident login</h1>
+          <p className="mt-2 text-sm text-slate-500">Log in with the phone number on your stay. No password needed.</p>
+        </div>
           {step === 'phone' ? (<>
             <form onSubmit={requestCode} className="mt-5 space-y-3">
               <input required type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" className="w-full border border-slate-300 px-3 py-2.5 text-sm" />
@@ -291,52 +331,30 @@ export default function ResidentPortal() {
               <button type="button" onClick={() => setStep('phone')} className="text-sm font-semibold text-slate-500">Use a different number</button>
             </form>
           )}
-        </section>
-      </main>
+      </SplitAuthLayout>
     );
   }
 
-  const tabs = [
-    { id: 'stays', label: 'My stays', badge: stays.length > 1 ? stays.length : 0 },
-    { id: 'money', label: 'Money', badge: 0 },
-    { id: 'food', label: 'Food', badge: 0 },
-    { id: 'services', label: 'Services', badge: 0 },
-    { id: 'maintenance', label: 'Maintenance', badge: 0 },
-    { id: 'roomchange', label: 'Room change', badge: 0 },
-    { id: 'notifications', label: 'Notifications', badge: unreadCount },
-    { id: 'profile', label: 'Profile', badge: 0 }
-  ] as const;
+
 
   return (
-    <main className="min-h-screen bg-slate-100 text-slate-900">
-      <header className="bg-[#02224B] text-white">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-          <span className="flex items-center gap-2 text-lg font-bold"><Building2 className="h-5 w-5 text-[#FEB109]" /> My stays</span>
-          {stays[0] && <span className="hidden items-center gap-1.5 text-sm font-medium text-blue-100 md:inline-flex"><UserRound className="h-4 w-4" />{stays[0].name}</span>}
-          <div className="ml-auto flex items-center gap-3 text-sm">
-            <span className="inline-flex items-center gap-1.5 font-semibold text-blue-100" aria-label={`${unreadCount} unread notifications`}><Bell className="h-4 w-4" />{unreadCount}</span>
-            {canFindPg ? <a href="/pg" className="font-semibold text-blue-100 hover:text-white">Find a PG</a> : null}
-            <button onClick={logout} className="inline-flex items-center gap-1 font-semibold text-blue-100 hover:text-white"><LogOut className="h-4 w-4" />Sign out</button>
+    <div className="flex h-[100dvh] bg-[#F8FAFB] text-slate-900">
+      <Sidebar />
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 md:px-8">
+          <div className="flex items-center gap-3">
+            <button onClick={toggle} aria-label="Open navigation" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden"><Menu className="h-6 w-6" /></button>
+            <span className="flex items-center gap-2 font-semibold text-[#02224B]"><Building2 className="h-5 w-5" /> My stays</span>
+            {stays[0] && <span className="hidden items-center gap-1.5 text-sm font-medium text-slate-500 md:inline-flex"><UserRound className="h-4 w-4" />{stays[0].name}</span>}
           </div>
-        </div>
-        <nav className="border-t border-white/10" aria-label="Resident sections">
-          <div className="mx-auto flex max-w-5xl items-center gap-1 overflow-x-auto px-4 text-sm" role="tablist">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                role="tab"
-                aria-selected={activeTab === tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex shrink-0 items-center gap-1.5 px-3 py-2 font-semibold ${activeTab === tab.id ? 'text-[#FEB109] underline underline-offset-4' : 'text-blue-100 hover:text-white'}`}
-              >
-                {tab.label}
-                {tab.badge > 0 && <span className="bg-[#FEB109] px-1.5 py-0.5 text-[11px] font-bold text-[#02224B]">{tab.badge}</span>}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 text-sm md:gap-3">
+            <span className="inline-flex items-center gap-1.5 font-semibold text-slate-500" aria-label={`${unreadCount} unread notifications`}><Bell className="h-4 w-4" />{unreadCount}</span>
+            {canFindPg ? <a href="/pg" className="hidden font-semibold text-[#02224B] hover:underline sm:inline">Find a PG</a> : null}
+            <button onClick={logout} className="inline-flex items-center gap-1 font-semibold text-slate-500 hover:text-[#02224B]"><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Sign out</span></button>
           </div>
-        </nav>
-      </header>
-      <section className="mx-auto max-w-5xl px-4 py-6">
+        </header>
+        <main className="flex-1 overflow-y-auto p-4 md:p-8">
+          <div className="mx-auto max-w-5xl">
         {activeTab === 'stays' && (<div className="space-y-4">
           {!stays.length && <p className="border border-slate-200 bg-white py-10 text-center text-sm text-slate-500">No stays found for this number.</p>}
           {stays.map((stay) => (
@@ -485,8 +503,10 @@ export default function ResidentPortal() {
             <p className="border border-slate-200 bg-white py-10 text-center text-sm text-slate-500">No notifications yet.</p>
           )}
         </div>)}
-      </section>
-      <AIChatPanel />
-    </main>
+          </div>
+        </main>
+        <AIChatPanel />
+      </div>
+    </div>
   );
 }

@@ -11,6 +11,12 @@ export declare function normalizeGuestPhone(phone: unknown): string;
  * forms, so both reduce to the same key. Returns null when unusable.
  */
 export declare function guestBookingPhoneKey(phone: unknown): string | null;
+/**
+ * Rejects placeholder text typed into the resident-name field so junk like
+ * "sample name" can never become a tenant record. Real single-word names
+ * pass; the check needs at least two letters and no placeholder token.
+ */
+export declare function isPlaceholderResidentName(name: unknown): boolean;
 /** Prisma `where` clause for the guest booking lookup, or null when invalid. */
 export declare function buildGuestBookingWhere(phone: unknown, propertyId?: string): {
     phone: {

@@ -133,7 +133,7 @@ async function main() {
             bookingRef: 'PG-DEMO-APPROVED',
             propertyId: demoProperties[0].id,
             bedId: occupiedBed.id,
-            residentName: 'Ananya Rao',
+            residentName: 'Demo Resident',
             phone: '9000000001',
             moveInDate: new Date('2026-10-01T00:00:00.000Z'),
             status: 'APPROVED'
@@ -147,7 +147,7 @@ async function main() {
             propertyId: demoProperties[0].id,
             bedId: occupiedBed.id,
             bookingId: booking.id,
-            name: 'Ananya Rao',
+            name: 'Demo Resident',
             phone: '9000000001',
             moveInDate: new Date('2026-10-01T00:00:00.000Z'),
             monthlyRent: 9800,
@@ -174,7 +174,7 @@ async function main() {
             bookingRef: 'PG-DEMO-PENDING',
             propertyId: demoProperties[0].id,
             bedId: requestBed.id,
-            residentName: 'Meera Iyer',
+            residentName: 'Demo Applicant',
             phone: '9000000002',
             moveInDate: new Date('2026-11-15T00:00:00.000Z'),
             status: 'PENDING'

@@ -8,7 +8,7 @@ import { sendDueRentReminders } from '../services/pg-rent-reminders.js';
 import { createExpense, deleteExpense, listExpenses } from '../services/pg-expenses.js';
 import { calculateMonthlyRent, ensureFoodEntries } from '../services/pg-billing.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
-import { buildGuestBookingWhere } from '../utils/guest-bookings.js';
+import { buildGuestBookingWhere, isPlaceholderResidentName } from '../utils/guest-bookings.js';
 function phoneVariants(phone) {
     const digits = String(phone || '').replace(/\D/g, '');
     const normalized = digits.length === 10 ? `91${digits}` : digits;
@@ -359,6 +359,9 @@ export const createBookingRequest = async (req, res) => {
     const idemKey = String(req.body.idempotencyKey || req.headers['x-idempotency-key'] || '').trim().slice(0, 80) || null;
     if (!propertyId || !residentName?.trim() || !phone?.trim() || !moveInDate) {
         return res.status(400).json({ message: 'Property, name, phone and move-in date are required' });
+    }
+    if (isPlaceholderResidentName(residentName)) {
+        return res.status(400).json({ message: 'Please enter the resident\u2019s real name as on their ID' });
     }
     if (requestPropertyId(req) && String(propertyId) !== requestPropertyId(req)) {
         return res.status(404).json({ message: 'Property is not available on this PG host' });

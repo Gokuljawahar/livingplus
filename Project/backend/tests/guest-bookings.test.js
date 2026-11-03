@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildGuestBookingWhere, guestBookingPhoneKey, normalizeGuestPhone } from '../src/utils/guest-bookings.js';
+import { buildGuestBookingWhere, guestBookingPhoneKey, isPlaceholderResidentName, normalizeGuestPhone } from '../src/utils/guest-bookings.js';
 describe('guest booking phone matching', () => {
     it('normalizes phones to digits only', () => {
         assert.equal(normalizeGuestPhone('+91 98765 43210'), '919876543210');
@@ -16,6 +16,16 @@ describe('guest booking phone matching', () => {
         assert.equal(guestBookingPhoneKey('12345'), null);
         assert.equal(guestBookingPhoneKey(''), null);
         assert.equal(guestBookingPhoneKey(undefined), null);
+    });
+    it('rejects placeholder resident names but keeps real ones', () => {
+        assert.equal(isPlaceholderResidentName('sample name'), true);
+        assert.equal(isPlaceholderResidentName('Test'), true);
+        assert.equal(isPlaceholderResidentName('asdf'), true);
+        assert.equal(isPlaceholderResidentName('A'), true);
+        assert.equal(isPlaceholderResidentName('99'), true);
+        assert.equal(isPlaceholderResidentName('Madhu'), false);
+        assert.equal(isPlaceholderResidentName('Ananya Rao'), false);
+        assert.equal(isPlaceholderResidentName(undefined), true);
     });
     it('builds an endsWith where clause with optional property scope', () => {
         assert.deepEqual(buildGuestBookingWhere('919876543210'), { phone: { endsWith: '9876543210' } });

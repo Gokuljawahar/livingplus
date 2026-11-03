@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, Loader2, Phone, ShieldCheck } from 'lucide-react';
+import { Building2, ClipboardList, Loader2, Phone, Search, ShieldCheck } from 'lucide-react';
+import SplitAuthLayout from './SplitAuthLayout';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
@@ -75,15 +76,26 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
-      <section className="w-full max-w-md bg-white p-6 shadow-xl">
+    <SplitAuthLayout
+      panelTitle="Find a PG without the broker chase"
+      panelCopy="Verify your number once, browse verified PGs with real availability, and track every request you raise."
+      bullets={[
+        { icon: ShieldCheck, heading: 'One verification', text: 'OTP sign-in, no passwords' },
+        { icon: Search, heading: 'Verified listings', text: 'Real beds, real rents' },
+        { icon: ClipboardList, heading: 'Request tracking', text: 'Watch your booking status' }
+      ]}
+      mobileTitle="Sign in to browse PGs"
+      mobileSubtitle="Verify your phone number once to continue."
+    >
+      <div className="hidden lg:block">
         <p className="flex items-center gap-1.5 text-xs font-bold uppercase text-amber-700">
           <Building2 className="h-4 w-4" /> PG listings
         </p>
-        <h1 className="mt-1 text-xl font-bold text-[#02224B]">Sign in to browse PGs</h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <h1 className="mt-1 text-2xl font-bold text-[#02224B]">Sign in to browse PGs</h1>
+        <p className="mt-2 text-sm text-slate-500">
           Verify your phone number once. Residents go straight to their stays — everyone else can search stays and track booking requests.
         </p>
+      </div>
         {step === 'phone' ? (
           <form onSubmit={requestCode} className="mt-5 space-y-3">
             <label className="block text-sm font-medium text-slate-700">
@@ -142,7 +154,6 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
             </a>
           </p>
         )}
-      </section>
-    </main>
+    </SplitAuthLayout>
   );
 }

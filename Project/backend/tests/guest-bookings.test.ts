@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildGuestBookingWhere,
   guestBookingPhoneKey,
+  isPlaceholderResidentName,
   normalizeGuestPhone
 } from '../src/utils/guest-bookings.js';
 
@@ -23,6 +24,17 @@ describe('guest booking phone matching', () => {
     assert.equal(guestBookingPhoneKey('12345'), null);
     assert.equal(guestBookingPhoneKey(''), null);
     assert.equal(guestBookingPhoneKey(undefined), null);
+  });
+
+  it('rejects placeholder resident names but keeps real ones', () => {
+    assert.equal(isPlaceholderResidentName('sample name'), true);
+    assert.equal(isPlaceholderResidentName('Test'), true);
+    assert.equal(isPlaceholderResidentName('asdf'), true);
+    assert.equal(isPlaceholderResidentName('A'), true);
+    assert.equal(isPlaceholderResidentName('99'), true);
+    assert.equal(isPlaceholderResidentName('Madhu'), false);
+    assert.equal(isPlaceholderResidentName('Ananya Rao'), false);
+    assert.equal(isPlaceholderResidentName(undefined), true);
   });
 
   it('builds an endsWith where clause with optional property scope', () => {
