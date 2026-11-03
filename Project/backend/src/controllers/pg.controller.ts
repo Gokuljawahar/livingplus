@@ -21,7 +21,7 @@ const db = new Proxy({} as Record<string, any>, {
   get: (_target, property) => (prisma as any)[property]
 });
 
-function currentUser(req: Request): { id: string; role: string; propertyId?: string } | null {
+export function currentUser(req: Request): { id: string; role: string; propertyId?: string } | null {
   const user = (req as any).user;
   if (!user?.userId || !user?.role) return null;
   return {
@@ -51,7 +51,7 @@ async function residentScope(req: Request) {
   return { user, propertyId, tenantIds: tenants.map((tenant: { id: string }) => tenant.id), tenants };
 }
 
-async function canManageProperty(req: Request, propertyId: string, roles = ['OWNER', 'WARDEN']): Promise<boolean> {
+export async function canManageProperty(req: Request, propertyId: string, roles = ['OWNER', 'WARDEN']): Promise<boolean> {
   const user = currentUser(req);
   if (!user) return false;
   const scopedPropertyId = requestPropertyId(req);
@@ -762,7 +762,7 @@ export const listTenantStays = async (req: Request, res: Response): Promise<any>
       },
       include: {
         property: { select: { id: true, name: true, address: true, locality: true, city: true, contactPhone: true, upiId: true } },
-        bed: { include: { room: { select: { roomNumber: true, roomType: true } } } },
+        bed: { include: { room: { select: { roomNumber: true, roomType: true, foodIncluded: true, foodCharge: true } } } },
         rentEntries: { orderBy: [{ dueDate: 'desc' }, { createdAt: 'desc' }] }
       },
       orderBy: { createdAt: 'desc' }

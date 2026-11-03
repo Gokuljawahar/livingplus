@@ -1,4 +1,10 @@
 import type { Request, Response } from 'express';
+export declare function currentUser(req: Request): {
+    id: string;
+    role: string;
+    propertyId?: string;
+} | null;
+export declare function canManageProperty(req: Request, propertyId: string, roles?: string[]): Promise<boolean>;
 export declare const getPublicConfig: (_req: Request, res: Response) => Promise<any>;
 export declare const listProperties: (req: Request, res: Response) => Promise<any>;
 export declare const listOwnerProperties: (req: Request, res: Response) => Promise<any>;

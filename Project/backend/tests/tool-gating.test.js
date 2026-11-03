@@ -23,20 +23,23 @@ describe('agent tool gating by role', () => {
             'search_properties', 'get_property_details', 'check_bed_availability',
             'create_booking_request', 'get_booking_status',
             'get_my_stay', 'get_my_maintenance_requests', 'create_maintenance_ticket',
-            'set_meal_preference'
+            'set_meal_preference', 'request_room_change', 'get_my_room_change_requests',
+            'find_room_change_matches', 'propose_room_swap', 'respond_room_swap'
         ]) {
             assert.ok(names.includes(tool), `PG_TENANT should have ${tool}`);
         }
         assert.ok(!names.includes('get_pending_rent'), 'residents must not see dues detail');
         assert.ok(!names.includes('log_expense'), 'residents must not log expenses');
         assert.ok(!names.includes('get_occupancy_report'), 'residents must not see occupancy reports');
+        assert.ok(!names.includes('decide_room_change'), 'residents must not approve their own swaps');
     });
     it('gives wardens operations tools but no dues detail', () => {
         const names = toolNamesFor('PG_WARDEN');
         for (const tool of [
             'get_occupancy_report', 'update_maintenance_status', 'send_rent_reminders',
             'log_expense', 'get_expense_summary', 'propose_electricity_split',
-            'approve_electricity_bill', 'get_booking_status'
+            'approve_electricity_bill', 'get_booking_status', 'decide_room_change',
+            'list_room_change_requests'
         ]) {
             assert.ok(names.includes(tool), `PG_WARDEN should have ${tool}`);
         }
@@ -61,6 +64,13 @@ describe('agent tool gating by role', () => {
     });
     it('keeps dues detail owner-side only', () => {
         assert.deepEqual(rolesOf('get_pending_rent'), ['PG_OWNER', 'SUPER_ADMIN']);
+    });
+    it('keeps the swap handshake split across residents and staff', () => {
+        assert.deepEqual(rolesOf('decide_room_change'), ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN']);
+        assert.deepEqual(rolesOf('list_room_change_requests'), ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN']);
+        for (const tool of ['request_room_change', 'get_my_room_change_requests', 'find_room_change_matches', 'propose_room_swap', 'respond_room_swap']) {
+            assert.deepEqual(rolesOf(tool), ['PG_TENANT'], `${tool} must stay resident-side only`);
+        }
     });
 });
 //# sourceMappingURL=tool-gating.test.js.map

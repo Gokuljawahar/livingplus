@@ -7,16 +7,22 @@ import { RESIDENT_TOKEN_KEY } from '../utils/session';
 import { resolveAppHost } from '../utils/pg-host';
 import { useOtpCooldown } from '../hooks/useOtpCooldown';
 import AIChatPanel from '../components/AIChatPanel';
+import RoomChange from '../components/RoomChange';
+import FoodPreferences from '../components/FoodPreferences';
+import MoneyOverview from '../components/MoneyOverview';
+import StayServices from '../components/StayServices';
 
 type Stay = {
   id: string; name: string; status: string; monthlyRent: number; depositAmount: number;
   depositReceived: number; depositDeductions?: number; depositRefundAmount?: number | null;
-  depositRefundStatus?: string; noticeDate?: string | null;
+  depositRefundStatus?: string; depositRefundReference?: string | null; noticeDate?: string | null;
+  moveInDate: string; moveOutDate?: string | null;
+  checkedInAt?: string | null; checkedOutAt?: string | null; checkoutNote?: string | null;
   permanentAddress?: string | null; bloodGroup?: string | null; institutionOrEmployer?: string | null;
   emergencyName?: string | null; emergencyPhone?: string | null; kycType?: string | null;
   kycDocumentUrl?: string | null; kycVerified?: boolean; foodOptOut?: boolean;
   property: { id: string; name: string; address: string; locality: string; city: string; contactPhone?: string | null; upiId?: string | null };
-  bed?: { label: string; room: { roomNumber: string; roomType: string } } | null;
+  bed?: { label: string; room: { roomNumber: string; roomType: string; foodIncluded?: boolean; foodCharge?: number | null } } | null;
   rentEntries: { id: string; period: string; entryType: string; amount: number; paidAmount: number; status: string; method?: string | null; reference?: string | null; dueDate: string }[];
 };
 
@@ -35,7 +41,7 @@ export default function ResidentPortal() {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const { cooldown, startCooldown } = useOtpCooldown();
-  const [activeTab, setActiveTab] = useState<'stays' | 'maintenance' | 'notifications' | 'profile'>('stays');
+  const [activeTab, setActiveTab] = useState<'stays' | 'money' | 'food' | 'services' | 'maintenance' | 'roomchange' | 'notifications' | 'profile'>('stays');
   const [stays, setStays] = useState<Stay[]>([]);
   const [tickets, setTickets] = useState<MaintenanceTicket[]>([]);
   const [ticketFormFor, setTicketFormFor] = useState('');
@@ -292,7 +298,11 @@ export default function ResidentPortal() {
 
   const tabs = [
     { id: 'stays', label: 'My stays', badge: stays.length > 1 ? stays.length : 0 },
+    { id: 'money', label: 'Money', badge: 0 },
+    { id: 'food', label: 'Food', badge: 0 },
+    { id: 'services', label: 'Services', badge: 0 },
     { id: 'maintenance', label: 'Maintenance', badge: 0 },
+    { id: 'roomchange', label: 'Room change', badge: 0 },
     { id: 'notifications', label: 'Notifications', badge: unreadCount },
     { id: 'profile', label: 'Profile', badge: 0 }
   ] as const;
@@ -456,6 +466,10 @@ export default function ResidentPortal() {
             </article>
           ))}
         </div>)}
+        {activeTab === 'roomchange' && <RoomChange />}
+        {activeTab === 'money' && <MoneyOverview stays={stays} claims={paymentClaims} />}
+        {activeTab === 'food' && <FoodPreferences stays={stays} onChanged={() => void refreshResidentData()} />}
+        {activeTab === 'services' && <StayServices stays={stays} />}
         {activeTab === 'notifications' && (<div className="space-y-4">
           {notifications.length > 0 ? (
             <section className="border border-slate-200 bg-white px-5 py-4">

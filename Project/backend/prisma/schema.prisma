@@ -56,6 +56,7 @@ model PGProperty {
   electricityBills   PGElectricityBill[]
   paymentClaims      PGPaymentClaim[]
   residentNotifications PGResidentNotification[]
+  roomChangeRequests PGRoomChangeRequest[]
 }
 
 model PGPropertyAccess {
@@ -106,6 +107,8 @@ model PGBed {
   room            PGRoom   @relation(fields: [roomId], references: [id], onDelete: Cascade)
   bookings        PGBooking[]
   tenants         PGTenant[]
+  roomChangeFrom  PGRoomChangeRequest[] @relation("RoomChangeFromBed")
+  roomChangeTo    PGRoomChangeRequest[] @relation("RoomChangeToBed")
 
   @@unique([roomId, label])
   @@index([roomId, status])
@@ -178,6 +181,8 @@ model PGTenant {
   maintenanceTickets    PGMaintenanceTicket[]
   paymentClaims         PGPaymentClaim[]
   notifications         PGResidentNotification[]
+  roomChangeRequests  PGRoomChangeRequest[] @relation("RoomChangeRequester")
+  roomChangePartners  PGRoomChangeRequest[] @relation("RoomChangePartner")
 
   @@index([propertyId, status])
 }
@@ -263,6 +268,31 @@ model PGResidentNotification {
 
   @@index([tenantId, readAt, createdAt])
   @@index([propertyId, type, createdAt])
+}
+
+model PGRoomChangeRequest {
+  id            String   @id @default(uuid())
+  propertyId    String
+  requesterId   String
+  requestType   String   @default("SWAP")
+  fromBedId     String?
+  toBedId       String?
+  partnerId     String?
+  preferences   String?
+  reason        String?
+  status        String   @default("PENDING_MATCH")
+  decidedBy     String?
+  decidedAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  property      PGProperty @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  requester     PGTenant   @relation("RoomChangeRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  partner       PGTenant?  @relation("RoomChangePartner", fields: [partnerId], references: [id], onDelete: SetNull)
+  fromBed       PGBed?     @relation("RoomChangeFromBed", fields: [fromBedId], references: [id], onDelete: SetNull)
+  toBed         PGBed?     @relation("RoomChangeToBed", fields: [toBedId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId, status])
+  @@index([requesterId, status])
 }
 
 model PGExpense {

@@ -17,7 +17,7 @@ function phoneVariants(phone) {
 const db = new Proxy({}, {
     get: (_target, property) => prisma[property]
 });
-function currentUser(req) {
+export function currentUser(req) {
     const user = req.user;
     if (!user?.userId || !user?.role)
         return null;
@@ -45,7 +45,7 @@ async function residentScope(req) {
     }) : [];
     return { user, propertyId, tenantIds: tenants.map((tenant) => tenant.id), tenants };
 }
-async function canManageProperty(req, propertyId, roles = ['OWNER', 'WARDEN']) {
+export async function canManageProperty(req, propertyId, roles = ['OWNER', 'WARDEN']) {
     const user = currentUser(req);
     if (!user)
         return false;
@@ -773,7 +773,7 @@ export const listTenantStays = async (req, res) => {
             },
             include: {
                 property: { select: { id: true, name: true, address: true, locality: true, city: true, contactPhone: true, upiId: true } },
-                bed: { include: { room: { select: { roomNumber: true, roomType: true } } } },
+                bed: { include: { room: { select: { roomNumber: true, roomType: true, foodIncluded: true, foodCharge: true } } } },
                 rentEntries: { orderBy: [{ dueDate: 'desc' }, { createdAt: 'desc' }] }
             },
             orderBy: { createdAt: 'desc' }

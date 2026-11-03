@@ -6,6 +6,13 @@
 import { randomUUID } from 'crypto';
 import { prisma } from '../app.js';
 import { consumePhoneToken } from '../controllers/pg-auth.controller.js';
+import {
+  ACTIVE_ROOM_CHANGE_STATUSES,
+  canTransitionRoomChange,
+  maskSwapPartner,
+  parseRoomPreferences,
+  roomPreferencesCompatible
+} from '../utils/room-change.js';
 import { logAudit } from './pg-audit.js';
 import { sendDueRentReminders } from './pg-rent-reminders.js';
 import { createExpense, listExpenses } from './pg-expenses.js';
@@ -68,6 +75,28 @@ export interface ToolExecutor {
 }
 
 const str = (v: unknown) => String(v || '').trim();
+
+// Room-swap handshake helpers: resolve the caller's own active stay and
+// render beds the way swap candidates see them (room context, no people).
+async function residentRoomTenant(actor: Actor) {
+  const propertyId = actor.propertyId;
+  if (!propertyId || !actor.propertyIds.includes(propertyId) || !actor.phones.length) throw new Error('FORBIDDEN');
+  const tenant = await db.pGTenant.findFirst({
+    where: { propertyId, phone: { in: actor.phones }, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
+    select: { id: true, bedId: true, name: true }
+  });
+  if (!tenant) throw new Error('NO_TENANT_RECORD');
+  return { propertyId, tenant };
+}
+
+function offeredBedView(bed: any) {
+  if (!bed) return null;
+  return {
+    bed_id: bed.id, label: bed.label,
+    room_number: bed.room?.roomNumber || null, floor: bed.room?.floor ?? null,
+    room_type: bed.room?.roomType || null, monthly_rent: bed.room?.monthlyRent ?? null
+  };
+}
 
 async function publicProperties(where: Record<string, unknown> = {}) {
   return db.pGProperty.findMany({
@@ -310,6 +339,317 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
       });
       logAudit(propertyId, actor.userId, 'TICKET_CREATED_VIA_AI', 'PGMaintenanceTicket', ticket.id, ticket.title);
       return { ticket_id: ticket.id, status: ticket.status, category: ticket.category };
+    }
+  },
+
+  request_room_change: {
+    description: 'Open a room swap or room move request for the signed-in resident’s own active stay. Swaps match with another resident; moves target a vacant bed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        request_type: { type: 'string', enum: ['SWAP', 'MOVE'] },
+        to_bed_id: { type: 'string', description: 'Required for MOVE: a vacant bed id from find_room_change_matches. Never set for SWAP.' },
+        preferences: { type: 'object', description: 'Swap preferences such as floor or room type; unstated means flexible.' },
+        reason: { type: 'string' }
+      },
+      required: ['request_type']
+    },
+    requiresConfirmation: true,
+    roles: ['PG_TENANT'],
+    execute: async (actor, args) => {
+      const { propertyId, tenant } = await residentRoomTenant(actor);
+      const requestType = str(args.request_type).toUpperCase();
+      if (requestType !== 'SWAP' && requestType !== 'MOVE') throw new Error('INVALID_REQUEST_TYPE');
+      if (!tenant.bedId) throw new Error('NO_BED_ASSIGNED');
+      const existing = await db.pGRoomChangeRequest.findFirst({
+        where: { propertyId, requesterId: tenant.id, status: { in: [...ACTIVE_ROOM_CHANGE_STATUSES] } },
+        select: { id: true, status: true, requestType: true }
+      });
+      if (existing) return { request_id: existing.id, status: existing.status, already_open: true };
+      let toBedId: string | null = null;
+      if (requestType === 'MOVE') {
+        toBedId = str(args.to_bed_id);
+        if (!toBedId) throw new Error('BED_REQUIRED');
+        const bed = await db.pGBed.findFirst({
+          where: { id: toBedId, status: 'AVAILABLE', room: { propertyId, status: 'ACTIVE' } },
+          select: { id: true }
+        });
+        if (!bed) throw new Error('BED_UNAVAILABLE');
+      } else if (str(args.to_bed_id)) {
+        throw new Error('SWAP_MATCHES_LATER');
+      }
+      const preferences = parseRoomPreferences(args.preferences);
+      const row = await db.pGRoomChangeRequest.create({
+        data: {
+          propertyId, requesterId: tenant.id, requestType, fromBedId: tenant.bedId, toBedId,
+          preferences: Object.keys(preferences).length ? JSON.stringify(preferences) : null,
+          reason: str(args.reason).slice(0, 500) || null
+        }
+      });
+      logAudit(propertyId, actor.userId, 'ROOM_CHANGE_REQUESTED_VIA_AI', 'PGRoomChangeRequest', row.id, requestType);
+      return { request_id: row.id, status: row.status, request_type: row.requestType };
+    }
+  },
+
+  get_my_room_change_requests: {
+    description: 'List the signed-in resident’s room swap / move requests, including proposals awaiting their answer.',
+    parameters: { type: 'object', properties: {} },
+    requiresConfirmation: false,
+    roles: ['PG_TENANT'],
+    execute: async (actor) => {
+      const { propertyId, tenant } = await residentRoomTenant(actor);
+      const rows = await db.pGRoomChangeRequest.findMany({
+        where: { propertyId, OR: [{ requesterId: tenant.id }, { partnerId: tenant.id }] },
+        include: {
+          requester: { select: { name: true } },
+          partner: { select: { name: true } },
+          toBed: { include: { room: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 25
+      });
+      return rows.map((row: any) => {
+        const mine = row.requesterId === tenant.id;
+        const otherName = mine ? row.partner?.name : row.requester?.name;
+        return {
+          request_id: row.id, mine, request_type: row.requestType, status: row.status,
+          reason: row.reason, preferences: parseRoomPreferences(row.preferences),
+          counterparty: row.partnerId || !mine ? maskSwapPartner({ name: otherName }) : null,
+          offered_bed: offeredBedView(row.toBed),
+          created_at: row.createdAt, updated_at: row.updatedAt
+        };
+      });
+    }
+  },
+
+  find_room_change_matches: {
+    description: 'Find candidates for the resident’s open request: compatible swap partners (identity masked) or vacant beds for a move.',
+    parameters: { type: 'object', properties: {} },
+    requiresConfirmation: false,
+    roles: ['PG_TENANT'],
+    execute: async (actor) => {
+      const { propertyId, tenant } = await residentRoomTenant(actor);
+      const mine = await db.pGRoomChangeRequest.findFirst({
+        where: { propertyId, requesterId: tenant.id, status: { in: [...ACTIVE_ROOM_CHANGE_STATUSES] } },
+        select: { id: true, requestType: true, preferences: true }
+      });
+      if (!mine) throw new Error('NO_OPEN_REQUEST');
+      if (mine.requestType === 'MOVE') {
+        const beds = await db.pGBed.findMany({
+          where: { status: 'AVAILABLE', room: { propertyId, status: 'ACTIVE' } },
+          include: { room: true },
+          orderBy: { label: 'asc' },
+          take: 20
+        });
+        return { request_id: mine.id, request_type: 'MOVE', vacant_beds: beds.map(offeredBedView) };
+      }
+      const prefs = parseRoomPreferences(mine.preferences);
+      const others = await db.pGRoomChangeRequest.findMany({
+        where: { propertyId, requestType: 'SWAP', status: 'PENDING_MATCH', requesterId: { not: tenant.id } },
+        include: {
+          requester: { select: { id: true, name: true } },
+          fromBed: { include: { room: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20
+      });
+      return {
+        request_id: mine.id,
+        request_type: 'SWAP',
+        candidates: others.filter((row: any) => row.fromBedId).map((row: any) => ({
+          their_request_id: row.id,
+          partner: maskSwapPartner({
+            name: row.requester?.name,
+            roomNumber: row.fromBed?.room?.roomNumber,
+            floor: row.fromBed?.room?.floor,
+            roomType: row.fromBed?.room?.roomType
+          }),
+          offered_bed: offeredBedView(row.fromBed),
+          compatibility: roomPreferencesCompatible(prefs, parseRoomPreferences(row.preferences)) ? 'MATCH' : 'OPEN'
+        }))
+      };
+    }
+  },
+
+  propose_room_swap: {
+    description: 'Propose a swap to another resident’s pending request. The partner accepts or declines; nothing moves until staff confirm.',
+    parameters: {
+      type: 'object',
+      properties: { my_request_id: { type: 'string' }, their_request_id: { type: 'string' } },
+      required: ['my_request_id', 'their_request_id']
+    },
+    requiresConfirmation: true,
+    roles: ['PG_TENANT'],
+    execute: async (actor, args) => {
+      const { propertyId, tenant } = await residentRoomTenant(actor);
+      const mine = await db.pGRoomChangeRequest.findUnique({ where: { id: String(args.my_request_id) } });
+      if (!mine || mine.propertyId !== propertyId || mine.requesterId !== tenant.id) throw new Error('FORBIDDEN');
+      if (!canTransitionRoomChange(mine.status, 'PROPOSED', 'REQUESTER', mine.requestType)) throw new Error('INVALID_STATE');
+      const theirs = await db.pGRoomChangeRequest.findUnique({
+        where: { id: String(args.their_request_id) },
+        include: { requester: { select: { id: true, name: true } }, fromBed: { include: { room: true } } }
+      });
+      if (!theirs || theirs.propertyId !== propertyId || theirs.requestType !== 'SWAP' ||
+        theirs.status !== 'PENDING_MATCH' || theirs.requesterId === tenant.id || !theirs.fromBedId) {
+        throw new Error('PARTNER_UNAVAILABLE');
+      }
+      const updated = await db.pGRoomChangeRequest.update({
+        where: { id: mine.id },
+        data: { partnerId: theirs.requesterId, toBedId: theirs.fromBedId, status: 'PROPOSED' }
+      });
+      logAudit(propertyId, actor.userId, 'ROOM_SWAP_PROPOSED_VIA_AI', 'PGRoomChangeRequest', mine.id, theirs.id);
+      return {
+        request_id: updated.id,
+        status: updated.status,
+        partner: maskSwapPartner({
+          name: theirs.requester?.name,
+          roomNumber: theirs.fromBed?.room?.roomNumber,
+          floor: theirs.fromBed?.room?.floor,
+          roomType: theirs.fromBed?.room?.roomType
+        }),
+        offered_bed: offeredBedView(theirs.fromBed)
+      };
+    }
+  },
+
+  respond_room_swap: {
+    description: 'Answer a swap proposal addressed to the signed-in resident. Accepting sends it to staff for the final move.',
+    parameters: {
+      type: 'object',
+      properties: { request_id: { type: 'string' }, decision: { type: 'string', enum: ['ACCEPT', 'DECLINE'] } },
+      required: ['request_id', 'decision']
+    },
+    requiresConfirmation: true,
+    roles: ['PG_TENANT'],
+    execute: async (actor, args) => {
+      const { propertyId, tenant } = await residentRoomTenant(actor);
+      const row = await db.pGRoomChangeRequest.findUnique({ where: { id: String(args.request_id) } });
+      if (!row || row.propertyId !== propertyId || row.partnerId !== tenant.id) throw new Error('FORBIDDEN');
+      const decision = str(args.decision).toUpperCase();
+      if (decision !== 'ACCEPT' && decision !== 'DECLINE') throw new Error('INVALID_DECISION');
+      const next = decision === 'ACCEPT' ? 'ACCEPTED' : 'DECLINED';
+      if (!canTransitionRoomChange(row.status, next, 'PARTNER', row.requestType)) throw new Error('INVALID_STATE');
+      const updated = await db.pGRoomChangeRequest.update({ where: { id: row.id }, data: { status: next } });
+      logAudit(propertyId, actor.userId, 'ROOM_SWAP_RESPONDED_VIA_AI', 'PGRoomChangeRequest', row.id, updated.status);
+      return {
+        request_id: updated.id,
+        status: updated.status,
+        next: updated.status === 'ACCEPTED' ? 'Waiting for your warden or owner to confirm the move.' : null
+      };
+    }
+  },
+
+  list_room_change_requests: {
+    description: 'List room swap and move requests across the caller’s properties, newest first. Staff only; resident phone numbers are never returned.',
+    parameters: { type: 'object', properties: { status: { type: 'string', description: 'Optional status filter such as ACCEPTED or PENDING_MATCH.' } } },
+    requiresConfirmation: false,
+    roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+    execute: async (actor, args = {}) => {
+      if (!actor.propertyIds.length) throw new Error('FORBIDDEN');
+      const status = str(args.status).toUpperCase();
+      const rows = await db.pGRoomChangeRequest.findMany({
+        where: {
+          propertyId: { in: actor.propertyIds },
+          ...(status ? { status } : {})
+        },
+        include: {
+          property: { select: { name: true } },
+          requester: { select: { name: true } },
+          partner: { select: { name: true } },
+          fromBed: { include: { room: true } },
+          toBed: { include: { room: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50
+      });
+      return rows.map((row: any) => ({
+        request_id: row.id, request_type: row.requestType, status: row.status,
+        property: row.property?.name || null,
+        requester: row.requester?.name || null, partner: row.partner?.name || null,
+        from_bed: offeredBedView(row.fromBed), to_bed: offeredBedView(row.toBed),
+        reason: row.reason, decided_at: row.decidedAt, created_at: row.createdAt, updated_at: row.updatedAt
+      }));
+    }
+  },
+
+  decide_room_change: {
+    description: 'Staff decision on a room swap or move. Approving moves the residents to their new beds atomically. Staff only, audited.',
+    parameters: {
+      type: 'object',
+      properties: { request_id: { type: 'string' }, decision: { type: 'string', enum: ['APPROVE_AND_MOVE', 'DECLINE'] }, note: { type: 'string' } },
+      required: ['request_id', 'decision']
+    },
+    requiresConfirmation: true,
+    roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+    execute: async (actor, args) => {
+      const row = await db.pGRoomChangeRequest.findUnique({
+        where: { id: String(args.request_id) },
+        include: { requester: true, partner: true }
+      });
+      if (!row || !actor.propertyIds.includes(row.propertyId)) throw new Error('FORBIDDEN');
+      const decision = str(args.decision).toUpperCase();
+      if (decision !== 'APPROVE_AND_MOVE' && decision !== 'DECLINE') throw new Error('INVALID_DECISION');
+      const target = decision === 'APPROVE_AND_MOVE' ? 'COMPLETED' : 'DECLINED';
+      if (!canTransitionRoomChange(row.status, target, 'STAFF', row.requestType)) throw new Error('INVALID_STATE');
+      if (decision === 'DECLINE') {
+        const updated = await db.pGRoomChangeRequest.update({
+          where: { id: row.id },
+          data: { status: 'DECLINED', decidedBy: actor.userId, decidedAt: new Date() }
+        });
+        logAudit(row.propertyId, actor.userId, 'ROOM_CHANGE_DECLINED_VIA_AI', 'PGRoomChangeRequest', row.id, str(args.note).slice(0, 200));
+        return { request_id: updated.id, status: updated.status };
+      }
+      const requester = await db.pGTenant.findFirst({
+        where: { id: row.requesterId, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } }
+      });
+      if (!requester || !requester.bedId || requester.bedId !== row.fromBedId) throw new Error('STALE_BEDS');
+      if (row.requestType === 'SWAP') {
+        const partner = await db.pGTenant.findFirst({
+          where: { id: row.partnerId || '', status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } }
+        });
+        if (!partner || !partner.bedId || partner.bedId !== row.toBedId) throw new Error('STALE_BEDS');
+        const [, , updated] = await db.$transaction([
+          db.pGTenant.update({ where: { id: requester.id }, data: { bedId: partner.bedId } }),
+          db.pGTenant.update({ where: { id: partner.id }, data: { bedId: requester.bedId } }),
+          db.pGRoomChangeRequest.update({
+            where: { id: row.id },
+            data: { status: 'COMPLETED', decidedBy: actor.userId, decidedAt: new Date() }
+          }),
+          db.pGRoomChangeRequest.updateMany({
+            where: {
+              propertyId: row.propertyId, id: { not: row.id },
+              requesterId: { in: [requester.id, partner.id] },
+              status: { in: [...ACTIVE_ROOM_CHANGE_STATUSES] }
+            },
+            data: { status: 'WITHDRAWN' }
+          })
+        ]);
+        logAudit(row.propertyId, actor.userId, 'ROOM_SWAP_COMPLETED_VIA_AI', 'PGRoomChangeRequest', row.id, str(args.note).slice(0, 200));
+        return { request_id: updated.id, status: updated.status };
+      }
+      const bed = await db.pGBed.findFirst({
+        where: { id: row.toBedId || '', status: 'AVAILABLE', room: { propertyId: row.propertyId, status: 'ACTIVE' } }
+      });
+      if (!bed) throw new Error('BED_UNAVAILABLE');
+      const ops: any[] = [
+        db.pGRoomChangeRequest.update({
+          where: { id: row.id },
+          data: { status: 'COMPLETED', decidedBy: actor.userId, decidedAt: new Date() }
+        }),
+        db.pGTenant.update({ where: { id: requester.id }, data: { bedId: bed.id } }),
+        db.pGBed.update({ where: { id: bed.id }, data: { status: 'OCCUPIED' } }),
+        db.pGRoomChangeRequest.updateMany({
+          where: {
+            propertyId: row.propertyId, id: { not: row.id },
+            requesterId: requester.id, status: { in: [...ACTIVE_ROOM_CHANGE_STATUSES] }
+          },
+          data: { status: 'WITHDRAWN' }
+        })
+      ];
+      if (requester.bedId) ops.push(db.pGBed.update({ where: { id: requester.bedId }, data: { status: 'AVAILABLE' } }));
+      const [updated] = await db.$transaction(ops);
+      logAudit(row.propertyId, actor.userId, 'ROOM_MOVE_COMPLETED_VIA_AI', 'PGRoomChangeRequest', row.id, str(args.note).slice(0, 200));
+      return { request_id: updated.id, status: updated.status };
     }
   },
 
