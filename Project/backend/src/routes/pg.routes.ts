@@ -55,6 +55,16 @@ import {
 import multer from 'multer';
 import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware.js';
 import { getAiStatus, postChat, postTranscribe } from '../controllers/ai.controller.js';
+import {
+  createRoomChange,
+  decideRoomChange,
+  listMyRoomChanges,
+  listRoomChangeMatches,
+  listStaffRoomChanges,
+  listVacantBeds,
+  proposeRoomSwap,
+  respondRoomSwap
+} from '../controllers/room-change.controller.js';
 
 const voiceUpload = multer({
   storage: multer.memoryStorage(),
@@ -84,6 +94,12 @@ router.get('/tenant/payment-claims', authenticate, listResidentPaymentClaims);
 router.post('/tenant/payment-claims', authenticate, createResidentPaymentClaim);
 router.post('/tenant/:tenantId/notice', authenticate, submitTenantNotice);
 router.post('/tenant/:tenantId/notice-cancel', authenticate, cancelTenantNotice);
+router.get('/tenant/room-changes', authenticate, listMyRoomChanges);
+router.post('/tenant/room-changes', authenticate, createRoomChange);
+router.get('/tenant/room-change-matches', authenticate, listRoomChangeMatches);
+router.get('/tenant/vacant-beds', authenticate, listVacantBeds);
+router.post('/tenant/room-changes/:requestId/proposals', authenticate, proposeRoomSwap);
+router.post('/tenant/room-changes/:requestId/response', authenticate, respondRoomSwap);
 router.get('/owner/activity', authenticate, listAuditLogs);
 router.get('/properties', listProperties);
 router.get('/bookings/mine', listGuestBookings);
@@ -98,6 +114,8 @@ router.delete('/owner/properties/:propertyId', authenticate, deleteProperty);
 router.post('/owner/properties/:propertyId/rooms', authenticate, createRoom);
 router.patch('/owner/beds/:bedId/status', authenticate, updateBedStatus);
 router.get('/owner/bookings', authenticate, listOwnerBookings);
+router.get('/owner/room-changes', authenticate, listStaffRoomChanges);
+router.post('/owner/room-changes/:requestId/decision', authenticate, decideRoomChange);
 router.patch('/owner/bookings/:bookingId/status', authenticate, updateBookingStatus);
 router.post('/owner/tenants/:tenantId/check-in', authenticate, checkInTenant);
 router.post('/owner/tenants/:tenantId/check-out', authenticate, checkOutTenant);

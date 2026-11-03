@@ -25,13 +25,13 @@ function roleSystemPrompt(role) {
         return [...shared, 'You serve a PG owner across the properties they own. Summarize occupancy, outstanding dues and property expenses from tool results with period and scope. You may log property expenses, draft and approve electricity splits, and send rent reminders or notifications through their tools, always pausing for explicit confirmation first. Never mark rent paid or approve tenants yourself; direct those to the workspace workflows. Only ever discuss properties returned by your tools.'].join('\n');
     }
     if (role === 'PG_WARDEN') {
-        return [...shared, 'You serve a PG warden for day-to-day operations on assigned properties only: occupancy, bookings, maintenance lifecycle, expenses, electricity drafts and approvals, reminders and notifications, always pausing for explicit confirmation first. You cannot see outstanding-dues detail; for dues questions direct the owner to the rent ledger. Never mark rent paid or approve tenants yourself; direct those to the workspace workflows. Only ever discuss properties returned by your tools.'].join('\n');
+        return [...shared, 'You serve a PG warden for day-to-day operations on assigned properties only: occupancy, bookings, maintenance lifecycle, expenses, electricity drafts and approvals, reminders and notifications, always pausing for explicit confirmation first. You cannot see outstanding-dues detail; for dues questions direct the owner to the rent ledger. For room swap or move requests, review them with decide_room_change only after both residents have accepted; the move itself is atomic. Never mark rent paid or approve tenants yourself; direct those to the workspace workflows. Only ever discuss properties returned by your tools.'].join('\n');
     }
     if (role === 'SUPER_ADMIN') {
         return [...shared, 'You serve the platform administrator across every property. Summarize occupancy, outstanding dues and property expenses from tool results with period and scope. You may log property expenses, draft and approve electricity splits, and send rent reminders or notifications through their tools, always pausing for explicit confirmation first. Never mark rent paid or approve tenants yourself; direct those to the workspace workflows.'].join('\n');
     }
     if (role === 'PG_TENANT') {
-        return [...shared, 'You serve a resident and can only ever see their own stay on their own PG. For questions about room, stay, rent or dues, call get_my_stay immediately. For ticket history, call get_my_maintenance_requests. For a complaint, gather a short title, details and category, then call create_maintenance_ticket; the session already identifies their PG, so omit property_id. If the resident attaches a clear, relevant maintenance photo, use it to help describe the issue. For meal charges, use set_meal_preference only after explicit confirmation. Never ask which PG the resident is staying in or ask for internal IDs. Never access other residents, other PGs, owner finances or staff operations.'].join('\n');
+        return [...shared, 'You serve a resident and can only ever see their own stay on their own PG. For questions about room, stay, rent or dues, call get_my_stay immediately. For ticket history, call get_my_maintenance_requests. For a complaint, gather a short title, details and category, then call create_maintenance_ticket; the session already identifies their PG, so omit property_id. If the resident attaches a clear, relevant maintenance photo, use it to help describe the issue. For meal charges, use set_meal_preference only after explicit confirmation. For room changes: open requests with request_room_change, show matches with find_room_change_matches, and track them with get_my_room_change_requests. Swap proposals name only a first name and the bed on offer — never reveal any other resident phone number or surname, and either side may decline with no reason needed. Nothing moves until the warden or owner confirms. Never ask which PG the resident is staying in or ask for internal IDs. Never access other residents, other PGs, owner finances or staff operations.'].join('\n');
     }
     return [...shared, 'You serve visitors. Help discover PGs, check availability and booking status, and prepare booking requests only after collecting move-in details and phone verification. Visitors cannot create maintenance tickets; direct current residents to their authenticated resident portal for that.'].join('\n');
 }
@@ -41,6 +41,18 @@ function previewFor(tool, args) {
     }
     if (tool === 'create_maintenance_ticket') {
         return `File a maintenance ticket: ${args.title || 'untitled'} — ${(args.description || '').slice(0, 140)}.`;
+    }
+    if (tool === 'request_room_change') {
+        return `Open a room ${args.request_type === 'MOVE' ? 'move' : 'swap'} request for your stay${args.reason ? ` (${String(args.reason).slice(0, 100)})` : ''}. The other side and staff must still agree.`;
+    }
+    if (tool === 'propose_room_swap') {
+        return `Propose a swap with another resident's pending request. They can accept or decline; nothing moves until staff confirm.`;
+    }
+    if (tool === 'respond_room_swap') {
+        return `${args.decision === 'ACCEPT' ? 'Accept' : 'Decline'} the swap proposal${args.decision === 'ACCEPT' ? '; the warden or owner still confirms the move' : ''}.`;
+    }
+    if (tool === 'decide_room_change') {
+        return `${args.decision === 'APPROVE_AND_MOVE' ? 'Approve and move the resident(s) to their new bed(s) now' : 'Decline the room change request'}${args.note ? ` (${String(args.note).slice(0, 100)})` : ''}. This is audited.`;
     }
     if (tool === 'send_rent_reminders') {
         return `Send rent-due reminders for ${args.period || 'all open periods'}${args.property_id ? ' (one property)' : ' (all my properties)'}. Residents who were reminded recently are skipped unless forced.`;

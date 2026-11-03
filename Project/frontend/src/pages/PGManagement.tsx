@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BedDouble, Building2, Check, ClipboardList, Clock, Download, FileText, IndianRupee, Loader2, Plus, Users, Wallet, Wrench, X, Zap } from 'lucide-react';
+import { ArrowLeftRight, BedDouble, Building2, Check, ClipboardList, Clock, Download, FileText, IndianRupee, Loader2, Plus, Users, Wallet, Wrench, X, Zap } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
 import { SecureImage } from '../components/SecureImage';
@@ -19,12 +19,14 @@ type Expense = { id: string; category: string; amount: number; spentOn: string; 
 type ElecBill = { id: string; period: string; totalAmount: number; status: string; splitJson: string; property: { name: string } };
 type Staff = { id: string; name: string; phone: string; email?: string | null; role: string; property: { id: string; name: string } };
 type Summary = { properties: number; totalBeds: number; occupiedBeds: number; occupancyRate: number; pendingBookings: number; openTickets: number; rentOutstanding: number; canManageStaff: boolean };
+type RoomChangeBed = { bed_id: string; label: string; room_number: string | null; floor: number | null; room_type: string | null } | null;
+type RoomChangeRow = { request_id: string; request_type: string; status: string; property: string | null; requester: string | null; partner: string | null; from_bed: RoomChangeBed; to_bed: RoomChangeBed; reason: string | null; created_at: string };
 type OwnerReport = { period: string; properties: number; totalBeds: number; occupiedBeds: number; availableBeds: number; occupancyRate: number; activeTenants: number; newBookings: number; rentCharged: number; rentCollected: number; outstanding: number; entries: RentEntry[] };
 
 const emptySummary: Summary = { properties: 0, totalBeds: 0, occupiedBeds: 0, occupancyRate: 0, pendingBookings: 0, openTickets: 0, rentOutstanding: 0, canManageStaff: false };
 
 export default function PGManagement() {
-  const [view, setView] = useState<'overview' | 'properties' | 'bookings' | 'tenants' | 'activity' | 'rent' | 'payments' | 'expenses' | 'utilities' | 'maintenance' | 'reports' | 'staff'>('overview');
+  const [view, setView] = useState<'overview' | 'properties' | 'bookings' | 'roomchanges' | 'tenants' | 'activity' | 'rent' | 'payments' | 'expenses' | 'utilities' | 'maintenance' | 'reports' | 'staff'>('overview');
   const [properties, setProperties] = useState<Property[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -59,6 +61,9 @@ export default function PGManagement() {
   const [ticketForm, setTicketForm] = useState({ title: '', description: '', category: 'PLUMBING', priority: 'NORMAL', assignedTo: '' });
   const [rejectingBookingId, setRejectingBookingId] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
+  const [roomChanges, setRoomChanges] = useState<RoomChangeRow[]>([]);
+  const [decliningChangeId, setDecliningChangeId] = useState('');
+  const [changeDecisionNote, setChangeDecisionNote] = useState('');
   const [checkoutTenantId, setCheckoutTenantId] = useState('');
   const [refundReference, setRefundReference] = useState('');
   const [ticketImage, setTicketImage] = useState<File | null>(null);
@@ -80,6 +85,7 @@ export default function PGManagement() {
         setSummary(summaryResponse.data);
         setTenants(tenantResponse.data);
         try { const activityResponse = await api.get('/pg/owner/activity'); setActivity(activityResponse.data); } catch { setActivity([]); }
+        try { const roomChangeResponse = await api.get('/pg/owner/room-changes'); setRoomChanges(roomChangeResponse.data || []); } catch { setRoomChanges([]); }
         if (summaryResponse.data.canManageStaff) {
           const [rentResponse, expenseResponse, billResponse, reportResponse, staffResponse, claimResponse] = await Promise.all([
             api.get('/pg/owner/rent'),
@@ -547,10 +553,27 @@ export default function PGManagement() {
     }
   };
 
+  const decideRoomChange = async (requestId: string, decision: 'APPROVE_AND_MOVE' | 'DECLINE') => {
+    if (decision === 'APPROVE_AND_MOVE' && !window.confirm('Move the resident(s) to the new bed(s) now? This updates the stay records.')) return;
+    try {
+      await api.post(`/pg/owner/room-changes/${requestId}/decision`, { decision, ...(decision === 'DECLINE' && changeDecisionNote.trim() ? { note: changeDecisionNote.trim() } : {}) });
+      toast.success(decision === 'APPROVE_AND_MOVE' ? 'Rooms updated' : 'Request declined');
+      setDecliningChangeId('');
+      setChangeDecisionNote('');
+      refresh();
+    } catch (error: unknown) {
+      const message = typeof error === 'object' && error !== null && 'response' in error
+        ? (error as { response?: { data?: { message?: unknown } } }).response?.data?.message
+        : undefined;
+      toast.error(typeof message === 'string' && message.trim() ? message : 'Could not decide room change');
+    }
+  };
+
   const views = useMemo(() => [
     { id: 'overview', label: 'Overview', icon: Building2 },
     { id: 'properties', label: 'Properties & Beds', icon: BedDouble },
     { id: 'bookings', label: 'Bookings', icon: ClipboardList },
+    { id: 'roomchanges', label: 'Room changes', icon: ArrowLeftRight },
     { id: 'tenants', label: 'Tenants & KYC', icon: Users },
     { id: 'activity', label: 'Activity', icon: Clock },
     { id: 'maintenance', label: 'Maintenance', icon: Wrench },
@@ -701,6 +724,23 @@ export default function PGManagement() {
                   {booking.status === 'APPROVED' && booking.tenant?.status === 'RESERVED' && <button onClick={() => void updateTenantStay(booking.tenant!.id, 'check-in')} className="bg-[#02224B] px-3 py-2 text-sm font-semibold text-white">Check in</button>}
                 </article>)}
                 {!bookings.length && <p className="py-8 text-center text-sm text-slate-500">No booking requests yet.</p>}
+              </div>
+            </section>}
+
+            {view === 'roomchanges' && <section className="pt-6">
+              <h2 className="font-semibold">Room swap and move requests</h2>
+              <div className="mt-3 divide-y divide-slate-200 border-y border-slate-200">
+                {roomChanges.map((row) => <article key={row.request_id} className="flex flex-col gap-4 py-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{row.request_type === 'MOVE' ? 'Move' : 'Swap'} · {row.requester}{row.partner ? ` ↔ ${row.partner}` : ''}</h3><span className={`text-xs font-semibold uppercase ${row.status === 'ACCEPTED' ? 'text-emerald-700' : row.status === 'PENDING_MATCH' || row.status === 'PROPOSED' ? 'text-amber-700' : 'text-slate-500'}`}>{row.status.replace('_', ' ')}</span></div>
+                    <p className="mt-1 text-sm text-slate-600">{row.property}{row.from_bed ? ` · from Room ${row.from_bed.room_number || '?'}, ${row.from_bed.label}` : ''}{row.to_bed ? ` → Room ${row.to_bed.room_number || '?'}, ${row.to_bed.label}` : ''}</p>
+                    {row.reason && <p className="mt-1 text-sm text-slate-500">“{row.reason}”</p>}
+                    {decliningChangeId === row.request_id && <form onSubmit={(event) => { event.preventDefault(); void decideRoomChange(row.request_id, 'DECLINE'); }} className="mt-3 flex flex-col gap-2 sm:flex-row"><input value={changeDecisionNote} onChange={(event) => setChangeDecisionNote(event.target.value)} maxLength={200} placeholder="Note for the residents (optional)" className="w-full border border-slate-300 px-3 py-2 text-sm sm:w-80" /><button className="bg-red-700 px-3 py-2 text-sm font-semibold text-white">Confirm decline</button><button type="button" onClick={() => { setDecliningChangeId(''); setChangeDecisionNote(''); }} className="border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700">Cancel</button></form>}
+                  </div>
+                  {(row.status === 'ACCEPTED' || (row.status === 'PENDING_MATCH' && row.request_type === 'MOVE' && row.to_bed)) && decliningChangeId !== row.request_id && <div className="flex flex-wrap items-center gap-2"><button onClick={() => { setDecliningChangeId(row.request_id); setChangeDecisionNote(''); }} className="inline-flex items-center gap-1 border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"><X className="h-4 w-4" />Decline</button><button onClick={() => void decideRoomChange(row.request_id, 'APPROVE_AND_MOVE')} className="inline-flex items-center gap-1 bg-emerald-700 px-3 py-2 text-sm font-semibold text-white"><Check className="h-4 w-4" />Approve and move</button></div>}
+                  {row.status === 'PROPOSED' && <p className="text-xs text-slate-500">Waiting on the other resident.</p>}
+                </article>)}
+                {!roomChanges.length && <p className="py-8 text-center text-sm text-slate-500">No room change requests yet.</p>}
               </div>
             </section>}
 
