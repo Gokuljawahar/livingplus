@@ -9,7 +9,7 @@
     "build": "tsc",
     "start": "node src/index.js",
     "seed": "tsx prisma/seed-pg.ts",
-    "test": "tsx --test tests/ai-scenarios.test.ts tests/pg-host.test.ts tests/guest-bookings.test.ts tests/auth-middleware.test.ts tests/tool-gating.test.ts tests/room-change.test.ts"
+    "test": "tsx --test tests/ai-scenarios.test.ts tests/pg-host.test.ts tests/guest-bookings.test.ts tests/auth-middleware.test.ts tests/tool-gating.test.ts tests/room-change.test.ts tests/resident-search.test.ts"
   },
   "prisma": {
     "schema": "./prisma/schema.prisma",

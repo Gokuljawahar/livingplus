@@ -101,9 +101,9 @@ router.get('/tenant/vacant-beds', authenticate, listVacantBeds);
 router.post('/tenant/room-changes/:requestId/proposals', authenticate, proposeRoomSwap);
 router.post('/tenant/room-changes/:requestId/response', authenticate, respondRoomSwap);
 router.get('/owner/activity', authenticate, listAuditLogs);
-router.get('/properties', listProperties);
+router.get('/properties', optionalAuthenticate, listProperties);
 router.get('/bookings/mine', listGuestBookings);
-router.post('/bookings', createBookingRequest);
+router.post('/bookings', optionalAuthenticate, createBookingRequest);
 router.post('/bookings/:bookingRef/cancel', cancelBookingRequest);
 router.get('/bookings/:bookingRef/status', getPublicBookingStatus);
 

@@ -1,4 +1,4 @@
-import { LogOut, Building2, X, BedDouble } from 'lucide-react';
+import { LogOut, Building2, X, BedDouble, Search } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useSidebar } from '../../context/SidebarContext';
@@ -10,9 +10,15 @@ export default function Sidebar() {
   const { logout, user } = useAuth();
   const { isOpen, close, sectionNav } = useSidebar();
   
-  const navItems: any[] = [
-    { icon: BedDouble, label: 'PG Operations', path: resolveAppHost().kind === 'property' ? '/owner/manage' : '/pg/manage' }
-  ];
+  const residentBase = location.pathname.startsWith('/pg/') ? '/pg/resident' : '/resident';
+  const navItems: any[] = user?.role === 'PG_TENANT'
+    ? [
+      { icon: Building2, label: 'My stays', path: residentBase },
+      { icon: Search, label: 'Find a PG', path: '/pg' }
+    ]
+    : [
+      { icon: BedDouble, label: 'PG Operations', path: resolveAppHost().kind === 'property' ? '/owner/manage' : '/pg/manage' }
+    ];
 
   const adminItems = [
     { icon: Building2, label: 'PG Operators', path: '/pg/operators' }

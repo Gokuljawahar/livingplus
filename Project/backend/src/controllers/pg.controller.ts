@@ -9,7 +9,8 @@ import { sendDueRentReminders } from '../services/pg-rent-reminders.js';
 import { createExpense, deleteExpense, listExpenses } from '../services/pg-expenses.js';
 import { calculateMonthlyRent, ensureFoodEntries } from '../services/pg-billing.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
-import { buildGuestBookingWhere } from '../utils/guest-bookings.js';
+import { buildGuestBookingWhere, isPlaceholderResidentName } from '../utils/guest-bookings.js';
+import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
 
 function phoneVariants(phone: string): string[] {
   const digits = String(phone || '').replace(/\D/g, '');
@@ -49,6 +50,31 @@ async function residentScope(req: Request) {
     select: { id: true, status: true }
   }) : [];
   return { user, propertyId, tenantIds: tenants.map((tenant: { id: string }) => tenant.id), tenants };
+}
+// PGs the caller currently lives in as a resident. Room moves inside those
+// properties happen through the in-portal room change, so public search and
+// new bookings must not offer them back to the same resident.
+async function ownStayPropertyIds(req: Request): Promise<string[]> {
+  const user = currentUser(req);
+  if (!user || user.role !== 'PG_TENANT') return [];
+  const ids = new Set<string>();
+  if (user.propertyId) ids.add(user.propertyId);
+  try {
+    const account = await db.user.findUnique({ where: { id: user.id }, select: { phone: true } });
+    const phones = phoneVariants(String(account?.phone || '')).filter(Boolean);
+    if (phones.length) {
+      const stays = await db.pGTenant.findMany({
+        where: { phone: { in: phones }, status: { in: [...ACTIVE_RESIDENT_STATUSES] } },
+        select: { propertyId: true }
+      });
+      for (const stay of stays) {
+        if (stay.propertyId) ids.add(stay.propertyId);
+      }
+    }
+  } catch {
+    // A failed stay lookup must not break public search; fall back to the token property.
+  }
+  return [...ids];
 }
 
 export async function canManageProperty(req: Request, propertyId: string, roles = ['OWNER', 'WARDEN']): Promise<boolean> {
@@ -123,9 +149,11 @@ export const listProperties = async (req: Request, res: Response): Promise<any> 
 
   try {
     await releaseExpiredBookingHolds();
+    const hiddenPropertyIds = await ownStayPropertyIds(req);
     const properties = await db.pGProperty.findMany({
       where: {
         status: 'ACTIVE',
+        ...ownPropertyExclusionWhere(hiddenPropertyIds),
         ...(requestPropertyId(req) ? { id: requestPropertyId(req) } : {}),
         ...(locality ? { locality: { contains: locality } } : {}),
         ...(genderPolicy ? { genderPolicy: { in: [genderPolicy, 'ANY'] } } : {}),
@@ -363,6 +391,9 @@ export const createBookingRequest = async (req: Request, res: Response): Promise
   if (!propertyId || !residentName?.trim() || !phone?.trim() || !moveInDate) {
     return res.status(400).json({ message: 'Property, name, phone and move-in date are required' });
   }
+  if (isPlaceholderResidentName(residentName)) {
+    return res.status(400).json({ message: 'Please enter the resident\u2019s real name as on their ID' });
+  }
   if (requestPropertyId(req) && String(propertyId) !== requestPropertyId(req)) {
     return res.status(404).json({ message: 'Property is not available on this PG host' });
   }
@@ -375,6 +406,23 @@ export const createBookingRequest = async (req: Request, res: Response): Promise
       select: { id: true, bookingLockMinutes: true }
     });
     if (!property) return res.status(404).json({ message: 'Property is not available' });
+    // Residents move rooms inside their own PG through the in-portal room
+    // change, not through a new public booking.
+    const bookingRequester = currentUser(req);
+    if (bookingRequester?.role === 'PG_TENANT' && bookingRequester.propertyId === String(propertyId)) {
+      return res.status(409).json({ message: OWN_PROPERTY_BOOKING_MESSAGE });
+    }
+    const ownStay = await db.pGTenant.findFirst({
+      where: {
+        propertyId: String(propertyId),
+        phone: { in: phoneVariants(String(phone || '')).filter(Boolean) },
+        status: { in: [...ACTIVE_RESIDENT_STATUSES] }
+      },
+      select: { id: true }
+    });
+    if (ownStay) {
+      return res.status(409).json({ message: OWN_PROPERTY_BOOKING_MESSAGE });
+    }
 
     if (idemKey) {
       const existing = await db.pGBooking.findUnique({ where: { idempotencyKey: idemKey } });

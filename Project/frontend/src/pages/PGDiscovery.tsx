@@ -181,15 +181,31 @@ export default function PGDiscovery() {
       .filter(matchesRoom)
       .reduce((lowest, room) => Math.min(lowest, room.monthlyRent), Number.POSITIVE_INFINITY);
 
+  // A resident's own PG never appears in "search other PGs" here. Room moves
+  // inside it happen through the room change section of the resident portal.
+  const ownPropertyIds = useMemo(
+    () =>
+      new Set(
+        stays
+          .filter((stay) => ['ACTIVE', 'NOTICE_PERIOD', 'RESERVED'].includes(stay.status))
+          .map((stay) => stay.property.id)
+      ),
+    [stays]
+  );
+  const visibleProperties = useMemo(
+    () => (ownPropertyIds.size ? properties.filter((property) => !ownPropertyIds.has(property.id)) : properties),
+    [properties, ownPropertyIds]
+  );
+
   const queryFiltered = useMemo(() => {
     const text = query.trim().toLowerCase();
-    return properties.filter((property) => {
+    return visibleProperties.filter((property) => {
       const haystack = `${property.name} ${property.locality} ${property.city} ${property.address}`.toLowerCase();
       const matchesText = !text || haystack.includes(text);
       const matchesScope = !queryScope || queryScope === property.locality;
       return matchesText && matchesScope;
     });
-  }, [properties, query, queryScope]);
+  }, [visibleProperties, query, queryScope]);
 
   const amenityCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -200,8 +216,8 @@ export default function PGDiscovery() {
   }, [queryFiltered]);
 
   const localityOptions = useMemo(
-    () => [...new Set(properties.map((property) => property.locality).filter(Boolean))].sort(),
-    [properties]
+    () => [...new Set(visibleProperties.map((property) => property.locality).filter(Boolean))].sort(),
+    [visibleProperties]
   );
 
   const filteredProperties = useMemo(() => {
@@ -579,6 +595,16 @@ export default function PGDiscovery() {
             <Link to="/resident" className="ml-auto text-sm font-bold text-[#02224B] hover:underline">
               Open full profile →
             </Link>
+            {ownPropertyIds.size > 0 && (
+              <p className="w-full text-xs text-slate-500">
+                Your current PG{ownPropertyIds.size > 1 ? 's are' : ' is'} hidden from search. To change rooms, use
+                Room change in your{' '}
+                <Link to="/resident" className="font-bold text-[#02224B] hover:underline">
+                  resident portal
+                </Link>
+                .
+              </p>
+            )}
           </div>
         </section>
       )}

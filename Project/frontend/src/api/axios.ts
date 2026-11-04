@@ -19,7 +19,28 @@ const api = axios.create({
 api.interceptors.request.use(async (config) => {
   const isResidentRoute = window.location.pathname === '/resident' || window.location.pathname.startsWith('/pg/resident');
   const isResidentRequest = isResidentRoute || config.url?.includes('/pg/tenant/') || (config.data && !(config.data instanceof FormData) && config.data.purpose === 'TENANT_LOGIN');
-  const token = localStorage.getItem(isResidentRequest ? RESIDENT_TOKEN_KEY : OWNER_TOKEN_KEY);
+  // Public PG search and the assistant chat also hide a signed-in resident's
+  // own PG, so they need the resident identity even though the discovery page
+  // itself is not a resident route.
+  const method = (config.method || 'get').toLowerCase();
+  const url = config.url || '';
+  const pathname = window.location.pathname;
+  // Owner workspace pages must always act as the owner, even when a resident
+  // session from another tab lingers in storage. Otherwise the assistant
+  // answers with the resident persona on the owner page.
+  const isOwnerRoute =
+    pathname.startsWith('/owner/') ||
+    pathname.startsWith('/pg/manage') ||
+    pathname.startsWith('/pg/operators') ||
+    pathname.startsWith('/dashboard') ||
+    pathname === '/change-password';
+  const isPublicDiscovery =
+    (method === 'get' && url.includes('/pg/properties')) ||
+    (method === 'post' && url.includes('/pg/ai/chat'));
+  const residentToken = localStorage.getItem(RESIDENT_TOKEN_KEY);
+  const token = localStorage.getItem(
+    isResidentRequest || (!isOwnerRoute && isPublicDiscovery && Boolean(residentToken)) ? RESIDENT_TOKEN_KEY : OWNER_TOKEN_KEY
+  );
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }

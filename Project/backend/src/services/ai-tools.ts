@@ -17,6 +17,7 @@ import { logAudit } from './pg-audit.js';
 import { sendDueRentReminders } from './pg-rent-reminders.js';
 import { createExpense, listExpenses } from './pg-expenses.js';
 import { notifyWhatsAppTemplate } from './pg-notifications.js';
+import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
 
 const db = new Proxy({} as Record<string, any>, {
   get: (_target, property) => (prisma as any)[property]
@@ -106,6 +107,25 @@ async function publicProperties(where: Record<string, unknown> = {}) {
   });
 }
 
+// Staff tools accept a property UUID, slug, or exact name for property_id:
+// dues and occupancy results only show the model names, while
+// actor.propertyIds holds UUIDs. Anything outside the actor's own properties
+// resolves to null so callers can throw FORBIDDEN.
+async function resolveScopedPropertyId(actor: Actor, raw: unknown): Promise<string | null> {
+  const text = str(raw);
+  if (!text) return null;
+  if (actor.propertyIds.includes(text)) return text;
+  const accessible = await db.pGProperty.findMany({
+    where: { id: { in: actor.propertyIds } },
+    select: { id: true, name: true, slug: true }
+  });
+  const lowered = text.toLowerCase();
+  const hit = accessible.find((p: any) =>
+    String(p.name || '').toLowerCase() === lowered ||
+    (typeof p.slug === 'string' && p.slug.toLowerCase() === lowered));
+  return hit ? hit.id : null;
+}
+
 function compactProperty(property: any) {
   const rooms = property.rooms.map((room: any) => ({
     room_id: room.id,
@@ -127,13 +147,15 @@ function compactProperty(property: any) {
 
 export const toolCatalogue: Record<string, ToolExecutor> = {
   search_properties: {
-    description: 'Find published PG properties matching location, budget, gender policy, room type, AC, food and amenities.',
+    description: 'Find published PG properties matching location, budget, gender policy, room type, AC, food and amenities. A resident never sees their current PG here; room moves inside it go through the room change tools, never a new booking.',
     parameters: { type: 'object', properties: { location: { type: 'string' }, budget_max: { type: 'number' }, gender: { type: 'string', enum: ['MEN', 'WOMEN', 'ANY'] }, room_type: { type: 'string' }, ac: { type: 'boolean' }, food_included: { type: 'boolean' }, amenities: { type: 'array', items: { type: 'string' } } } },
     requiresConfirmation: false,
     roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
     execute: async (actor, args = {}) => {
       const q = str(args.location).toLowerCase();
-      const properties = await publicProperties(actor.role === 'PG_TENANT' && actor.propertyId ? { id: actor.propertyId } : {});
+      const properties = await publicProperties(
+        actor.role === 'PG_TENANT' && actor.propertyId ? ownPropertyExclusionWhere([actor.propertyId]) : {}
+      );
       return properties
         .filter((p: any) => !q || `${p.name} ${p.locality} ${p.city} ${p.address}`.toLowerCase().includes(q))
         .filter((p: any) => !args.gender || p.genderPolicy === 'ANY' || p.genderPolicy === args.gender)
@@ -209,9 +231,20 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
         const existing = await db.pGBooking.findUnique({ where: { idempotencyKey: idemKey } });
         if (existing) return { booking_ref: existing.bookingRef, status: existing.status, move_in_date: existing.moveInDate, deduped: true };
       }
-      if (actor.role === 'PG_TENANT' && actor.propertyId) {
-        const bed = await db.pGBed.findUnique({ where: { id: String(args.bed_id) }, select: { room: { select: { propertyId: true } } } });
-        if (!bed || bed.room.propertyId !== actor.propertyId) throw new Error('FORBIDDEN');
+      if (actor.role === 'PG_TENANT') {
+        const bedScope = await db.pGBed.findUnique({ where: { id: String(args.bed_id) }, select: { room: { select: { propertyId: true } } } });
+        const bedPropertyId = bedScope?.room?.propertyId;
+        if (!bedPropertyId) throw new Error('FORBIDDEN');
+        // Room moves inside the resident's own PG go through the room change
+        // tools, never a new booking — mirror of the public booking guard.
+        const tokenOwns = Boolean(actor.propertyId && bedPropertyId === actor.propertyId);
+        const phoneOwns = actor.phones.length
+          ? await db.pGTenant.findFirst({
+            where: { propertyId: bedPropertyId, phone: { in: actor.phones }, status: { in: [...ACTIVE_RESIDENT_STATUSES] } },
+            select: { id: true }
+          })
+          : null;
+        if (tokenOwns || phoneOwns) throw new Error(OWN_PROPERTY_BOOKING_MESSAGE);
       }
       if (!await consumePhoneToken(normalized, String(args.phone_token))) throw new Error('PHONE_NOT_VERIFIED');
       const booking = await db.$transaction(async (tx: any) => {
@@ -659,8 +692,9 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     requiresConfirmation: false,
     roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
     execute: async (actor, args) => {
-      const scope = args.property_id ? [String(args.property_id)] : actor.propertyIds;
-      if (args.property_id && !actor.propertyIds.includes(String(args.property_id))) throw new Error('FORBIDDEN');
+      const scopedPropertyId = args.property_id ? await resolveScopedPropertyId(actor, args.property_id) : null;
+      if (args.property_id && !scopedPropertyId) throw new Error('FORBIDDEN');
+      const scope = scopedPropertyId ? [scopedPropertyId] : actor.propertyIds;
       const [properties, activeTenants, pendingBookings] = await Promise.all([
         db.pGProperty.findMany({ where: { id: { in: scope } }, include: { rooms: { include: { beds: true } } } }),
         db.pGTenant.count({ where: { propertyId: { in: scope }, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } } }),
@@ -683,8 +717,9 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     requiresConfirmation: false,
     roles: ['PG_OWNER', 'SUPER_ADMIN'],
     execute: async (actor, args) => {
-      const scope = args.property_id ? [String(args.property_id)] : actor.propertyIds;
-      if (args.property_id && !actor.propertyIds.includes(String(args.property_id))) throw new Error('FORBIDDEN');
+      const scopedPropertyId = args.property_id ? await resolveScopedPropertyId(actor, args.property_id) : null;
+      if (args.property_id && !scopedPropertyId) throw new Error('FORBIDDEN');
+      const scope = scopedPropertyId ? [scopedPropertyId] : actor.propertyIds;
       const entries = await db.pGRentEntry.findMany({
         where: { tenant: { propertyId: { in: scope } }, status: { in: ['DUE', 'PARTIAL', 'OVERDUE'] }, ...(args.period ? { period: String(args.period) } : {}) },
         include: { tenant: { select: { name: true, property: { select: { name: true } } } } }
@@ -717,8 +752,9 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     requiresConfirmation: true,
     roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
     execute: async (actor, args = {}) => {
-      const scope = args.property_id ? [String(args.property_id)] : actor.propertyIds;
-      if (args.property_id && !actor.propertyIds.includes(String(args.property_id))) throw new Error('FORBIDDEN');
+      const scopedPropertyId = args.property_id ? await resolveScopedPropertyId(actor, args.property_id) : null;
+      if (args.property_id && !scopedPropertyId) throw new Error('FORBIDDEN');
+      const scope = scopedPropertyId ? [scopedPropertyId] : actor.propertyIds;
       const summary = await sendDueRentReminders(db, {
         propertyIds: scope,
         period: typeof args.period === 'string' ? args.period : undefined,
