@@ -9,6 +9,7 @@ import { createExpense, deleteExpense, listExpenses } from '../services/pg-expen
 import { calculateMonthlyRent, ensureFoodEntries } from '../services/pg-billing.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { buildGuestBookingWhere, isPlaceholderResidentName } from '../utils/guest-bookings.js';
+import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
 function phoneVariants(phone) {
     const digits = String(phone || '').replace(/\D/g, '');
     const normalized = digits.length === 10 ? `91${digits}` : digits;
@@ -44,6 +45,35 @@ async function residentScope(req) {
         select: { id: true, status: true }
     }) : [];
     return { user, propertyId, tenantIds: tenants.map((tenant) => tenant.id), tenants };
+}
+// PGs the caller currently lives in as a resident. Room moves inside those
+// properties happen through the in-portal room change, so public search and
+// new bookings must not offer them back to the same resident.
+async function ownStayPropertyIds(req) {
+    const user = currentUser(req);
+    if (!user || user.role !== 'PG_TENANT')
+        return [];
+    const ids = new Set();
+    if (user.propertyId)
+        ids.add(user.propertyId);
+    try {
+        const account = await db.user.findUnique({ where: { id: user.id }, select: { phone: true } });
+        const phones = phoneVariants(String(account?.phone || '')).filter(Boolean);
+        if (phones.length) {
+            const stays = await db.pGTenant.findMany({
+                where: { phone: { in: phones }, status: { in: [...ACTIVE_RESIDENT_STATUSES] } },
+                select: { propertyId: true }
+            });
+            for (const stay of stays) {
+                if (stay.propertyId)
+                    ids.add(stay.propertyId);
+            }
+        }
+    }
+    catch {
+        // A failed stay lookup must not break public search; fall back to the token property.
+    }
+    return [...ids];
 }
 export async function canManageProperty(req, propertyId, roles = ['OWNER', 'WARDEN']) {
     const user = currentUser(req);
@@ -118,9 +148,11 @@ export const listProperties = async (req, res) => {
     const genderPolicy = String(req.query.genderPolicy || '').trim();
     try {
         await releaseExpiredBookingHolds();
+        const hiddenPropertyIds = await ownStayPropertyIds(req);
         const properties = await db.pGProperty.findMany({
             where: {
                 status: 'ACTIVE',
+                ...ownPropertyExclusionWhere(hiddenPropertyIds),
                 ...(requestPropertyId(req) ? { id: requestPropertyId(req) } : {}),
                 ...(locality ? { locality: { contains: locality } } : {}),
                 ...(genderPolicy ? { genderPolicy: { in: [genderPolicy, 'ANY'] } } : {}),
@@ -376,6 +408,23 @@ export const createBookingRequest = async (req, res) => {
         });
         if (!property)
             return res.status(404).json({ message: 'Property is not available' });
+        // Residents move rooms inside their own PG through the in-portal room
+        // change, not through a new public booking.
+        const bookingRequester = currentUser(req);
+        if (bookingRequester?.role === 'PG_TENANT' && bookingRequester.propertyId === String(propertyId)) {
+            return res.status(409).json({ message: OWN_PROPERTY_BOOKING_MESSAGE });
+        }
+        const ownStay = await db.pGTenant.findFirst({
+            where: {
+                propertyId: String(propertyId),
+                phone: { in: phoneVariants(String(phone || '')).filter(Boolean) },
+                status: { in: [...ACTIVE_RESIDENT_STATUSES] }
+            },
+            select: { id: true }
+        });
+        if (ownStay) {
+            return res.status(409).json({ message: OWN_PROPERTY_BOOKING_MESSAGE });
+        }
         if (idemKey) {
             const existing = await db.pGBooking.findUnique({ where: { idempotencyKey: idemKey } });
             if (existing)

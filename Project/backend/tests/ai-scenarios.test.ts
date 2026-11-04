@@ -105,6 +105,8 @@ before(async () => {
   const bedFree3 = await prisma.pGBed.create({ data: { roomId: roomA.id, label: 'Bed 3', status: 'AVAILABLE' } });
   const bedOcc = await prisma.pGBed.create({ data: { roomId: roomB.id, label: 'Bed 1', status: 'OCCUPIED' } });
   const bedSpare = await prisma.pGBed.create({ data: { roomId: roomB.id, label: 'Bed 2', status: 'AVAILABLE' } });
+  const otherRoom = await prisma.pGRoom.create({ data: { propertyId: other.id, roomNumber: '201', roomType: 'DOUBLE', monthlyRent: 6500, foodIncluded: false, status: 'ACTIVE' } });
+  const otherBed = await prisma.pGBed.create({ data: { roomId: otherRoom.id, label: 'Bed 1', status: 'AVAILABLE' } });
   const tenant = await prisma.pGTenant.create({
     data: {
       propertyId: prop.id, bedId: bedOcc.id, name: 'Spec Tenant', phone: '9200000002',
@@ -115,7 +117,7 @@ before(async () => {
   await prisma.pGRentEntry.create({ data: { tenantId: tenant.id, period: '2026-10', entryType: 'RENT', amount: 3000, paidAmount: 1000, dueDate: new Date('2026-10-05'), status: 'PARTIAL' } });
   const ticket = await prisma.pGMaintenanceTicket.create({ data: { propertyId: prop.id, tenantId: tenant.id, title: 'Leak', description: 'Sink leak', category: 'PLUMBING', status: 'OPEN' } });
   const otherTicket = await prisma.pGMaintenanceTicket.create({ data: { propertyId: other.id, title: 'Other', description: 'x', category: 'OTHER', status: 'OPEN' } });
-  ids = { owner, tenantUser, outsider, prop, other, roomA, roomB, bedFree1, bedFree2, bedFree3, bedOcc, bedSpare, tenant, ticket, otherTicket };
+  ids = { owner, tenantUser, outsider, prop, other, roomA, roomB, bedFree1, bedFree2, bedFree3, bedOcc, bedSpare, otherRoom, otherBed, tenant, ticket, otherTicket };
 });
 
 after(async () => {
@@ -149,6 +151,60 @@ describe('discovery and availability (guest)', () => {
     const byRoom = Object.fromEntries(res.map((r: any) => [r.room_number, r]));
     assert.deepEqual(byRoom['101'].beds.map((b: any) => b.status), ['AVAILABLE', 'AVAILABLE', 'AVAILABLE']);
     assert.deepEqual(byRoom['102'].beds.map((b: any) => b.status), ['OCCUPIED', 'AVAILABLE']);
+  });
+});
+
+describe('resident own-PG exclusion in AI search and booking', () => {
+  it('hides the resident PG from AI search but keeps other PGs', async () => {
+    const resident = await tools.actorFromRequest(userReq(ids.tenantUser));
+    assert.equal(resident.propertyId, ids.prop.id);
+    const res: any[] = await tools.toolCatalogue.search_properties.execute(resident, {});
+    assert.ok(res.length > 0, 'other PGs stay visible to residents');
+    assert.ok(res.every((p: any) => p.property_id !== ids.prop.id), 'own PG is hidden');
+  });
+
+  it('refuses an AI booking inside the resident PG and points at room change', async () => {
+    const resident = await tools.actorFromRequest(userReq(ids.tenantUser));
+    const before = await prisma.pGBooking.count();
+    await assert.rejects(
+      tools.toolCatalogue.create_booking_request.execute(resident, {
+        bed_id: ids.bedFree1.id, move_in_date: '2026-12-10',
+        resident_name: 'Spec Tenant', phone: '9200000002', phone_token: 'unused'
+      }),
+      /room change/i);
+    assert.equal(await prisma.pGBooking.count(), before);
+  });
+
+  it('still lets the same resident book a bed at another PG', async () => {
+    const resident = await tools.actorFromRequest(userReq(ids.tenantUser));
+    const { phone, token } = await otpFor('9400000011', 'tenant-other');
+    const res: any = await tools.toolCatalogue.create_booking_request.execute(resident, {
+      bed_id: ids.otherBed.id, move_in_date: '2026-12-11',
+      resident_name: 'Spec Tenant', phone, phone_token: token
+    });
+    assert.ok(/^PG-/.test(res.booking_ref));
+  });
+});
+
+describe('staff property resolution in AI tools', () => {
+  it('accepts a property name for dues and reminders inside the caller scope', async () => {
+    const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: ['9100000001'], propertyIds: [ids.prop.id], isSuperAdmin: false };
+    const dues: any = await tools.toolCatalogue.get_pending_rent.execute(actor, { property_id: 'Spec House' });
+    assert.equal(dues.outstanding_total, 7000);
+    assert.equal(dues.entries_due, 2);
+    const reminders: any = await tools.toolCatalogue.send_rent_reminders.execute(actor, { property_id: 'Spec House', period: '2026-11' });
+    assert.equal(reminders.total, 1);
+    assert.equal(reminders.sent, 0);
+  });
+
+  it('still refuses properties outside the caller scope without leaking data', async () => {
+    const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id], isSuperAdmin: false };
+    await assert.rejects(
+      tools.toolCatalogue.send_rent_reminders.execute(actor, { property_id: 'Other House' }),
+      /FORBIDDEN/);
+    await assert.rejects(
+      tools.toolCatalogue.get_pending_rent.execute(actor, { property_id: 'No Such House' }),
+      /FORBIDDEN/);
   });
 });
 
