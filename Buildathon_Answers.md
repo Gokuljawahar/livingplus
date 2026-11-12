@@ -75,6 +75,7 @@ Firebase Hosting serves the web frontend at the edge with CDN caching; Cloud Run
 
 Through Instagram.
 
+
 ## Research appendix (do NOT paste into portal)
 
 Deep-research run (3 parallel sweeps + critic + gap follow-up + synthesis; status: partial).
