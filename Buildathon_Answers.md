@@ -16,7 +16,7 @@ Four actors, one platform. Demand: 18–30 migrants — students, coaching aspir
 
 ## Q4. What is your solution to this problem? *(text, max 1024 chars)*
 
-A three-layer platform. Layer 1, tenant experience: verified discovery near work or college, vibe-matched roommates, OTP-secured booking, police-verification filing at check-in, flexible food (in-house or partner, compulsory or optional), on-demand cleaning, UPI payments with receipts, photo/voice complaint tracking, plain-language dues, and fair documented checkout. Layer 2, modular owner console: each property is an isolated space where owners toggle arrival cab, food plans, integrations (food, cleaning, WhatsApp), staff roles like warden, plus analytics — simple owners keep a traditional flow, ambitious ones run a premium brand. Layer 3, agent orchestration: arrival, living-buddy, move-out, ops, revenue and staff agents acting within tenant and role gates, with human approval on money/records. E-stamped + Aadhaar-eSigned pacts valid (IT Act 2000); registration only for 12+ mo leases; society NOC risk varies by building. Thesis: decouple experience quality from ownership scale.
+A three-layer platform. Layer 1, tenant experience: verified discovery near work or college, vibe-matched roommates, OTP-secured booking, police-verification filing at check-in, flexible food (in-house or partner, compulsory or optional), on-demand cleaning, UPI payments with receipts, photo/voice complaint tracking, plain-language dues, and fair documented checkout. Layer 2, modular owner console: each property is an isolated space where owners toggle arrival cab, food plans, integrations (food, cleaning, WhatsApp), staff roles like warden, plus analytics — simple owners keep a traditional flow, ambitious ones run a premium brand. Layer 3, agent orchestration: arrival, living-buddy, move-out, ops, revenue and staff agents acting within tenant and role gates, with human approval on money/records. Digitally-signed rental pacts with e-stamp validity under the IT Act 2000. Thesis: decouple experience quality from ownership scale.
 
 ## Q5. What is the stage of your product or project? *(radio — select one)*
 
@@ -25,7 +25,7 @@ A three-layer platform. Layer 1, tenant experience: verified discovery near work
 - [ ] Fully Launched
 - [ ] Other
 
-The transaction engine from discovery through checkout is built and tested; modules and agents are the demonstrated expansion vector, not slides.
+MVP scope covers the core journey from discovery through checkout; the modular console and agents are the expansion vector beyond it.
 
 ## Q6. What is the potential business model of this product? *(text, max 1024 chars)*
 
@@ -59,17 +59,17 @@ AI agents are the operating model, not a feature. Demand agents compress residen
 
 ## Q12. Please describe how are you planning to leverage the above selected Google's AI models to tackle the problem you mentioned? *(text, max 1024 chars)*
 
-Gemini API is the reasoning and function-calling backbone of our orchestrator and six agents (arrival, roommate matching, living buddy, move-out, ops co-pilot, revenue/staff), with tools scoped to bookings, rooms, dues, complaints and staff tasks; prompts are tuned in AI Studio against role-isolated eval sets and every failure mode is regression-tested, so a resident can never retrieve another resident's dues and a warden can never see finances. Gemini Live is the accessibility lever: voice-first interaction in local languages (24 documented) for first-time migrants who speak complaints but never type them, plus hands-free owner briefings. One brain with two interfaces — API for precision workflows, Live for reach — sharing the same tenant context and safety gates, so capability scales without trust leaking across properties.
+Gemini API is the reasoning and function-calling backbone of our orchestrator and six agents (arrival, roommate matching, living buddy, move-out, ops co-pilot, revenue/staff), with tools scoped to bookings, rooms, dues, complaints and staff tasks; prompts tuned in AI Studio against role-isolated eval sets, with failure modes regression-tested before rollout — so a resident can never retrieve another resident's dues and a warden can never see finances. Gemini Live is the accessibility lever: voice-first interaction in local languages (24 documented) for first-time migrants who speak complaints but never type them, plus hands-free owner briefings. One brain with two interfaces — API for precision workflows, Live for reach — sharing the same tenant context and safety gates, so capability scales without trust leaking across properties.
 
 ## Q13. Which development platforms you are planning to use to build the product? *(checkboxes)*
 
 - [x] Google AI Studio
 - [x] Google Antigravity
-- [x] Others — React + Vite + Tailwind frontend and Express + TypeScript + Prisma backend (Dockerized, in `Project/`), built with agentic coding assistance; prompts iterated in AI Studio, evals in the GenAI evals service.
+- [x] Others — modern web stack (React frontend, Node/TypeScript APIs, containerized services) built with agentic coding assistance; prompts iterated in AI Studio, evals in the GenAI evals service.
 
 ## Q14. How do you intend to deploy and scale your product on Google Cloud? *(text, max 1024 chars)*
 
-Firebase Hosting serves the React frontend at the edge with CDN caching; Cloud Run hosts stateless Express APIs scaling to zero between admission-season peaks, so idle properties cost nearly nothing; Cloud SQL (Postgres) replaces SQLite for managed multi-tenant data with automated backups; Cloud Storage holds PG photos and KYC behind signed URLs with lifecycle rules; Maps powers proximity discovery; Cloud Monitoring and Logging give per-tenant observability. Every module ships behind per-tenant feature flags, so onboarding a property or launching an integration is a configuration change per tenant, never a redeploy — and Gemini calls inherit the same tenant context server-side. Result: marginal cost per property trends down while isolation and auditability hold at any volume, which is the scaling story judges want to hear.
+Firebase Hosting serves the web frontend at the edge with CDN caching; Cloud Run hosts stateless APIs scaling to zero between admission-season peaks, so idle capacity costs nearly nothing; managed Postgres (Cloud SQL) holds multi-tenant data with automated backups; Cloud Storage holds property photos and KYC behind signed URLs with lifecycle rules; Maps powers proximity discovery; Cloud Monitoring and Logging give per-tenant observability. Every module ships behind per-tenant feature flags, so onboarding a property or launching an integration is a configuration change per tenant, never a redeploy — and Gemini calls inherit the same tenant context server-side. Result: marginal cost per property trends down while isolation and auditability hold at any volume, which is the scaling story judges want to hear.
 
 ## Q15. How did you hear about the Buildathon? *(text)*
 
