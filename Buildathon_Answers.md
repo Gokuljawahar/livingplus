@@ -1,52 +1,77 @@
-# LivingPlus — Google Startup Buildathon: Final Answers
+# LivingPlus — Google Startup Buildathon: Application Answers
 
-> Deadline: 15/11/2026 06:29 PM IST · Track: Open Innovation · All text boxes: max 1024 characters.
+> Mirror of the application form, in form order. Every text box: max 1024 characters (all answers below verified within limit). Radio/checkbox selections marked with [x].
 
-## 1. One-sentence summary
+## Q1. Provide one sentence summary of your new product/project that you are planning to build. *(text, max 1024 chars)*
 
 LivingPlus is an experience platform that productizes urban migration for India's millions of student and professional newcomers — giving tenants a managed journey from city arrival with cab pickup, verified stays near work, vibe-matched roommates, flexible food and cleaning, transparent payments and instant support through fair move-out — while apartment and PG owners run everything from a modular multi-tenant console, switching on only the services, integrations and staff roles each property needs, with agentic AI orchestrating both sides under strict tenant and role isolation.
 
-## 2. Main problem
+## Q2. What is the main problem that you are solving with the new product idea? *(text, max 1024 chars)*
 
 Three structural failures tax this market. First, discovery is adversarial: fake listings, a standard one-month broker fee, and advance-payment frauds of Rs 10,000–2,00,000 per victim hit newcomers with zero recourse — 60%+ of Bangalore tenants search 3+ weeks on mismatched listings. Second, living is unmanaged: food, cleaning, receipts, complaints, dues and deposits run on notebooks and WhatsApp, so quality collapses after check-in and disputes explode at checkout. Third, supply is fragmented: ~80–85% of urban rentals are unorganized while branded stock is only ~0.3M beds, and rigid software fits nobody — food can't be optional per resident, cabs and cleaning can't plug in, staff can't be scoped. Result: residents churn through distrust, owners compete only by cutting rent, and the services value pool around every stay goes uncaptured.
 
-## 3. Typical user/customer
+## Q3. Who would be a typical user/customer? *(text, max 1024 chars)*
 
 Four actors, one platform. Demand: 18–30 migrants — students, coaching aspirants, early professionals — new to the city, plus parents as trust-buyers who often fund it. Economic buyer: independent apartment and PG owners, single to multi-property, who buy occupancy, operational calm and ancillary income. Operational users: wardens, cooks, housekeeping and accountants with scoped permissions. Ecosystem: food, cleaning and mobility partners gaining concentrated resident demand per property. TAM ladder (reconciled): 450M internal migrants = 2011 population stock, not yearly demand; 40M+ urban migrant-worker pool = serviceable renter base; $15–20B = total annual PG spend (~16% CAGR, RedSeer); Rs 4,000cr→Rs 20,600cr by 2030 = organized slice only (Colliers, May 2025). Commercial logic: residents and staff are served free, owners pay, partners share revenue — so acquisition concentrates on owners while resident density per property compounds partner value.
 
-## 4. Solution
+## Q4. What is your solution to this problem? *(text, max 1024 chars)*
 
 A three-layer platform. Layer 1, tenant experience: verified discovery near work or college, vibe-matched roommates, OTP-secured booking, police-verification filing at check-in, flexible food (in-house or partner, compulsory or optional), on-demand cleaning, UPI payments with receipts, photo/voice complaint tracking, plain-language dues, and fair documented checkout. Layer 2, modular owner console: each property is an isolated space where owners toggle arrival cab, food plans, integrations (food, cleaning, WhatsApp), staff roles like warden, plus analytics — simple owners keep a traditional flow, ambitious ones run a premium brand. Layer 3, agent orchestration: arrival, living-buddy, move-out, ops, revenue and staff agents acting within tenant and role gates, with human approval on money/records. E-stamped + Aadhaar-eSigned pacts valid (IT Act 2000); registration only for 12+ mo leases; society NOC risk varies by building. Thesis: decouple experience quality from ownership scale.
 
-## 5. Stage
+## Q5. What is the stage of your product or project? *(radio — select one)*
 
-**Minimal Viable Product (MVP).** The transaction engine from discovery through checkout is built and tested; modules and agents are the demonstrated expansion vector, not slides.
+- [ ] Ideation
+- [x] Minimal Viable Product (MVP)
+- [ ] Fully Launched
+- [ ] Other
 
-## 6. Business model
+The transaction engine from discovery through checkout is built and tested; modules and agents are the demonstrated expansion vector, not slides.
+
+## Q6. What is the potential business model of this product? *(text, max 1024 chars)*
 
 Three revenue pools in land-and-expand order. Pool 1, SaaS: pilot pricing Rs 99/bed/month base plus Rs 49 per active module (food, integrations, AI) as owners switch on — net revenue retention grows with module penetration per property. Pool 2, transactions: 5% commission on confirmed bookings plus featured and verified-listing promotions that owners buy to fill vacancies faster. Pool 3, ecosystem take-rate: shares of food, cleaning and mobility fulfilled inside properties, where concentrated resident demand gives us partner leverage no single PG could command. Residents and staff pay nothing, which maximizes density; density raises partner yield; partner yield funds accessible SaaS pricing. Unit economics improve with every module switched on, and multi-property owners standardize across their portfolio, raising switching costs structurally.
 
-## 7. Competitors & differentiation
+## Q7. Who will be your primary competitor(s) and how is your solution different from them? *(text, max 1024 chars)*
 
 Map the market on journey coverage versus supply flexibility. Branded co-living covers the journey but only on its own network: Stanza (~51–75k beds across FY25 reports) and Zolo (~50k beds, FY25 revenue Rs 342cr, +67%) run leased/managed supply, Colive holds ~14k beds targeting 50k — premium cost, zero help to independent owners. Marketplaces (NoBroker, MagicBricks, 99acres) aggregate third-party supply but stop at lead-gen; NoBroker adds agreements, rent collection and society management across 20,000+ communities, yet no managed-stay living layer. Brokers monetize opacity. Legacy suites (Yardi, Buildium) are accounting-first and rigid for small portfolios, though 2026 tools now add AI and tenant portals. LivingPlus takes the empty quadrant — full-journey coverage on anyone's supply via modular tenancy plus isolated agents — with moats in configuration data, partner density, workflow lock-in, and double-blind 14-day two-way ratings with AI tenant screening (rent-to-credit stays roadmap-only).
 
-## 8. Target countries
+## Q8. What will be your primary and secondary target countries, if applicable? *(text, max 1024 chars)*
 
 Beachhead is India: among the world's largest migrant inflows (450M internal migrants, Census 2011; 40M+ urban migrant-worker base), a $15–20B PG market growing ~16% CAGR, with ~80–85% unorganized supply versus ~0.3M branded beds heading to ~1M by 2030 (Colliers, May 2025) — maximum pain meets maximum leverage, with low acquisition cost through owner clusters near campuses and office corridors. Wave two replicates where renting is dense and supply fragmented: the UAE (~89% foreigner share; Law No.4 of 2026 in force Aug 2026 with permits + DLD register; shared units 30–40% below whole-unit rents) and SE Asia — steady Philippines boarding demand near campuses, Indonesia kost aggregated via Mamikos (qualitative fit; no sized TAM claimed). Same playbook and modules, localized language and payments; expansion is configuration, not rebuild. Pilot channels: 1–2 colleges + 1 corporate batch + certified-agent listings (precedent: Zolo–MAHE 20k beds 2023; live ref: JECRC 1600+ students 2025).
 
-## 9. How will you use AI
+## Q9. Please upload a pitch deck for your startup/project. *(PDF, up to 5 MB)*
+
+Export `LivingPlus_Pitch_Deck_v3.pptx` to PDF (must stay ≤ 5 MB) and upload; fill in the slide 9 contact line before exporting.
+
+## Q10. How are you planning to use AI for this solution? *(text, max 1024 chars)*
 
 AI agents are the operating model, not a feature. Demand agents compress resident effort: arrival (pickup, check-in guidance), roommate matching (habit and compatibility scoring), living buddy (dues explained simply, complaints from photo or voice, food and cleaning orders, pre-due nudges), and move-out (deduction computation from ledger, inspection scheduling, refunds). Supply agents compress owner overhead: ops co-pilot (daily brief on occupancy, dues, complaints, expiries with one-tap actions and drafted notices), revenue (vacancy pricing, instant lead follow-up), staff coordinator (tasking, escalation, audit trail). Safety architecture: every request passes tenant plus role gates before any tool call, cross-tenant data is unreachable by construction, and money or record mutations require human approval with full ledger audit — autonomy where it delights, control where it matters, converting support from cost center into the product.
 
-## 10. Google AI models — select Gemini API + Gemini Live
+## Q11. Please select Google's AI model(s) that you will be leveraging for your AI usecase. *(checkboxes)*
 
-Gemini API is the reasoning and function-calling backbone for the orchestrator and all six agents, with tools scoped to bookings, rooms, dues, complaints and staff tasks; prompts and guardrails are tuned in AI Studio against role-isolated evaluation sets (e.g., resident must never retrieve another resident's dues, warden must never see finances), and every failure mode is regression-tested before rollout. Gemini Live is the inclusion and accessibility lever: voice-first, local-language interaction for first-time migrants who will speak a complaint but never type one, plus hands-free owner briefings. One brain with two interfaces — API for precision workflows, Live for reach — sharing the same tenant context and safety gates, so capability scales without trust leaking across properties.
+- [x] Gemini API
+- [ ] Gemini Omni
+- [x] Gemini Live
+- [ ] Gemma
+- [ ] Nano Banana
+- [ ] Lyria
+- [ ] Other
 
-## 11. Deploy & scale on Google Cloud
+## Q12. Please describe how are you planning to leverage the above selected Google's AI models to tackle the problem you mentioned? *(text, max 1024 chars)*
+
+Gemini API is the reasoning and function-calling backbone of our orchestrator and six agents (arrival, roommate matching, living buddy, move-out, ops co-pilot, revenue/staff), with tools scoped to bookings, rooms, dues, complaints and staff tasks; prompts are tuned in AI Studio against role-isolated eval sets and every failure mode is regression-tested, so a resident can never retrieve another resident's dues and a warden can never see finances. Gemini Live is the accessibility lever: voice-first interaction in local languages (24 documented) for first-time migrants who speak complaints but never type them, plus hands-free owner briefings. One brain with two interfaces — API for precision workflows, Live for reach — sharing the same tenant context and safety gates, so capability scales without trust leaking across properties.
+
+## Q13. Which development platforms you are planning to use to build the product? *(checkboxes)*
+
+- [x] Google AI Studio
+- [x] Google Antigravity
+- [x] Others — React + Vite + Tailwind frontend and Express + TypeScript + Prisma backend (Dockerized, in `Project/`), built with agentic coding assistance; prompts iterated in AI Studio, evals in the GenAI evals service.
+
+## Q14. How do you intend to deploy and scale your product on Google Cloud? *(text, max 1024 chars)*
 
 Firebase Hosting serves the React frontend at the edge with CDN caching; Cloud Run hosts stateless Express APIs scaling to zero between admission-season peaks, so idle properties cost nearly nothing; Cloud SQL (Postgres) replaces SQLite for managed multi-tenant data with automated backups; Cloud Storage holds PG photos and KYC behind signed URLs with lifecycle rules; Maps powers proximity discovery; Cloud Monitoring and Logging give per-tenant observability. Every module ships behind per-tenant feature flags, so onboarding a property or launching an integration is a configuration change per tenant, never a redeploy — and Gemini calls inherit the same tenant context server-side. Result: marginal cost per property trends down while isolation and auditability hold at any volume, which is the scaling story judges want to hear.
 
-## 12. How did you hear about the Buildathon
+## Q15. How did you hear about the Buildathon? *(text)*
 
 Through Instagram.
 
@@ -66,8 +91,8 @@ Live agent demo — VERIFIED 12 Nov 2026 against local stack (guest discovery + 
 
 ## Submission checklist
 
-- [ ] Stage: Minimal Viable Product (MVP)
-- [ ] Models ticked: Gemini API, Gemini Live
-- [ ] Platforms ticked: Google AI Studio, Google Antigravity, Others
-- [ ] Pitch deck exported to PDF (≤ 5 MB) and uploaded; slide 9 contact line filled in
+- [x] Q5 stage: Minimal Viable Product (MVP)
+- [x] Q11 models ticked: Gemini API, Gemini Live
+- [x] Q13 platforms ticked: Google AI Studio, Google Antigravity, Others
+- [ ] Q9: pitch deck exported to PDF (≤ 5 MB) and uploaded; slide 9 contact line filled in
 - [ ] Skim every box once for typos before submitting
