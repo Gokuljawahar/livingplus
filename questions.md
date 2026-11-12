@@ -74,3 +74,39 @@ Which development platforms you are planning to use to build the product? *(chec
 ## Q14. Deploy and scale on Google Cloud
 
 How do you intend to deploy and scale your product on Google Cloud? *(text, max 1024 chars — required)*
+
+---
+
+# Module 2 — Startup / Project Details (Idea Stage Startup)
+
+## M2-Q1. Project name
+
+Project Team Name / Potential Startup Name *(text, max 1024 chars — required)*
+
+## M2-Q2. Venture intent
+
+Are you planning to build a venture out of this project? *(radio — Yes / No, required)*
+
+## M2-Q3. Team size
+
+How many members are working together on this? *(text, max 1024 chars — required)*
+
+## M2-Q4. Industry / vertical
+
+Intended Industry/Vertical *(required)*
+
+## M2-Q5. Founders and LinkedIn
+
+Please share the name of your founder(s) or founding members, their company role/title, and their LinkedIn url. *(text, max 1024 chars — required)*
+
+## M2-Q6. Founder emails
+
+Provide Email ID(s) of the founding team/Founder *(text, max 1024 chars — required)*
+
+## M2-Q7. Team bio
+
+Please provide a brief bio, the background of the founders or founding team, experience, and complementary skills. *(text, max 1024 chars — required)*
+
+## M2-Q8. Time together
+
+How long have you been working as a team? *(radio — < 12 months / 1-2 years / 3-5 years / 5-10 years / 10+ years, required)*
