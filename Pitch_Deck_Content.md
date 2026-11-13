@@ -1,8 +1,8 @@
 # LivingPlus — Pitch Deck Content Plan (Google Startup Buildathon)
 
 > 11 slides · 16:9 · Dark theme (deep teal `#0F2027`, mint accent `#2DD4A7`) · 1 conclusion-first headline + max 5 bullets per slide.
-> Source of truth: `Buildathon_Answers.md` + deep-research runs (market + competitor verified; Google-stack verified). Portal upload: export to **PDF ≤ 5 MB**.
-> Figure rule: every number carries source + year. Anything without one is phrased qualitative — never sized.
+> Framing: idea-stage concept. Every slide describes the planned product and market — no claims of a built product, traction, customers or revenue. Source of truth: `Buildathon_Answers.md` (matched to `questions.md`). Portal upload: export to **PDF ≤ 5 MB**.
+> Figure rule: market numbers are third-party estimates — always carry source + year on the slide or in speaker notes; anything unsourced stays qualitative.
 
 ---
 
@@ -11,12 +11,12 @@
 **Headline:** LivingPlus — the experience platform for urban migration
 **Sub-line:** From city arrival to move-out · Google Startup Buildathon · India
 **Bullets:**
-- Tenants get a managed journey: cab pickup, verified stay, food, support, fair checkout
-- Owners get a modular console: switch on only what each property needs
-- Agentic AI on Gemini API + Live; tenant and role isolation enforced in our tool layer (function-calling per Google Cloud docs, 2026)
+- A planned platform that turns moving to a new city into a managed journey
+- For residents: verified stays, everyday services, transparent payments, fair move-out
+- For owners: a modular console to run any property like a branded operator
 
 **Visual:** night-arrival city skyline + phone mock with journey timeline.
-**Say:** "We productize urban migration — one platform both sides love."
+**Say:** "We want to productize urban migration — one platform both sides would love."
 
 ---
 
@@ -24,27 +24,27 @@
 
 **Headline:** Settling into a new city is stressful, slow and untrustworthy
 **Bullets:**
-- Discovery is adversarial — one month's rent is the standard broker fee (2026 city guides); fake-listing frauds run Rs 10,000–2,00,000 per victim, hitting young newcomers most (Sep 2026 review)
-- Search drags: 60%+ of Bangalore tenants spend 3+ weeks on mismatched listings (NoBroker Research, 2024)
-- Living is unmanaged — food, cleaning, receipts, complaints, dues run on notebooks and WhatsApp
-- Supply is fragmented — ~80–85% of urban rentals unorganized vs ~0.3M branded beds (recent analyses; Colliers May 2025)
+- Discovery is adversarial — fake or misleading listings, high broker fees, advance-payment fraud
+- Search drags on for weeks while listings rarely match real needs (cite dated source if quantified)
+- Living is unmanaged — food, cleaning, receipts, complaints, dues run on notebooks and chat apps
+- Supply is fragmented — most rentals are run by small independent owners with no shared tools
 
-**Visual:** three cracked pillars labeled Discovery / Living / Supply, each with its figure.
-**Say:** "Pain isn't one bug — it's three structural failures. That's why point fixes keep failing."
+**Visual:** three cracked pillars labeled Discovery / Living / Supply.
+**Say:** "The pain isn't one bug — it's three structural failures. That's why point fixes keep failing."
 
 ---
 
-## Slide 3 — Who we serve (demand this large)
+## Slide 3 — Who we serve
 
-**Headline:** Four actors, one platform, a $15–20B market
+**Headline:** Four actors, one platform
 **Bullets:**
-- Demand: 18–30 migrants from a 450M internal-migrant base (Census 2011) and 40M+ urban migrant-worker pool (2026 industry reporting) + parents as trust-buyers
-- Economic buyer: independent apartment/PG owners, single to multi-property — the ~80–85% unorganized supply
-- Operational users: wardens, cooks, housekeeping with strictly scoped roles
-- Ecosystem: food, cleaning, mobility partners buying concentrated resident demand
+- Demand: students and early professionals (roughly 18–30) moving cities, plus parents who fund and vet stays
+- Paying customers: independent apartment/PG owners, single to multi-property
+- Operational users: wardens, cooks, housekeeping and accountants with role-limited access
+- Ecosystem: food, cleaning and mobility partners serving concentrated resident demand
 
-**Visual:** four personas connected to one hub; market-size callout.
-**Say:** "We sell to owners, serve residents free, and monetize both plus partners."
+**Visual:** four personas connected to one hub.
+**Say:** "Owners would pay, residents and staff use it free, partners share revenue — density per property makes it work."
 
 ---
 
@@ -52,10 +52,10 @@
 
 **Headline:** Decouple experience quality from ownership scale
 **Bullets:**
-- Layer 1, tenant experience — verified discovery near work/college, vibe-matched roommates, OTP-secured booking, flexible food, on-demand cleaning, UPI receipts, tracked complaints, fair checkout
-- Layer 2, modular owner console — each property is an isolated tenant space: food plans, cab, integrations, staff roles, analytics, all per-property toggles
-- Layer 3, agent orchestration — arrival, living-buddy, move-out, ops, revenue, staff agents; function-calling tools scoped per role (Gemini API, Google Cloud docs 2026)
-- Trust built in: police-verification filing per local DM order at onboarding (Form C in 24h for foreigners); e-stamped + Aadhaar-eSigned pacts valid under IT Act 2000
+- Resident experience — verified discovery near work/college, roommate matching, secure booking, guided move-in, flexible food, cleaning, receipts, tracked complaints, fair move-out
+- Modular owner console — each property is a private workspace; owners switch services on or off and scope staff access by role
+- AI assistance — helpers for residents, owners and staff across the journey, with human approval for money and records
+- Trust by design — verified listings, documented agreements and dues, two-way reviews (specifics to be confirmed against local regulation)
 
 **Visual:** three stacked layers, toggles on the middle one.
 **Say:** "Simple owners keep a traditional flow; ambitious ones run a premium brand — same platform."
@@ -64,128 +64,110 @@
 
 ## Slide 5 — The journey: landing to leaving
 
-**Headline:** Own the full migrant journey, not just the listing
+**Headline:** Cover the full migrant journey, not just the listing
 **Bullets:**
-- Arrive: cab pickup (own or integrated), check-in checklist on chat or voice — Live API native audio: 30 HD voices across 24 documented languages with seamless switching (Google Cloud docs, 2026)
-- Settle: nearby verified stays via Places API searchNearby with type/rank filters (Maps Platform docs, 2026); OTP-secured booking
-- Live: flexible food, on-demand cleaning, receipts, photo/voice complaints, plain-language dues
-- Leave: ledger-based deductions, scheduled inspection, documented refund — no deposit fights
+- Arrive: optional pickup and a guided move-in checklist, by chat or voice
+- Settle: verified stays near campus or workplace, secure booking, clear terms before payment
+- Live: flexible food, on-demand cleaning, digital receipts, photo/voice complaints, plain-language dues
+- Leave: documented inspection and deduction summary — no deposit fights
 
 **Visual:** horizontal timeline with 4 stops and icons.
-**Say:** "Listing sites exit at search. We stay till send-off — that's where loyalty and margin live."
+**Say:** "Listing sites exit at search. The loyalty and margin live in everything after."
 
 ---
 
-## Slide 6 — Modular multi-tenancy
+## Slide 6 — Modular by design
 
 **Headline:** Every property configures its own LivingPlus
 **Bullets:**
-- Isolated tenant space per property: data, staff, settings never leak across owners
-- Food compulsory or optional per resident; cab, cleaning, WhatsApp on or off per property
-- Plug-in integrations: food vendors, cleaning providers, mobility, messaging
-- Media and documents shared by time-limited signed URLs, V4 signing (Cloud Storage docs, 2026)
+- Private workspace per property: data, staff and settings stay separate
+- Food compulsory or optional per resident; pickup, cleaning and messaging integrations on or off
+- Owners start simple and add modules as they grow — no forced bundle
+- The same core adapts to new cities and countries through configuration and localisation
 
 **Visual:** one console branching into three differently-configured properties.
-**Say:** "Onboarding a property is a configuration decision, never a rebuild."
+**Say:** "Onboarding a property would be a configuration decision, never a rebuild."
 
 ---
 
-## Slide 7 — AI agents: the operating model (all claims verified)
+## Slide 7 — AI: the planned operating layer
 
-**Headline:** Agents do the work; humans approve what matters
+**Headline:** AI assistants do the routine work; humans approve what matters
 **Bullets:**
-- Demand agents: arrival, roommate matching, living buddy, move-out
-- Supply agents: ops co-pilot (daily brief + drafted notices), revenue (vacancy pricing, lead follow-up), staff coordinator
-- Safety: tenant + role gates before every tool call; human approval on money/records; full audit
-- Built production-grade: prompts iterated in AI Studio, full-scale evals in GenAI evals service (GA Jul 2026), Antigravity 2.0 + CLI — GA, not preview (Cloud release notes, Aug 2026)
+- Resident side: arrival help, roommate matching, daily-living assistant, move-out guidance
+- Owner side: operations summaries with suggested actions, vacancy pricing help, enquiry follow-up, staff coordination
+- Accessible by design: voice-first, local-language interaction for users who prefer speaking to typing
+- Safe by design: per-property data separation, role-based limits, human approval for money/records, full activity record
 
-**Visual:** agent roster with a shield/gate icon over tenant boundaries.
+**Visual:** assistant roster with a shield/gate icon over property boundaries.
 **Say:** "Support stops being a cost center and becomes the product itself."
 
 ---
 
-## Slide 8 — Business model
+## Slide 8 — Business model (potential)
 
-**Headline:** Land with SaaS, expand with transactions and take-rate
+**Headline:** Land with subscriptions, expand with transactions and services
 **Bullets:**
-- Pool 1, SaaS: base per-bed subscription + per-module uplift — retention grows with penetration (market: $15–20B PG at ~16% CAGR per RedSeer; organized Rs 4,000cr→Rs 20,600cr by 2030 per Colliers May 2025)
-- Pool 2, transactions: booking commissions + featured/verified promotions owners buy to fill vacancies
-- Pool 3, ecosystem take-rate: share of food, cleaning, mobility fulfilled in-property
-- Flywheel: free residents → density → partner yield → accessible pricing → more owners
+- Subscriptions: owners pay per property/bed, with optional paid modules (food, integrations, AI)
+- Transactions: booking commissions and optional promoted/verified listings
+- Services: revenue share on food, cleaning and transport ordered through the platform
+- Flywheel: free residents → density per property → partner value → accessible owner pricing → more owners
 
 **Visual:** three stacked revenue bars feeding a flywheel loop.
-**Say:** "Margin expands with every module switched on — NRR grows inside each property."
+**Say:** "Three pools that reinforce each other — and owners only pay for what they switch on."
 
 ---
 
-## Slide 9 — Competition (figures checked)
+## Slide 9 — Competition
 
-**Headline:** The empty quadrant is ours
+**Headline:** Full journey, on anyone's supply — the open position
 **Bullets:**
-- Branded co-living covers the journey but only on its own leased/managed network: Stanza ~51–75k beds (FY25 reports vary), Zolo ~50k beds (FY25 revenue Rs 342cr, +67%), Colive ~14k beds targeting 50k
-- Marketplaces (NoBroker, MagicBricks, 99acres) stop at lead-gen; NoBroker adds agreements, rent collection, 20,000+ society management — yet no managed-stay living layer
-- Brokers monetize opacity; legacy suites (Yardi, Buildium) are accounting-first, though 2026 tools now add AI/portals — none covers the journey on anyone's supply
-- Moats: property configuration data × partner density per micro-market × workflow lock-in
-- Two-way trust no one else has: double-blind 14-day reviews (Airbnb model, 2026) + AI tenant screening with portable scores — no rent-to-credit promises (not standard in India)
+- Branded co-living (Stanza, Zolo, Colive): managed experience, but only on their own networks
+- Marketplaces (NoBroker, MagicBricks, 99acres): strong discovery, limited help after move-in
+- Brokers: monetize opacity; legacy management software: accounting-first, rigid for small owners
+- LivingPlus (planned): end-to-end journey for independent properties, modular per property, AI-assisted
+- Potential moats if adopted: property configuration know-how, local partner density, everyday workflow habits, trust data
 
-**Visual:** 2×2 matrix (journey coverage × supply flexibility), star top-right.
-**Say:** "Nobody covers the whole journey on anyone's supply. That quadrant compounds."
+**Visual:** 2×2 matrix (journey coverage × supply flexibility), star top-right labeled "planned position".
+**Say:** "Nobody owns the whole journey on independent supply. That is the position we aim for."
 
 ---
 
-## Slide 10 — Traction & roadmap
+## Slide 10 — Roadmap (idea stage)
 
-**Headline:** Engine built; modules and agents are the expansion vector
+**Headline:** From idea to first properties, in stages
 **Bullets:**
-- Built: discovery, OTP booking, payments with ledger, billing, complaints, checkout — tests green, builds passing
-- Observable from day one: Cloud Logging + Monitoring with metrics, dashboards, log-based alerts (Google Cloud Observability docs, 2026)
-- Pilot: 20 properties in one city + 1–2 colleges and 1 corporate batch; certified-agent listings; paid owner plans + booking commission (precedent: Zolo–MAHE 20k beds 2023; live ref: JECRC 1600+ students 2025)
-- Phase 2: arrival cab, food/cleaning partners, roommate matching, voice agents, inter-city transfers (roadmap-only: police-portal filing, deposit-arbitration SLA, rent-to-credit score)
+- Stage 1 — Validate: interview residents, owners and partners; sharpen the concept and pilot scope
+- Stage 2 — Build: first working version covering discovery, booking, payments, complaints and move-out
+- Stage 3 — Pilot: a small cluster of properties in one city, with campus/employer channels and service partners
+- Stage 4 — Expand: more modules (arrival, food/cleaning partners, voice), then more cities and countries
 
-**Visual:** roadmap in three phases with checkmarks on phase 1.
-**Say:** "We're not selling slides — the transaction engine runs today."
+**Visual:** four-step roadmap, first step highlighted as current.
+**Say:** "We are at stage one — validating before we build, so the pilot answers real questions."
 
 ---
 
 ## Slide 11 — Ask
 
-**Headline:** Build the migrant experience layer of India with us
+**Headline:** Help us make moving cities feel managed, not miserable
 **Bullets:**
-- Raising pilot + partner integrations for the 20-property launch
-- Seeking: 1 paid LOI for the 20-property pilot (Rs 99/bed/mo + 5% booking commission) plus design-partner owners, food/mobility pilots, Buildathon credits
-- Edge hosting on Firebase global CDN at no charge; APIs on Cloud Run that scale to zero — we pay compute only when used (2026 docs)
+- Seeking: design-partner owners and campus/employer pilots to validate the concept
+- Seeking: food, cleaning and mobility partners interested in property-level demand
+- Seeking: Buildathon mentorship, feedback and cloud credits to build and pilot on Google Cloud
 - Contact: [name · email · phone]
 
 **Visual:** city skyline + "Landing to leaving, handled." tagline.
-**Say:** "If you own beds or serve migrants, talk to us this week."
+**Say:** "If you own beds, serve migrants, or advise startups — talk to us this week."
 
 ---
 
-## Research footnotes (do NOT put on slides; keep for Q&A)
+## Speaker-notes backup (do NOT put on slides)
 
-- Stanza ~75k beds FY25 (Entrackr Apr 2026; CARE cites 51k — ranges vary, use "≈75k, FY25 reports"); leased/managed via 500+ developer partners, not owned.
-- Zolo ~50k beds / 300+ properties / 13 cities (Jan 2025 profile); FY25 revenue Rs 342.3cr +67%, losses −38% (RoC via Entrackr Apr 2026).
-- Colive ~14k beds at Sep 2025 Bain+Sattva $100M announcement (LiveMint/RealtynMore), 50k target.
-- UAE ~89% foreigner (UN WPP/DESA 2024); Law No.4 of 2026 signed 11 Mar 2026, in force 26 Aug 2026 — permits + DLD Shared Accommodation Register, 12-month compliance window (Garant/Kaizen/Alsuwaidi legal summaries 2026); shared units 30–40% below whole-unit rents.
-- PH/Indonesia: qualitative fit only — never size TAM. No yearly metro-inflow headcount exists — never claim one.
-- Named gaps remaining: exact 2026 bed counts vary by source (use dated figures as written); 99acres/MagicBricks trust-layer depth unverified beyond NoBroker.
-
-Google stack (each confirmed against official docs, accessed 12 Nov 2026)
-- Function calling: https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/ — tool use via function declarations; Live API async function calling supported.
-- Live API overview (24 languages): https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/live-api
-- Live API native audio (30 HD voices, 24 languages, seamless switching): https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash-live-api
-- AI Studio prompt iteration + code export; GenAI evals: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/evaluation-overview — Agent/Model Evaluations GA per Google Developers Blog 31 Jul 2026 (GenAI Client interface still Preview — do not claim otherwise).
-- Antigravity GA (not preview): bundled in Gemini Enterprise Standard/Plus since ~20–21 Aug 2026 (release notes + antigravity.google/blog, 2026).
-- Cloud Run scale-to-zero: https://cloud.google.com/run/docs — last instance removed with no traffic, created on demand.
-- Firebase Hosting global CDN at no charge: https://firebase.google.com/docs/hosting
-- Cloud SQL Postgres automated backups + PITR: https://docs.cloud.google.com/sql
-- Storage signed URLs (V4): https://docs.cloud.google.com/storage/docs/signed-urls
-- Places API (New) searchNearby: https://developers.google.com/maps/documentation/places/web-service/search-nearby
-- Cloud Logging + Monitoring: https://docs.cloud.google.com/stackdriver/docs (Google Cloud Observability)
-- Corrected 12 Nov 2026: "97+ Live languages" dropped (third-party only — use 24 documented); tenant/role isolation re-attributed to our tool layer, not Google docs.
-- TAM ladder (use verbatim if asked): 450M = 2011 migrant stock, not demand; 40M+ = serviceable urban renter-worker pool; $15–20B = total annual PG spend (~16% CAGR, RedSeer); Rs 4,000cr→Rs 20,600cr by 2030 = organized slice only (Colliers May 2025).
-- Live agent demo (verified 12 Nov 2026, local stack): guest discovery via search_properties with grounded reply; resident cross-tenant dues request refused, own dues via get_my_stay (Room 101 Bed 1, Nov 2026: Rs 9,000 + Rs 2,000 = Rs 11,000). Full transcript in Buildathon_Answers.md appendix.
-- Pilot economics (proposal — confirm): Rs 99/bed/mo + Rs 49/active module; 5% booking commission; 8–12% partner take-rate target; funnel ~60% demo-to-trial, ~40% trial-to-paid; LTV = ARPU × ~85% margin × ~24-mo tenure. LOI unsigned — name no property until signed.
+- Market and competitor scale figures come from third-party reports with varying dates and methods; present them as dated estimates with sources, never as audited current numbers.
+- Do not claim traction, signed pilots, customers, revenue, pricing, take-rates or timelines as facts — anything numeric on commercials is a hypothesis to validate in Stage 1–3.
+- Do not size markets for secondary countries, and do not claim a yearly city-inflow headcount; neither has been reliably established.
+- Trust/compliance specifics (verification duties, agreement formats, review mechanics) must be checked against current local regulation before being promised to users or partners.
+- Google services named in the answers (Gemini API, Gemini Live, AI Studio, Antigravity, Firebase Hosting, Cloud Run, Cloud SQL, Cloud Storage, Maps) are the planned build/deploy choices, described at capability level.
 
 ## Build checklist
 
