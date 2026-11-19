@@ -6,6 +6,12 @@
 // own credentials from its usual environment variables (GOOGLE_API_KEY,
 // OPENAI_API_KEY, ANTHROPIC_API_KEY, Google Cloud ADC, ...). Switching provider
 // means installing its @langchain/* package and changing AI_MODEL: no code.
+//
+// One exception: for "google:" models we build ChatGoogle from
+// @langchain/google/node ourselves. initChatModel loads the package's web entry,
+// whose client accepts only an API key, so on Cloud Run (no GOOGLE_API_KEY) it
+// failed with "No authentication method available". The Node entry also uses
+// Application Default Credentials: the service account, calling Vertex AI.
 import { initChatModel } from 'langchain';
 export const aiEnabled = () => process.env.ENABLE_AI_ORCHESTRATOR === 'true';
 function parseOptions(raw) {
@@ -45,6 +51,11 @@ export async function createChatModel(purpose = 'chat') {
     if (!config.model)
         throw new Error('AI_ORCHESTRATOR_NOT_CONFIGURED');
     try {
+        const { provider, name } = describeModel(config.model);
+        if (provider === 'google') {
+            const { ChatGoogle } = await import('@langchain/google/node');
+            return new ChatGoogle({ model: name, maxRetries: 1, ...config.options });
+        }
         return (await initChatModel(config.model, { maxRetries: 1, ...config.options }));
     }
     catch (error) {

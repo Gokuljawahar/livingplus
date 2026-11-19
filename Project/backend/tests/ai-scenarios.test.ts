@@ -1760,6 +1760,20 @@ describe('LangSmith tracing', () => {
 });
 
 describe('LangGraph agent with the Google provider', () => {
+  it('builds Gemini without an API key on the Node client, so Cloud Run uses its service account', async () => {
+    const keep = process.env.GOOGLE_API_KEY;
+    try {
+      delete process.env.GOOGLE_API_KEY;
+      const model: any = await providerMod.createChatModel();
+      // The web client (what initChatModel loads) rejects calls without a key:
+      // "No authentication method available". The Node client uses ADC instead.
+      assert.equal(model.apiClient?.constructor?.name, 'NodeApiClient');
+      assert.equal(model.location, 'global');
+    } finally {
+      if (keep === undefined) delete process.env.GOOGLE_API_KEY; else process.env.GOOGLE_API_KEY = keep;
+    }
+  });
+
   it('runs a tool round trip and echoes the Gemini thought signature', async () => {
     const api = fakeGemini([
       { candidates: [{ content: { role: 'model', parts: [
