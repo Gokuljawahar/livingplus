@@ -49,3 +49,31 @@ export const operatorSchema = z.object({
   amenities: z.string()
 });
 export type OperatorForm = z.infer<typeof operatorSchema>;
+
+// Resident portal (limits match the API).
+export const residentTicketSchema = z.object({
+  tenantId: z.string(),
+  category: z.string(),
+  title: z.string().trim().min(1, 'Add a short title').max(120, 'Keep the title under 120 characters'),
+  description: z.string().trim().min(1, 'Describe the issue').max(2000, 'Keep the details under 2000 characters')
+});
+export type ResidentTicketForm = z.infer<typeof residentTicketSchema>;
+
+export const paymentClaimSchema = z.object({
+  tenantId: z.string(),
+  rentEntryId: z.string(),
+  amount: z.string().refine((value) => Number(value) > 0, 'Enter the amount you paid'),
+  reference: z.string().trim().regex(/^[a-zA-Z0-9._/-]{6,80}$/, 'Enter the UPI reference / UTR (6-80 letters or numbers)')
+});
+export type PaymentClaimForm = z.infer<typeof paymentClaimSchema>;
+
+export const residentProfileSchema = z.object({
+  permanentAddress: z.string().max(200),
+  institutionOrEmployer: z.string().max(200),
+  emergencyName: z.string().max(200),
+  emergencyPhone: z.string().max(20),
+  bloodGroup: z.enum(['', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']),
+  kycType: z.string(),
+  foodOptOut: z.boolean()
+});
+export type ResidentProfileForm = z.infer<typeof residentProfileSchema>;

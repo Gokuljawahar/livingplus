@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { paymentClaimSchema, residentProfileSchema, residentTicketSchema, type PaymentClaimForm, type ResidentProfileForm, type ResidentTicketForm } from '../validation/forms';
 import { AlertCircle, ArrowLeftRight, Bell, Building2, Check, Download, History, Loader2, LogOut, Menu, Plus, ReceiptIndianRupee, Send, UserRound, UtensilsCrossed, Wallet, Wrench } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
@@ -40,6 +44,14 @@ type MaintenanceTicket = {
 type ResidentNotification = { id: string; type: string; title: string; message: string; entityId?: string | null; readAt?: string | null; createdAt: string };
 type PaymentClaim = { id: string; tenantId: string; rentEntryId: string; amount: number; reference: string; status: string; responseNote?: string | null; createdAt: string; rentEntry: { id: string; entryType: string; period: string } };
 
+const NO_STAYS: Stay[] = [];
+const NO_TICKETS: MaintenanceTicket[] = [];
+const NO_NOTIFICATIONS: ResidentNotification[] = [];
+const NO_CLAIMS: PaymentClaim[] = [];
+const EMPTY_TICKET: ResidentTicketForm = { tenantId: '', title: '', description: '', category: 'OTHER' };
+const EMPTY_PAYMENT: PaymentClaimForm = { tenantId: '', rentEntryId: '', amount: '', reference: '' };
+const EMPTY_PROFILE: ResidentProfileForm = { permanentAddress: '', bloodGroup: '', institutionOrEmployer: '', emergencyName: '', emergencyPhone: '', kycType: '', foodOptOut: false };
+
 export default function ResidentPortal() {
   return (
     <SidebarProvider>
@@ -58,63 +70,47 @@ function ResidentPortalView() {
   const [loading, setLoading] = useState(false);
   const { cooldown, startCooldown } = useOtpCooldown();
   const [activeTab, setActiveTab] = useState<'stays' | 'money' | 'food' | 'services' | 'maintenance' | 'roomchange' | 'notifications' | 'profile'>('stays');
-  const [stays, setStays] = useState<Stay[]>([]);
-  const [tickets, setTickets] = useState<MaintenanceTicket[]>([]);
   const [ticketFormFor, setTicketFormFor] = useState('');
-  const [ticketForm, setTicketForm] = useState({ tenantId: '', title: '', description: '', category: 'OTHER' });
-  const [submittingTicket, setSubmittingTicket] = useState(false);
-  const [notifications, setNotifications] = useState<ResidentNotification[]>([]);
-  const [paymentClaims, setPaymentClaims] = useState<PaymentClaim[]>([]);
   const [profileEditingFor, setProfileEditingFor] = useState('');
-  const [profileForm, setProfileForm] = useState({ permanentAddress: '', bloodGroup: '', institutionOrEmployer: '', emergencyName: '', emergencyPhone: '', kycType: '', foodOptOut: false });
   const [profileFile, setProfileFile] = useState<File | null>(null);
-  const [savingProfile, setSavingProfile] = useState(false);
   const [paymentFormFor, setPaymentFormFor] = useState('');
-  const [paymentForm, setPaymentForm] = useState({ tenantId: '', rentEntryId: '', amount: '', reference: '' });
-  const [submittingPayment, setSubmittingPayment] = useState(false);
+
+  // Portal data: one query (polled every 30s while signed in), refreshed after actions.
+  const queryClient = useQueryClient();
+  const { data: portal } = useQuery({
+    queryKey: ['resident', 'portal'],
+    queryFn: async () => {
+      const [stayResponse, ticketResponse, notificationResponse, claimResponse] = await Promise.all([
+        api.get('/pg/tenant/stays'),
+        api.get('/pg/tenant/maintenance'),
+        api.get('/pg/tenant/notifications'),
+        api.get('/pg/tenant/payment-claims')
+      ]);
+      return {
+        stays: stayResponse.data as Stay[],
+        tickets: ticketResponse.data as MaintenanceTicket[],
+        notifications: (notificationResponse.data.notifications || []) as ResidentNotification[],
+        paymentClaims: (claimResponse.data || []) as PaymentClaim[]
+      };
+    },
+    enabled: step === 'portal',
+    refetchInterval: 30_000,
+    meta: { errorMessage: 'Could not load resident account' }
+  });
+  const stays = portal?.stays ?? NO_STAYS;
+  const tickets = portal?.tickets ?? NO_TICKETS;
+  const notifications = portal?.notifications ?? NO_NOTIFICATIONS;
+  const paymentClaims = portal?.paymentClaims ?? NO_CLAIMS;
+  const refreshResidentData = () => queryClient.invalidateQueries({ queryKey: ['resident', 'portal'] });
+
+  const ticketFormApi = useForm<ResidentTicketForm>({ resolver: zodResolver(residentTicketSchema), defaultValues: EMPTY_TICKET });
+  const submittingTicket = ticketFormApi.formState.isSubmitting;
+  const paymentFormApi = useForm<PaymentClaimForm>({ resolver: zodResolver(paymentClaimSchema), defaultValues: EMPTY_PAYMENT });
+  const submittingPayment = paymentFormApi.formState.isSubmitting;
+  const profileFormApi = useForm<ResidentProfileForm>({ resolver: zodResolver(residentProfileSchema), defaultValues: EMPTY_PROFILE });
+  const savingProfile = profileFormApi.formState.isSubmitting;
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
   const canFindPg = isPathModeHost() || resolveAppHost().kind === 'public';
-
-  useEffect(() => {
-    if (step !== 'portal') return;
-    const loadPortal = async () => {
-      try {
-        const [stayResponse, ticketResponse, notificationResponse, claimResponse] = await Promise.all([
-          api.get('/pg/tenant/stays'),
-          api.get('/pg/tenant/maintenance'),
-          api.get('/pg/tenant/notifications'),
-          api.get('/pg/tenant/payment-claims')
-        ]);
-        setStays(stayResponse.data);
-        setTickets(ticketResponse.data);
-        setNotifications(notificationResponse.data.notifications || []);
-        setPaymentClaims(claimResponse.data || []);
-      } catch (error) {
-        toast.error(apiErrorMessage(error, 'Could not load resident account'));
-      }
-    };
-    void loadPortal();
-    const intervalId = window.setInterval(() => void loadPortal(), 30000);
-    return () => window.clearInterval(intervalId);
-  }, [step]);
-
-  const loadStays = async () => {
-    const response = await api.get('/pg/tenant/stays');
-    setStays(response.data);
-  };
-
-  const refreshResidentData = async () => {
-    const [stayResponse, ticketResponse, notificationResponse, claimResponse] = await Promise.all([
-      api.get('/pg/tenant/stays'),
-      api.get('/pg/tenant/maintenance'),
-      api.get('/pg/tenant/notifications'),
-      api.get('/pg/tenant/payment-claims')
-    ]);
-    setStays(stayResponse.data);
-    setTickets(ticketResponse.data);
-    setNotifications(notificationResponse.data.notifications || []);
-    setPaymentClaims(claimResponse.data || []);
-  };
 
   const requestCode = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -156,7 +152,7 @@ function ResidentPortalView() {
     try {
       await api.post(`/pg/tenant/${stayId}/notice`);
       toast.success('Notice submitted');
-      await loadStays();
+      await refreshResidentData();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not submit notice'));
     }
@@ -167,7 +163,7 @@ function ResidentPortalView() {
     try {
       await api.post(`/pg/tenant/${stayId}/notice-cancel`);
       toast.success('Vacating notice cancelled');
-      await loadStays();
+      await refreshResidentData();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not cancel notice'));
     }
@@ -175,31 +171,27 @@ function ResidentPortalView() {
 
   const openTicketForm = (stayId: string) => {
     setTicketFormFor(stayId);
-    setTicketForm({ tenantId: stayId, title: '', description: '', category: 'OTHER' });
+    ticketFormApi.reset({ ...EMPTY_TICKET, tenantId: stayId });
   };
 
-  const submitTicket = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setSubmittingTicket(true);
+  const submitTicket = ticketFormApi.handleSubmit(async (form) => {
     try {
-      await api.post('/pg/tenant/maintenance', ticketForm);
+      await api.post('/pg/tenant/maintenance', form);
       toast.success('Maintenance request sent');
       setTicketFormFor('');
-      setTicketForm({ tenantId: '', title: '', description: '', category: 'OTHER' });
+      ticketFormApi.reset(EMPTY_TICKET);
       await refreshResidentData();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not send maintenance request'));
-    } finally {
-      setSubmittingTicket(false);
     }
-  };
+  });
 
   const editProfile = (stay: Stay) => {
     setProfileEditingFor(stay.id);
     setProfileFile(null);
-    setProfileForm({
+    profileFormApi.reset({
       permanentAddress: stay.permanentAddress || '',
-      bloodGroup: stay.bloodGroup || '',
+      bloodGroup: (stay.bloodGroup || '') as ResidentProfileForm['bloodGroup'],
       institutionOrEmployer: stay.institutionOrEmployer || '',
       emergencyName: stay.emergencyName || '',
       emergencyPhone: stay.emergencyPhone || '',
@@ -208,9 +200,7 @@ function ResidentPortalView() {
     });
   };
 
-  const saveProfile = async (event: React.FormEvent<HTMLFormElement>, stayId: string) => {
-    event.preventDefault();
-    setSavingProfile(true);
+  const saveProfile = (stayId: string) => profileFormApi.handleSubmit(async (form) => {
     try {
       let kycDocumentUrl: string | undefined;
       if (profileFile) {
@@ -219,43 +209,40 @@ function ResidentPortalView() {
         const result = await api.post('/upload-s3', upload, { headers: { 'Content-Type': 'multipart/form-data' } });
         kycDocumentUrl = result.data.fileKey;
       }
-      await api.patch(`/pg/tenant/${stayId}/profile`, { ...profileForm, ...(kycDocumentUrl ? { kycDocumentUrl } : {}) });
+      await api.patch(`/pg/tenant/${stayId}/profile`, { ...form, ...(kycDocumentUrl ? { kycDocumentUrl } : {}) });
       toast.success('Profile saved. New KYC documents need owner verification.');
       setProfileEditingFor('');
       setProfileFile(null);
       await refreshResidentData();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not save profile'));
-    } finally {
-      setSavingProfile(false);
     }
-  };
+  });
 
   const startPaymentClaim = (stay: Stay, entry: Stay['rentEntries'][number]) => {
     setPaymentFormFor(entry.id);
-    setPaymentForm({ tenantId: stay.id, rentEntryId: entry.id, amount: String(Math.max(0, entry.amount - entry.paidAmount)), reference: '' });
+    paymentFormApi.reset({ tenantId: stay.id, rentEntryId: entry.id, amount: String(Math.max(0, entry.amount - entry.paidAmount)), reference: '' });
   };
 
-  const submitPaymentClaim = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setSubmittingPayment(true);
+  const submitPaymentClaim = paymentFormApi.handleSubmit(async (form) => {
     try {
-      await api.post('/pg/tenant/payment-claims', { ...paymentForm, amount: Number(paymentForm.amount) });
+      await api.post('/pg/tenant/payment-claims', { ...form, amount: Number(form.amount) });
       toast.success('Payment submitted for PG verification');
       setPaymentFormFor('');
-      setPaymentForm({ tenantId: '', rentEntryId: '', amount: '', reference: '' });
+      paymentFormApi.reset(EMPTY_PAYMENT);
       await refreshResidentData();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not submit payment'));
-    } finally {
-      setSubmittingPayment(false);
     }
-  };
+  });
 
   const markNotificationRead = async (notificationId: string) => {
     try {
       await api.patch(`/pg/tenant/notifications/${notificationId}/read`);
-      setNotifications((current) => current.map((notification) => notification.id === notificationId ? { ...notification, readAt: new Date().toISOString() } : notification));
+      queryClient.setQueryData(['resident', 'portal'], (current: typeof portal) => current && {
+        ...current,
+        notifications: current.notifications.map((notification) => notification.id === notificationId ? { ...notification, readAt: new Date().toISOString() } : notification)
+      });
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not update notification'));
     }
@@ -277,10 +264,7 @@ function ResidentPortalView() {
 
   const logout = () => {
     clearSession('PG_TENANT');
-    setStays([]);
-    setTickets([]);
-    setNotifications([]);
-    setPaymentClaims([]);
+    queryClient.removeQueries({ queryKey: ['resident'] });
     setStep('phone');
   };
 
@@ -390,11 +374,12 @@ function ResidentPortalView() {
                   </div>}
                   {paymentFormFor === entry.id && <form onSubmit={submitPaymentClaim} className="grid w-full gap-2 border-t border-slate-100 pt-3 sm:grid-cols-[1fr_1.5fr_auto]">
                     <label className="text-xs font-medium text-slate-600">Amount paid
-                      <input required type="number" min="0.01" max={entry.amount - entry.paidAmount} step="0.01" value={paymentForm.amount} onChange={(event) => setPaymentForm({ ...paymentForm, amount: event.target.value })} className="mt-1 block w-full border border-slate-300 px-3 py-2 text-sm" />
+                      <input required type="number" min="0.01" max={entry.amount - entry.paidAmount} step="0.01" {...paymentFormApi.register('amount')} className="mt-1 block w-full border border-slate-300 px-3 py-2 text-sm" />
                     </label>
                     <label className="text-xs font-medium text-slate-600">UPI transaction reference
-                      <input required minLength={6} maxLength={80} value={paymentForm.reference} onChange={(event) => setPaymentForm({ ...paymentForm, reference: event.target.value })} placeholder="UPI reference / UTR" className="mt-1 block w-full border border-slate-300 px-3 py-2 text-sm" />
+                      <input required minLength={6} maxLength={80} {...paymentFormApi.register('reference')} placeholder="UPI reference / UTR" className="mt-1 block w-full border border-slate-300 px-3 py-2 text-sm" />
                     </label>
+                    {Object.values(paymentFormApi.formState.errors)[0]?.message && <p role="alert" className="text-xs font-medium text-red-600 sm:col-span-3">{Object.values(paymentFormApi.formState.errors)[0]?.message}</p>}
                     <button disabled={submittingPayment} className="self-end bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">{submittingPayment ? 'Submitting…' : 'Submit for verification'}</button>
                   </form>}
                 </div>
@@ -429,15 +414,15 @@ function ResidentPortalView() {
                 {stay.permanentAddress && <span>{stay.permanentAddress}</span>}{stay.institutionOrEmployer && <span>{stay.institutionOrEmployer}</span>}{stay.emergencyName && <span>Emergency contact: {stay.emergencyName}{stay.emergencyPhone ? ` · ${stay.emergencyPhone}` : ''}</span>}
                 <span>KYC {stay.kycVerified ? 'verified' : stay.kycDocumentUrl ? 'submitted, awaiting review' : 'not submitted'}</span>
               </div>
-              {profileEditingFor === stay.id && <form onSubmit={(event) => void saveProfile(event, stay.id)} className="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2">
-                <label className="text-sm font-medium text-slate-700">Permanent address<input maxLength={200} value={profileForm.permanentAddress} onChange={(event) => setProfileForm({ ...profileForm, permanentAddress: event.target.value })} className="mt-1 block w-full border border-slate-300 px-3 py-2" /></label>
-                <label className="text-sm font-medium text-slate-700">College / employer<input maxLength={200} value={profileForm.institutionOrEmployer} onChange={(event) => setProfileForm({ ...profileForm, institutionOrEmployer: event.target.value })} className="mt-1 block w-full border border-slate-300 px-3 py-2" /></label>
-                <label className="text-sm font-medium text-slate-700">Emergency contact<input maxLength={200} value={profileForm.emergencyName} onChange={(event) => setProfileForm({ ...profileForm, emergencyName: event.target.value })} className="mt-1 block w-full border border-slate-300 px-3 py-2" /></label>
-                <label className="text-sm font-medium text-slate-700">Emergency phone<input type="tel" maxLength={20} value={profileForm.emergencyPhone} onChange={(event) => setProfileForm({ ...profileForm, emergencyPhone: event.target.value })} className="mt-1 block w-full border border-slate-300 px-3 py-2" /></label>
-                <label className="text-sm font-medium text-slate-700">Blood group<select value={profileForm.bloodGroup} onChange={(event) => setProfileForm({ ...profileForm, bloodGroup: event.target.value })} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2"><option value="">Not provided</option>{['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((group) => <option key={group} value={group}>{group}</option>)}</select></label>
-                <label className="text-sm font-medium text-slate-700">KYC document type<select value={profileForm.kycType} onChange={(event) => setProfileForm({ ...profileForm, kycType: event.target.value })} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2"><option value="">Select document</option>{[['AADHAAR', 'Aadhaar'], ['PAN', 'PAN'], ['PASSPORT', 'Passport'], ['DRIVING_LICENSE', 'Driving license'], ['STUDENT_ID', 'Student ID'], ['WORK_ID', 'Work ID']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              {profileEditingFor === stay.id && <form onSubmit={saveProfile(stay.id)} className="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2">
+                <label className="text-sm font-medium text-slate-700">Permanent address<input maxLength={200} {...profileFormApi.register('permanentAddress')} className="mt-1 block w-full border border-slate-300 px-3 py-2" /></label>
+                <label className="text-sm font-medium text-slate-700">College / employer<input maxLength={200} {...profileFormApi.register('institutionOrEmployer')} className="mt-1 block w-full border border-slate-300 px-3 py-2" /></label>
+                <label className="text-sm font-medium text-slate-700">Emergency contact<input maxLength={200} {...profileFormApi.register('emergencyName')} className="mt-1 block w-full border border-slate-300 px-3 py-2" /></label>
+                <label className="text-sm font-medium text-slate-700">Emergency phone<input type="tel" maxLength={20} {...profileFormApi.register('emergencyPhone')} className="mt-1 block w-full border border-slate-300 px-3 py-2" /></label>
+                <label className="text-sm font-medium text-slate-700">Blood group<select {...profileFormApi.register('bloodGroup')} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2"><option value="">Not provided</option>{['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((group) => <option key={group} value={group}>{group}</option>)}</select></label>
+                <label className="text-sm font-medium text-slate-700">KYC document type<select {...profileFormApi.register('kycType')} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2"><option value="">Select document</option>{[['AADHAAR', 'Aadhaar'], ['PAN', 'PAN'], ['PASSPORT', 'Passport'], ['DRIVING_LICENSE', 'Driving license'], ['STUDENT_ID', 'Student ID'], ['WORK_ID', 'Work ID']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                 <label className="text-sm font-medium text-slate-700 sm:col-span-2">Replace KYC document<input type="file" accept="image/*,application/pdf" onChange={(event) => setProfileFile(event.target.files?.[0] || null)} className="mt-1 block w-full border border-slate-300 px-2 py-2 text-sm" /></label>
-                <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={profileForm.foodOptOut} onChange={(event) => setProfileForm({ ...profileForm, foodOptOut: event.target.checked })} />Opt out of included food</label>
+                <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" {...profileFormApi.register('foodOptOut')} />Opt out of included food</label>
                 <div className="flex gap-2 sm:col-span-2"><button disabled={savingProfile} className="bg-[#02224B] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{savingProfile ? 'Saving…' : 'Save profile'}</button><button type="button" onClick={() => setProfileEditingFor('')} className="border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600">Cancel</button></div>
               </form>}
               </section>
@@ -472,16 +457,17 @@ function ResidentPortalView() {
               </div>
               {ticketFormFor === stay.id && <form onSubmit={submitTicket} className="mt-3 space-y-3 border-t border-slate-100 pt-4">
                 <label className="block text-sm font-medium text-slate-700">Issue category
-                  <select value={ticketForm.category} onChange={(event) => setTicketForm({ ...ticketForm, category: event.target.value })} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2.5">
+                  <select {...ticketFormApi.register('category')} className="mt-1 block w-full border border-slate-300 bg-white px-3 py-2.5">
                     <option value="PLUMBING">Plumbing</option><option value="ELECTRICAL">Electrical</option><option value="APPLIANCE">Appliance</option><option value="CLEANING">Cleaning</option><option value="SAFETY">Safety</option><option value="PEST">Pest control</option><option value="OTHER">Other</option>
                   </select>
                 </label>
                 <label className="block text-sm font-medium text-slate-700">Title
-                  <input required maxLength={120} value={ticketForm.title} onChange={(event) => setTicketForm({ ...ticketForm, title: event.target.value })} placeholder="What needs attention?" className="mt-1 block w-full border border-slate-300 px-3 py-2.5" />
+                  <input required maxLength={120} {...ticketFormApi.register('title')} placeholder="What needs attention?" className="mt-1 block w-full border border-slate-300 px-3 py-2.5" />
                 </label>
                 <label className="block text-sm font-medium text-slate-700">Details
-                  <textarea required maxLength={2000} rows={3} value={ticketForm.description} onChange={(event) => setTicketForm({ ...ticketForm, description: event.target.value })} placeholder="Describe the issue and where it is." className="mt-1 block w-full resize-y border border-slate-300 px-3 py-2.5" />
+                  <textarea required maxLength={2000} rows={3} {...ticketFormApi.register('description')} placeholder="Describe the issue and where it is." className="mt-1 block w-full resize-y border border-slate-300 px-3 py-2.5" />
                 </label>
+                {Object.values(ticketFormApi.formState.errors)[0]?.message && <p role="alert" className="text-xs font-medium text-red-600">{Object.values(ticketFormApi.formState.errors)[0]?.message}</p>}
                 <div className="flex flex-wrap gap-2">
                   <button disabled={submittingTicket} className="inline-flex items-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{submittingTicket ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}Send request</button>
                   <button type="button" onClick={() => setTicketFormFor('')} className="border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-600">Cancel</button>
