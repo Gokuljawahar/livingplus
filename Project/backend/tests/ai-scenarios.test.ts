@@ -28,6 +28,7 @@ async function freePort(): Promise<number> {
   });
 }
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent';
+process.env.LIVINGPLUS_ROOT_DOMAIN = 'livingplus.com';
 process.env.ENABLE_AI_ORCHESTRATOR = 'true';
 process.env.AI_MODEL = 'google:gemini-3.8-flash';
 process.env.GOOGLE_API_KEY = 'test-key';
