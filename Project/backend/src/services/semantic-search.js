@@ -2,10 +2,11 @@
 // description (location, rules, amenities, room types, rent range); queries
 // like "quiet PG near the OMR tech park with veg food" are ranked by meaning.
 //
-// Vectors are stored as Float[] on PGProperty and ranked in process, which is
-// fast at PG-listing scale (hundreds to low thousands) and needs no database
-// extension, so it runs the same locally, in CI and on Cloud SQL. For much
-// larger catalogues, move the column to pgvector (supported by Cloud SQL).
+// Vectors are stored as Float[] on PGProperty. Where the database offers
+// pgvector (Cloud SQL does; see the property_search_pgvector migration) they
+// are also kept in a vector column and ranked inside PostgreSQL with cosine
+// distance. Elsewhere (the bundled local PostgreSQL) ranking happens in
+// process, which is fast at PG-listing scale. Both return the same scores.
 //
 // Enabled with ENABLE_SEMANTIC_SEARCH=true and AI_EMBEDDING_MODEL.
 import { createHash } from 'crypto';
@@ -47,6 +48,19 @@ export function propertySearchText(property) {
     ];
     return parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
 }
+let vectorColumn = null;
+/** Whether this database has the optional pgvector column (checked once). */
+export function hasVectorColumn() {
+    if (!vectorColumn) {
+        vectorColumn = db.$queryRawUnsafe(`SELECT 1 FROM information_schema.columns WHERE table_name = 'PGProperty' AND column_name = 'searchVector'`).then((rows) => rows.length > 0).catch(() => false);
+    }
+    return vectorColumn;
+}
+/** "pgvector" when ranking runs in PostgreSQL, else "in-process". */
+export async function searchBackend() {
+    return (await hasVectorColumn()) ? 'pgvector' : 'in-process';
+}
+const vectorLiteral = (vector) => `[${vector.map((v) => (Number.isFinite(v) ? v : 0)).join(',')}]`;
 const textHash = (model, text) => createHash('sha256').update(`${model}\n${text}`).digest('hex');
 /**
  * Embeds published properties whose description (or the embedding model)
@@ -71,10 +85,17 @@ export async function indexProperties(options = {}) {
     for (let i = 0; i < pending.length; i += BATCH) {
         const batch = pending.slice(i, i + BATCH);
         const vectors = await embeddings.embedDocuments(batch.map((p) => p.text));
-        await Promise.all(batch.map((p, n) => db.pGProperty.update({
-            where: { id: p.id },
-            data: { searchEmbedding: vectors[n] ?? [], searchEmbeddingModel: model, searchTextHash: p.hash, searchIndexedAt: new Date() }
-        })));
+        const withVectorColumn = await hasVectorColumn();
+        await Promise.all(batch.map(async (p, n) => {
+            const vector = vectors[n] ?? [];
+            await db.pGProperty.update({
+                where: { id: p.id },
+                data: { searchEmbedding: vector, searchEmbeddingModel: model, searchTextHash: p.hash, searchIndexedAt: new Date() }
+            });
+            if (withVectorColumn) {
+                await db.$executeRawUnsafe(`UPDATE "PGProperty" SET "searchVector" = $1::vector WHERE "id" = $2`, vectorLiteral(vector), p.id);
+            }
+        }));
     }
     return { indexed: pending.length, skipped: properties.length - pending.length };
 }
@@ -133,11 +154,24 @@ async function embedQuery(query) {
 export async function semanticScores(query, where = {}) {
     const vector = await embedQuery(query);
     const model = embeddingModelId();
+    const scores = new Map();
+    if (await hasVectorColumn()) {
+        // Prisma applies the access filters; PostgreSQL ranks by cosine distance.
+        const candidates = await db.pGProperty.findMany({ where: { status: 'ACTIVE', searchEmbeddingModel: model, ...where }, select: { id: true } });
+        if (!candidates.length)
+            return scores;
+        const rows = await db.$queryRawUnsafe(`SELECT "id", 1 - ("searchVector" <=> $1::vector) AS "score"
+         FROM "PGProperty"
+        WHERE "id" = ANY($2::text[]) AND "searchVector" IS NOT NULL AND vector_dims("searchVector") = $3`, vectorLiteral(vector), candidates.map((c) => c.id), vector.length);
+        // pgvector yields NaN for all-zero vectors; match the in-process result (0).
+        for (const row of rows)
+            scores.set(row.id, Number.isFinite(Number(row.score)) ? Number(row.score) : 0);
+        return scores;
+    }
     const rows = await db.pGProperty.findMany({
         where: { status: 'ACTIVE', searchEmbeddingModel: model, ...where },
         select: { id: true, searchEmbedding: true }
     });
-    const scores = new Map();
     for (const row of rows)
         scores.set(row.id, cosineSimilarity(vector, row.searchEmbedding || []));
     return scores;

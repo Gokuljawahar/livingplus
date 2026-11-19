@@ -17,7 +17,8 @@ jobs:
         working-directory: Project/backend
     services:
       postgres:
-        image: postgres:18
+        # PostgreSQL 18 with pgvector, like Cloud SQL, so the pgvector search path is tested.
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_USER: livingplus
           POSTGRES_PASSWORD: livingplus
@@ -32,6 +33,7 @@ jobs:
     env:
       # Tests use this database instead of starting an embedded PostgreSQL.
       TEST_DATABASE_URL: postgresql://livingplus:livingplus@localhost:5432/livingplus_test
+      EXPECT_PGVECTOR: 'true'
     steps:
       - uses: actions/checkout@v4
 

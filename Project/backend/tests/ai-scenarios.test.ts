@@ -1255,6 +1255,20 @@ describe('semantic PG search', () => {
     for (let i = 1; i < res.body.results.length; i += 1) assert.ok(res.body.results[i - 1].score >= res.body.results[i].score);
   });
 
+  it('ranks identically in PostgreSQL (pgvector) and in process', async () => {
+    const backend = await search.searchBackend();
+    if (process.env.EXPECT_PGVECTOR === 'true') assert.equal(backend, 'pgvector', 'CI provides pgvector');
+    const query = 'quiet calm veg food near OMR tech park';
+    const scores = await search.semanticScores(query);
+    const queryVector = fakeVector(query);
+    const stored = await prisma.pGProperty.findMany({ where: { id: { in: [...scores.keys()] } }, select: { id: true, searchEmbedding: true } });
+    assert.ok(stored.length >= 3);
+    for (const row of stored) {
+      const expected = search.cosineSimilarity(queryVector, row.searchEmbedding);
+      assert.ok(Math.abs(scores.get(row.id)! - expected) < 1e-6, `${backend} score for ${row.id}`);
+    }
+  });
+
   it('caches query vectors', async () => {
     search.clearSemanticQueryCache();
     embedCalls.length = 0;

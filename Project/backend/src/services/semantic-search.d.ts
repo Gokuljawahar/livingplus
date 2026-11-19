@@ -3,6 +3,10 @@ export declare const semanticSearchEnabled: () => boolean;
 export declare const minSemanticScore: () => number;
 /** Text a property is embedded from. Live data (free beds) is left out on purpose. */
 export declare function propertySearchText(property: any): string;
+/** Whether this database has the optional pgvector column (checked once). */
+export declare function hasVectorColumn(): Promise<boolean>;
+/** "pgvector" when ranking runs in PostgreSQL, else "in-process". */
+export declare function searchBackend(): Promise<'pgvector' | 'in-process'>;
 /**
  * Embeds published properties whose description (or the embedding model)
  * changed since they were last indexed. Pass ids to limit the scope.
