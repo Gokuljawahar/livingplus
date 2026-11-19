@@ -10,6 +10,7 @@ import { calculateMonthlyRent, ensureFoodEntries } from '../services/pg-billing.
 import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { buildGuestBookingWhere, isPlaceholderResidentName } from '../utils/guest-bookings.js';
 import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
+import { periodOf, periodRange } from '../utils/app-time.js';
 function phoneVariants(phone) {
     const digits = String(phone || '').replace(/\D/g, '');
     const normalized = digits.length === 10 ? `91${digits}` : digits;
@@ -154,13 +155,13 @@ export const listProperties = async (req, res) => {
                 status: 'ACTIVE',
                 ...ownPropertyExclusionWhere(hiddenPropertyIds),
                 ...(requestPropertyId(req) ? { id: requestPropertyId(req) } : {}),
-                ...(locality ? { locality: { contains: locality } } : {}),
+                ...(locality ? { locality: { contains: locality, mode: 'insensitive' } } : {}),
                 ...(genderPolicy ? { genderPolicy: { in: [genderPolicy, 'ANY'] } } : {}),
                 ...(search ? {
                     OR: [
-                        { name: { contains: search } },
-                        { locality: { contains: search } },
-                        { address: { contains: search } }
+                        { name: { contains: search, mode: 'insensitive' } },
+                        { locality: { contains: search, mode: 'insensitive' } },
+                        { address: { contains: search, mode: 'insensitive' } }
                     ]
                 } : {})
             },
@@ -1281,6 +1282,9 @@ export const recordRentPayment = async (req, res) => {
             return res.status(403).json({ message: 'You do not have access to this property' });
         }
         const updated = await db.$transaction(async (tx) => {
+            // Lock the ledger row so concurrent payments apply one after another
+            // instead of the later one failing its compare-and-swap below.
+            await tx.$queryRaw `SELECT 1 FROM "PGRentEntry" WHERE "id" = ${entry.id} FOR UPDATE`;
             const current = await tx.pGRentEntry.findUnique({ where: { id: entry.id } });
             if (!current)
                 throw new Error('LEDGER_ENTRY_NOT_FOUND');
@@ -1325,12 +1329,11 @@ export const getOwnerReport = async (req, res) => {
             return res.status(403).json({ message: 'You do not have access to this property' });
         }
         const scope = propertyId ? [propertyId] : propertyIds;
-        const period = String(req.query.period || new Date().toISOString().slice(0, 7));
+        const period = String(req.query.period || periodOf());
         const [year, month] = period.split('-').map(Number);
         if (!year || !month || month < 1 || month > 12)
             return res.status(400).json({ message: 'Period must be YYYY-MM' });
-        const periodStart = new Date(Date.UTC(year, month - 1, 1));
-        const periodEnd = new Date(Date.UTC(year, month, 1));
+        const { gte: periodStart, lt: periodEnd } = periodRange(period);
         const [properties, tenants, entries, bookings] = await Promise.all([
             db.pGProperty.findMany({ where: { id: { in: scope } }, include: { rooms: { include: { beds: true } } } }),
             db.pGTenant.findMany({ where: { propertyId: { in: scope } }, select: { id: true, status: true, propertyId: true } }),

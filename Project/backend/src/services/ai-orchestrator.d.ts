@@ -1,4 +1,13 @@
-import type { ModelProvider } from './ai-provider.js';
+import { type BaseMessage } from '@langchain/core/messages';
+/**
+ * Minimal surface the agent needs from a chat model. Every LangChain chat model
+ * with tool calling satisfies it; tests pass a scripted stand-in.
+ */
+export interface AgentModel {
+    bindTools?: (tools: any[]) => {
+        invoke: (messages: BaseMessage[], config?: any) => Promise<BaseMessage>;
+    };
+}
 export interface ChatResult {
     reply: string;
     sessionId: string;
@@ -13,7 +22,7 @@ export interface ChatResult {
         completion_tokens?: number;
     } | undefined;
 }
-export declare function runChat(req: any, provider: ModelProvider, input: {
+export declare function runChat(req: any, model: AgentModel, input: {
     message: string;
     sessionId?: string | undefined;
     confirmationId?: string | undefined;

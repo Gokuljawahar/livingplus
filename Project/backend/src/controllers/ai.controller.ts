@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { MetaModelProvider, parseImageDataUrl } from '../services/ai-provider.js';
+import { createChatModel, modelStatus, parseImageDataUrl } from '../services/ai-provider.js';
 import { runChat } from '../services/ai-orchestrator.js';
 import { transcribeAudio } from '../services/ai-voice.js';
 
@@ -15,13 +15,9 @@ function rateLimited(key: string): boolean {
   return recent.length > RATE_MAX;
 }
 
-export const getAiStatus = async (req: Request, res: Response): Promise<any> => {
-  const provider = new MetaModelProvider();
-  res.json({
-    enabled: process.env.ENABLE_AI_ORCHESTRATOR === 'true',
-    configured: provider.configured,
-    model: process.env.META_MODEL_NAME || 'muse-spark-1.3'
-  });
+export const getAiStatus = async (_req: Request, res: Response): Promise<any> => {
+  const status = await modelStatus();
+  res.json({ enabled: status.enabled, configured: status.configured, provider: status.provider, model: status.model });
 };
 
 export const postChat = async (req: Request, res: Response): Promise<any> => {
@@ -41,15 +37,18 @@ export const postChat = async (req: Request, res: Response): Promise<any> => {
     }
   }
 
-  const provider = new MetaModelProvider();
-  if (!provider.configured) {
+  let model;
+  try {
+    model = await createChatModel('chat');
+  } catch (error: any) {
+    if (String(error?.message || '').startsWith('AI_MODEL_INIT_FAILED')) console.error('PG AI model init failed:', String(error?.message || error));
     return res.status(503).json({
-      message: 'The AI assistant is not connected. Add META_MODEL_API_KEY and set ENABLE_AI_ORCHESTRATOR=true to enable it.'
+      message: 'The AI assistant is not connected. Set ENABLE_AI_ORCHESTRATOR=true and AI_MODEL (for example google:gemini-3.8-flash) with that provider\'s credentials to enable it.'
     });
   }
 
   try {
-    const result = await runChat(req, provider, {
+    const result = await runChat(req, model, {
       message,
       imageDataUrl,
       sessionId: req.body.sessionId ? String(req.body.sessionId) : undefined,
@@ -82,6 +81,9 @@ export const postTranscribe = async (req: Request, res: Response): Promise<any> 
     const code = String(error?.message || '');
     if (code === 'AI_VOICE_INVALID_AUDIO' || code === 'AI_VOICE_EMPTY_TRANSCRIPT') {
       return res.status(400).json({ message: 'That recording could not be transcribed. Send a short WAV voice note and retry.' });
+    }
+    if (code === 'AI_ORCHESTRATOR_NOT_CONFIGURED' || code.startsWith('AI_MODEL_INIT_FAILED')) {
+      return res.status(503).json({ message: 'Voice notes are not connected. Configure an audio-capable AI_MODEL or AI_VOICE_MODEL to enable them.' });
     }
     if (code.startsWith('MODEL_API_FAILED')) {
       return res.status(502).json({ message: 'The transcription service failed. Nothing was changed. Please retry.' });

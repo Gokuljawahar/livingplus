@@ -10,4 +10,5 @@ npm-debug.log
 uploads
 private-uploads
 coverage
-tests/tmp-*
+tests/tmp-*.local-postgres
+tests/.tmp-postgres*

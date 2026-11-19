@@ -1,6 +1,6 @@
 // Scenario suite for the PG OS agentic layer (project report §16).
-// Runs against a throwaway SQLite database with a scripted model stub, so no
-// Meta API key, model network access, or running server is required.
+// Runs against a throwaway PostgreSQL (or TEST_DATABASE_URL) with a scripted
+// model stub, so no API key, model network access, or running server is required.
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -8,17 +8,28 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import net from 'node:net';
+import { AIMessage } from '@langchain/core/messages';
+import { startLocalPostgres, type LocalPostgres } from '../scripts/local-postgres.js';
+import { inAppZone, periodOf } from '../src/utils/app-time.js';
 
-const DB_FILE = './tests/tmp-ai-scenarios.db';
-// Prisma resolves sqlite `file:` paths against the schema directory, so the
-// engine file lives at ./prisma/tests/... while unlink runs against cwd.
-const DB_FS = './prisma/tests/tmp-ai-scenarios.db';
 const UPLOAD_TEST_DIR = path.resolve('./tests/tmp-local-uploads');
-process.env.DATABASE_URL = `file:${DB_FILE}`;
+const PG_TEST_DIR = path.resolve(`./tests/.tmp-postgres-${process.pid}`);
+let testPostgres: LocalPostgres | null = null;
+
+async function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as net.AddressInfo;
+      server.close(() => resolve(port));
+    });
+  });
+}
 process.env.ENABLE_AI_ORCHESTRATOR = 'true';
-process.env.META_MODEL_API_KEY = 'test-key';
-process.env.META_MODEL_BASE_URL = 'https://api.meta.ai/v1';
-process.env.META_MODEL_NAME = 'muse-spark-1.3';
+process.env.AI_MODEL = 'google:gemini-3.8-flash';
+process.env.GOOGLE_API_KEY = 'test-key';
 process.env.MODEL_API_TIMEOUT_MS = '5000';
 process.env.ENCRYPTION_KEY = 'ab'.repeat(32);
 process.env.JWT_SECRET = 'test-secret-for-pg-scenario-suite-32-bytes';
@@ -41,19 +52,18 @@ const userReq = (user: any) => ({
 }) as any;
 const guestActor = { userId: null, role: 'GUEST', phones: [], propertyIds: [], isSuperAdmin: false };
 
-// Scripted stand-in for the Meta model: each turn returns the next step.
+// Scripted stand-in for a LangChain chat model: each turn returns the next step.
 function stubProvider(script: Array<{ text?: string; calls?: Array<{ name: string; args: any }> }>) {
   let i = 0;
   return {
-    name: 'stub-model',
-    configured: true,
-    async complete() {
-      const step = script[Math.min(i++, script.length - 1)]!;
+    bindTools() {
       return {
-        message: {
-          role: 'assistant',
-          content: step.text ?? null,
-          tool_calls: (step.calls ?? []).map((c, n) => ({ id: `call_${i}_${n}`, name: c.name, arguments: JSON.stringify(c.args) }))
+        async invoke() {
+          const step = script[Math.min(i++, script.length - 1)]!;
+          return new AIMessage({
+            content: step.text ?? '',
+            tool_calls: (step.calls ?? []).map((c, n) => ({ id: `call_${i}_${n}`, name: c.name, args: c.args, type: 'tool_call' as const }))
+          });
         }
       };
     }
@@ -73,8 +83,14 @@ async function otpFor(phone: string, tag: string) {
 }
 
 before(async () => {
-  for (const f of [DB_FS, `${DB_FS}-journal`]) { try { fs.unlinkSync(f); } catch { /* fresh */ } }
-  execFileSync(process.execPath, ['node_modules/prisma/build/index.js', 'db', 'push', '--skip-generate'], { stdio: 'pipe' });
+  if (process.env.TEST_DATABASE_URL) {
+    process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
+  } else {
+    testPostgres = await startLocalPostgres({ dir: PG_TEST_DIR, port: await freePort(), database: 'livingplus_test', persistent: false });
+    process.env.DATABASE_URL = testPostgres.url;
+  }
+  // Apply the real migrations, so the suite also proves they are complete.
+  execFileSync(process.execPath, ['node_modules/prisma/build/index.js', 'migrate', 'reset', '--force', '--skip-generate', '--skip-seed'], { stdio: 'pipe' });
   ({ prisma } = await import('../src/app.js'));
   tools = await import('../src/services/ai-tools.js');
   orchestrator = await import('../src/services/ai-orchestrator.js');
@@ -122,7 +138,9 @@ before(async () => {
 
 after(async () => {
   await prisma?.$disconnect();
-  for (const f of [DB_FS, `${DB_FS}-journal`]) { try { fs.unlinkSync(f); } catch { /* best effort */ } }
+  await (await import('../src/services/ai-checkpointer.js')).closeCheckpointer();
+  await testPostgres?.stop();
+  fs.rmSync(PG_TEST_DIR, { recursive: true, force: true });
   fs.rmSync(UPLOAD_TEST_DIR, { recursive: true, force: true });
 });
 
@@ -688,15 +706,18 @@ describe('orchestrator behaviour', () => {
   });
 
   it('surfaces malformed tool arguments back to the model', async () => {
+    let seen = 0;
     const broken = {
-      name: 'stub-model',
-      configured: true,
-      async complete() {
-        (this as any).seen = ((this as any).seen ?? 0) + 1;
-        if ((this as any).seen === 1) {
-          return { message: { role: 'assistant', content: null, tool_calls: [{ id: 'call_x', name: 'search_properties', arguments: '{oops' }] } };
-        }
-        return { message: { role: 'assistant', content: 'Let me try that differently.', tool_calls: [] } };
+      bindTools() {
+        return {
+          async invoke() {
+            seen += 1;
+            if (seen === 1) {
+              return new AIMessage({ content: '', invalid_tool_calls: [{ id: 'call_x', name: 'search_properties', args: '{oops', error: 'bad json', type: 'invalid_tool_call' }] });
+            }
+            return new AIMessage('Let me try that differently.');
+          }
+        };
       }
     };
     const result = await orchestrator.runChat(guestReq(), broken as any, { message: 'search' });
@@ -704,74 +725,366 @@ describe('orchestrator behaviour', () => {
   });
 });
 
-describe('model provider', () => {
-  it('refuses to call when unconfigured', async () => {
-    const keepEnabled = process.env.ENABLE_AI_ORCHESTRATOR;
-    const keepKey = process.env.META_MODEL_API_KEY;
-    process.env.ENABLE_AI_ORCHESTRATOR = 'false';
-    process.env.META_MODEL_API_KEY = '';
+// Intercepts fetch so the real LangChain Google model runs end to end without
+// network access: records each Gemini request and replies with scripted bodies.
+function fakeGemini(replies: any[]) {
+  const seen: { url: string; key: string; body: any }[] = [];
+  const realFetch = globalThis.fetch;
+  (globalThis as any).fetch = async (input: any, init?: any) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    seen.push({ url: request.url, key: request.headers.get('x-goog-api-key') || '', body: JSON.parse(await request.text()) });
+    const reply = replies[Math.min(seen.length - 1, replies.length - 1)];
+    if (reply instanceof Response) return reply;
+    return new Response(JSON.stringify(reply), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  return { seen, restore: () => { globalThis.fetch = realFetch; } };
+}
+
+const geminiText = (text: string) => ({ candidates: [{ content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP' }] });
+
+async function withEnv<T>(vars: Record<string, string | undefined>, fn: () => Promise<T>): Promise<T> {
+  const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  for (const [k, v] of Object.entries(vars)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  try {
+    return await fn();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+}
+
+// Like stubProvider, but records the messages the model was given each turn.
+function recordingProvider(script: Array<{ text?: string; calls?: Array<{ name: string; args: any }> }>) {
+  const seen: any[][] = [];
+  let i = 0;
+  return {
+    seen,
+    bindTools() {
+      return {
+        async invoke(messages: any[]) {
+          seen.push(messages);
+          const step = script[Math.min(i++, script.length - 1)]!;
+          return new AIMessage({
+            content: step.text ?? '',
+            tool_calls: (step.calls ?? []).map((c, n) => ({ id: `rec_${i}_${n}`, name: c.name, args: c.args, type: 'tool_call' as const }))
+          });
+        }
+      };
+    }
+  };
+}
+
+describe('durable agent threads (LangGraph checkpointer)', () => {
+  const expenseCall = (note: string) => ({ calls: [{ name: 'log_expense', args: { property_id: ids.prop.id, category: 'OTHER', amount: 321, spent_on: '2025-01-03', note } }] });
+  after(async () => {
+    const created = await prisma.pGExpense.findMany({ where: { amount: 321, spentOn: { lt: new Date('2025-02-01') } }, select: { id: true } });
+    const createdIds = created.map((row: { id: string }) => row.id);
+    await prisma.pHAuditLog.deleteMany({ where: { entityId: { in: createdIds } } });
+    await prisma.pGExpense.deleteMany({ where: { id: { in: createdIds } } });
+  });
+
+  it('keeps a pending confirmation across a server restart', async () => {
+    const prepared = await orchestrator.runChat(userReq(ids.owner), stubProvider([expenseCall('restart test')]), { message: 'log it' });
+    assert.ok(prepared.needsConfirmation);
+    assert.match(prepared.needsConfirmation.confirmationId, /^cfm\.[0-9a-f-]{36}\.[0-9a-f]{32}$/);
+
+    // Drop every in-process handle: a new process would start exactly like this.
+    await (await import('../src/services/ai-checkpointer.js')).closeCheckpointer();
+
+    const done = await orchestrator.runChat(userReq(ids.owner), stubProvider([]), { message: 'yes', confirmationId: prepared.needsConfirmation.confirmationId });
+    assert.match(done.reply, /^Done\./);
+    assert.deepEqual(done.toolCalls, ['log_expense']);
+    assert.equal(await prisma.pGExpense.count({ where: { note: 'restart test' } }), 1);
+
+    const rows: Array<{ n: bigint }> = await prisma.$queryRawUnsafe('SELECT count(*)::bigint AS n FROM langgraph.checkpoints WHERE thread_id = $1', prepared.sessionId);
+    assert.ok(Number(rows[0]!.n) > 0, 'thread state lives in PostgreSQL');
+  });
+
+  it('restores conversation history from the checkpoint', async () => {
+    const first = await orchestrator.runChat(guestReq(), stubProvider([{ text: 'Which area?' }]), { message: 'find a PG' });
+    const model = recordingProvider([{ text: 'Got it.' }]);
+    await orchestrator.runChat(guestReq(), model, { message: 'Sholinganallur', sessionId: first.sessionId });
+    const texts = model.seen[0]!.map((m: any) => `${m.getType()}:${typeof m.content === 'string' ? m.content : ''}`);
+    assert.deepEqual(texts.slice(1), ['human:find a PG', 'ai:Which area?', 'human:Sholinganallur']);
+    assert.equal(model.seen[0]![0].getType(), 'system', 'the role prompt is added per call, not stored');
+  });
+
+  it('closes an unanswered confirmation when the user moves on', async () => {
+    const prepared = await orchestrator.runChat(userReq(ids.owner), stubProvider([expenseCall('moved on')]), { message: 'log it' });
+    const model = recordingProvider([{ text: 'Sure, what else?' }]);
+    const next = await orchestrator.runChat(userReq(ids.owner), model, { message: 'never mind, show occupancy', sessionId: prepared.sessionId });
+    assert.equal(next.reply, 'Sure, what else?');
+
+    // Every tool call the model made has an answer before the next user turn.
+    const history = model.seen[0]!;
+    const callIds = history.flatMap((m: any) => (m.tool_calls ?? []).map((c: any) => c.id));
+    const answered = history.filter((m: any) => m.getType() === 'tool').map((m: any) => m.tool_call_id);
+    assert.ok(callIds.length > 0);
+    assert.deepEqual(answered, callIds);
+
+    const late = await orchestrator.runChat(userReq(ids.owner), stubProvider([]), { message: 'yes', confirmationId: prepared.needsConfirmation.confirmationId });
+    assert.match(late.reply, /expired/i);
+    assert.equal(await prisma.pGExpense.count({ where: { note: 'moved on' } }), 0);
+  });
+
+  it('expires confirmations after ten minutes', async () => {
+    const prepared = await orchestrator.runChat(userReq(ids.owner), stubProvider([expenseCall('too late')]), { message: 'log it' });
+    const realNow = Date.now;
+    Date.now = () => realNow() + 11 * 60 * 1000;
     try {
-      const provider = new providerMod.MetaModelProvider();
-      assert.equal(provider.configured, false);
-      await assert.rejects(provider.complete([], []), /AI_ORCHESTRATOR_NOT_CONFIGURED/);
+      const result = await orchestrator.runChat(userReq(ids.owner), stubProvider([]), { message: 'yes', confirmationId: prepared.needsConfirmation.confirmationId });
+      assert.match(result.reply, /expired/i);
     } finally {
-      process.env.ENABLE_AI_ORCHESTRATOR = keepEnabled;
-      process.env.META_MODEL_API_KEY = keepKey;
+      Date.now = realNow;
+    }
+    assert.equal(await prisma.pGExpense.count({ where: { note: 'too late' } }), 0);
+  });
+
+  it('rejects a confirmation presented with a different session', async () => {
+    const prepared = await orchestrator.runChat(userReq(ids.owner), stubProvider([expenseCall('wrong session')]), { message: 'log it' });
+    const other = await orchestrator.runChat(userReq(ids.owner), stubProvider([{ text: 'hi' }]), { message: 'hello' });
+    const result = await orchestrator.runChat(userReq(ids.owner), stubProvider([]), {
+      message: 'yes', sessionId: other.sessionId, confirmationId: prepared.needsConfirmation.confirmationId
+    });
+    assert.match(result.reply, /expired/i);
+    assert.equal(await prisma.pGExpense.count({ where: { note: 'wrong session' } }), 0);
+  });
+
+  it('does not let another user confirm or see the thread', async () => {
+    const prepared = await orchestrator.runChat(userReq(ids.owner), stubProvider([expenseCall('other user')]), { message: 'log it' });
+    const intruder = await orchestrator.runChat(guestReq(), stubProvider([]), { message: 'yes', confirmationId: prepared.needsConfirmation.confirmationId });
+    assert.match(intruder.reply, /expired/i);
+    assert.equal(await prisma.pGExpense.count({ where: { note: 'other user' } }), 0);
+    const stillPending = await orchestrator.runChat(userReq(ids.owner), stubProvider([]), { message: 'yes', confirmationId: prepared.needsConfirmation.confirmationId });
+    assert.match(stillPending.reply, /^Done\./, 'a refused attempt does not consume the owner’s confirmation');
+  });
+});
+
+describe('file storage drivers', () => {
+  it('stores files in Google Cloud Storage and serves cached signed URLs', async () => {
+    const storage = await import('../src/services/storage.js');
+    const saved: Record<string, { size: number; contentType: string }> = {};
+    const signed: string[] = [];
+    storage.setGcsBucketForTests({
+      file(name: string) {
+        return {
+          async save(data: Buffer, options: { contentType: string }) { saved[name] = { size: data.length, contentType: options.contentType }; },
+          async getSignedUrl(options: { action: string; contentType?: string }) {
+            signed.push(`${options.action}:${name}`);
+            return [`https://storage.googleapis.com/test-bucket/${name}?sig=${signed.length}`] as [string];
+          }
+        };
+      }
+    });
+    const keep = process.env.UPLOAD_STORAGE;
+    process.env.UPLOAD_STORAGE = 'gcs';
+    try {
+      const key = storage.newFileKey('webp');
+      assert.match(key, /^uploads\/\d+-[0-9a-f-]{36}\.webp$/);
+      await storage.putFile(key, Buffer.from('img'), 'image/webp');
+      assert.deepEqual(saved[key], { size: 3, contentType: 'image/webp' });
+
+      const req = { protocol: 'http', get: () => 'localhost' } as any;
+      const first = await storage.viewUrl(req, key);
+      const second = await storage.viewUrl(req, key);
+      assert.equal(first, second, 'signed URLs are reused while fresh');
+      assert.deepEqual(signed, [`read:${key}`]);
+
+      const uploadUrl = await storage.directUploadUrl('uploads/direct.pdf', 'application/pdf');
+      assert.match(uploadUrl, /storage\.googleapis\.com/);
+      assert.equal(signed[1], 'write:uploads/direct.pdf');
+    } finally {
+      process.env.UPLOAD_STORAGE = keep;
+      storage.setGcsBucketForTests(null);
     }
   });
 
-  it('normalizes nested OpenAI-style tool calls to the flat form', async () => {
-    let seen: any = null;
-    let calls = 0;
-    const server = http.createServer((req, res) => {
-      let body = '';
-      req.on('data', (c) => { body += c; });
-      req.on('end', () => {
-        seen = JSON.parse(body);
-        calls += 1;
-        res.setHeader('content-type', 'application/json');
-        res.end(JSON.stringify(calls === 1
-          ? { choices: [{ message: { content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'search_properties', arguments: JSON.stringify({ location: 'Sholinganallur' }) } }] } }] }
-          : { choices: [{ message: { content: 'done' } }] }));
-      });
-    });
-    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
-    const keepBase = process.env.META_MODEL_BASE_URL;
-    process.env.META_MODEL_BASE_URL = `http://127.0.0.1:${(server.address() as any).port}`;
+  it('keeps local storage private and refuses direct uploads there', async () => {
+    const storage = await import('../src/services/storage.js');
+    assert.equal(storage.storageKind(), 'local');
+    assert.match(storage.newFileKey('pdf'), /^local\/[0-9a-f-]{36}\.pdf$/);
+    assert.equal(storage.localUploadPath('../../etc/passwd'), null);
+    assert.equal(await storage.viewUrl({ protocol: 'http', get: () => 'x' } as any, 'local/00000000-0000-4000-8000-000000000000.webp'), null);
+    await assert.rejects(storage.directUploadUrl('uploads/x.pdf', 'application/pdf'), /DIRECT_UPLOAD_UNSUPPORTED/);
+  });
+});
+
+describe('scheduled jobs over HTTP (Cloud Scheduler)', () => {
+  let base = '';
+  let server: http.Server;
+  before(async () => {
+    const { default: app } = await import('../src/app.js');
+    server = app.listen(0);
+    await new Promise<void>((r) => server.once('listening', () => r()));
+    base = `http://127.0.0.1:${(server.address() as any).port}`;
+  });
+  after(() => { server?.close(); });
+
+  const post = (path: string, token?: string) => fetch(`${base}${path}`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {} });
+
+  it('is disabled unless a cron credential is configured', async () => {
+    const keep = { s: process.env.CRON_SECRET, a: process.env.CRON_OIDC_AUDIENCE };
+    delete process.env.CRON_SECRET; delete process.env.CRON_OIDC_AUDIENCE;
     try {
-      const provider = new providerMod.MetaModelProvider();
-      const result = await provider.complete([{ role: 'user', content: 'find PGs' }], []);
-      assert.deepEqual(result.message.tool_calls, [{ id: 'call_1', name: 'search_properties', arguments: JSON.stringify({ location: 'Sholinganallur' }) }]);
-      assert.ok(seen);
-      await provider.complete([
-        { role: 'user', content: 'find PGs' },
-        { role: 'assistant', content: null, tool_calls: result.message.tool_calls },
-        { role: 'tool', tool_call_id: 'call_1', content: '[]' }
-      ], []);
-      const echoed = seen.messages[1].tool_calls[0];
-      assert.equal(echoed.type, 'function');
-      assert.deepEqual(echoed.function, { name: 'search_properties', arguments: JSON.stringify({ location: 'Sholinganallur' }) });
+      assert.equal((await post('/internal/cron/monthly-rent', 'anything')).status, 404);
     } finally {
-      process.env.META_MODEL_BASE_URL = keepBase;
-      server.close();
+      if (keep.s !== undefined) process.env.CRON_SECRET = keep.s;
+      if (keep.a !== undefined) process.env.CRON_OIDC_AUDIENCE = keep.a;
+    }
+  });
+
+  it('rejects missing or wrong credentials, including forged OIDC tokens', async () => {
+    process.env.CRON_SECRET = 'cron-test-secret-value';
+    process.env.CRON_OIDC_AUDIENCE = 'https://api.example.test';
+    try {
+      assert.equal((await post('/internal/cron/monthly-rent')).status, 401);
+      assert.equal((await post('/internal/cron/monthly-rent', 'wrong-secret')).status, 403);
+      const forged = ['{"alg":"RS256","kid":"x"}', '{"aud":"https://api.example.test","email":"a@b.c","email_verified":true}']
+        .map((part) => Buffer.from(part).toString('base64url')).join('.') + '.c2ln';
+      assert.equal((await post('/internal/cron/monthly-rent', forged)).status, 403);
+    } finally {
+      delete process.env.CRON_SECRET; delete process.env.CRON_OIDC_AUDIENCE;
+    }
+  });
+
+  it('runs the monthly rent and reminder jobs with the shared secret', async () => {
+    process.env.CRON_SECRET = 'cron-test-secret-value';
+    try {
+      const rent = await post('/internal/cron/monthly-rent', 'cron-test-secret-value');
+      assert.equal(rent.status, 200);
+      const body = await rent.json() as any;
+      assert.equal(body.job, 'monthly-rent');
+      assert.match(body.period, /^\d{4}-\d{2}$/);
+      assert.equal(typeof body.tenants, 'number');
+      const again = await post('/internal/cron/monthly-rent', 'cron-test-secret-value');
+      assert.equal(again.status, 200, 'the job is idempotent');
+      const reminders = await post('/internal/cron/rent-reminders', 'cron-test-secret-value');
+      assert.equal(reminders.status, 200);
+      assert.equal((await reminders.json() as any).job, 'rent-reminders');
+    } finally {
+      delete process.env.CRON_SECRET;
+    }
+  });
+
+  it('serves a plain health check for Cloud Run', async () => {
+    const res = await fetch(`${base}/healthz`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true });
+  });
+});
+
+describe('model configuration', () => {
+  it('stays unconfigured until the assistant is enabled and a model is set', async () => {
+    await withEnv({ ENABLE_AI_ORCHESTRATOR: 'false' }, async () => {
+      await assert.rejects(providerMod.createChatModel(), /AI_ORCHESTRATOR_NOT_CONFIGURED/);
+      assert.equal((await providerMod.modelStatus()).configured, false);
+    });
+    await withEnv({ AI_MODEL: '' }, async () => {
+      await assert.rejects(providerMod.createChatModel(), /AI_ORCHESTRATOR_NOT_CONFIGURED/);
+    });
+  });
+
+  it('reports provider and model from a provider:model id', async () => {
+    assert.deepEqual(providerMod.describeModel('google:gemini-3.8-flash'), { provider: 'google', name: 'gemini-3.8-flash' });
+    assert.deepEqual(await providerMod.modelStatus(), { enabled: true, configured: true, provider: 'google', model: 'gemini-3.8-flash' });
+  });
+
+  it('fails clearly when a provider package is not installed or options are invalid', async () => {
+    await withEnv({ AI_MODEL: 'perplexity:sonar' }, async () => {
+      await assert.rejects(providerMod.createChatModel(), /AI_MODEL_INIT_FAILED/);
+      const status = await providerMod.modelStatus();
+      assert.equal(status.configured, false);
+      assert.equal(status.provider, 'perplexity');
+    });
+    await withEnv({ AI_MODEL_OPTIONS: '[1,2]' }, async () => {
+      await assert.rejects(providerMod.createChatModel(), /AI_MODEL_INIT_FAILED: AI_MODEL_OPTIONS must be a JSON object/);
+    });
+  });
+
+  it('uses AI_VOICE_MODEL for voice when set, else AI_MODEL', async () => {
+    assert.equal(providerMod.modelConfig('voice').model, 'google:gemini-3.8-flash');
+    await withEnv({ AI_VOICE_MODEL: 'google:gemini-3.5-flash-lite', AI_MODEL_OPTIONS: '{"temperature":0.1}' }, async () => {
+      assert.equal(providerMod.modelConfig('voice').model, 'google:gemini-3.5-flash-lite');
+      assert.deepEqual(providerMod.modelConfig('chat').options, { temperature: 0.1 });
+    });
+  });
+});
+
+describe('LangGraph agent with the Google provider', () => {
+  it('runs a tool round trip and echoes the Gemini thought signature', async () => {
+    const api = fakeGemini([
+      { candidates: [{ content: { role: 'model', parts: [
+        { functionCall: { id: 'fc_1', name: 'search_properties', args: { location: 'Sholinganallur' } }, thoughtSignature: 'sig-A' }
+      ] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 4, totalTokenCount: 15 } },
+      { ...geminiText('I found PGs in Sholinganallur.'), usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 6, totalTokenCount: 26 } }
+    ]);
+    try {
+      const model = await providerMod.createChatModel();
+      const result = await orchestrator.runChat(guestReq(), model, { message: 'PGs in Sholinganallur?' });
+      assert.equal(result.reply, 'I found PGs in Sholinganallur.');
+      assert.deepEqual(result.toolCalls, ['search_properties']);
+      assert.deepEqual(result.usage, { prompt_tokens: 20, completion_tokens: 6 });
+
+      assert.equal(api.seen.length, 2);
+      const [first, second] = api.seen;
+      assert.match(first!.url, /\/models\/gemini-3\.8-flash:generateContent$/);
+      assert.equal(first!.key, 'test-key');
+      assert.ok(first!.body.systemInstruction.parts[0].text.includes('PG OS assistant'));
+      const declared = first!.body.tools[0].functionDeclarations.map((d: any) => d.name);
+      assert.ok(declared.includes('search_properties'));
+      assert.ok(!declared.includes('create_maintenance_ticket'), 'guests never see resident tools');
+
+      const modelTurn = second!.body.contents.find((c: any) => c.role === 'model');
+      assert.equal(modelTurn.parts[0].thoughtSignature, 'sig-A');
+      assert.equal(modelTurn.parts[0].functionCall.id, 'fc_1');
+      const toolTurn = second!.body.contents[second!.body.contents.length - 1];
+      assert.equal(toolTurn.role, 'user');
+      assert.equal(toolTurn.parts[0].functionResponse.id, 'fc_1');
+      assert.equal(toolTurn.parts[0].functionResponse.name, 'search_properties');
+    } finally {
+      api.restore();
+    }
+  });
+
+  it('pauses sensitive tools for confirmation without executing them', async () => {
+    const api = fakeGemini([
+      { candidates: [{ content: { role: 'model', parts: [
+        { functionCall: { id: 'fc_9', name: 'send_rent_reminders', args: {} }, thoughtSignature: 'sig-B' }
+      ] }, finishReason: 'STOP' }] }
+    ]);
+    try {
+      const model = await providerMod.createChatModel();
+      const result = await orchestrator.runChat(userReq(ids.owner), model, { message: 'remind everyone' });
+      assert.equal(result.needsConfirmation?.tool, 'send_rent_reminders');
+      assert.deepEqual(result.toolCalls, []);
+      assert.equal(api.seen.length, 1, 'the model is not called again until the user confirms');
+    } finally {
+      api.restore();
+    }
+  });
+
+  it('maps provider HTTP errors to MODEL_API_FAILED', async () => {
+    const api = fakeGemini([new Response('{"error":{"code":400,"message":"bad request"}}', { status: 400, headers: { 'content-type': 'application/json' } })]);
+    try {
+      const model = await providerMod.createChatModel();
+      await assert.rejects(orchestrator.runChat(guestReq(), model, { message: 'hi' }), /MODEL_API_FAILED/);
+    } finally {
+      api.restore();
     }
   });
 
   it('times out a hanging model endpoint', async () => {
-    const server = http.createServer(() => { /* never responds */ });
-    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
-    const port = (server.address() as any).port;
-    const keepBase = process.env.META_MODEL_BASE_URL;
-    const keepTimeout = process.env.MODEL_API_TIMEOUT_MS;
-    process.env.META_MODEL_BASE_URL = `http://127.0.0.1:${port}`;
-    process.env.MODEL_API_TIMEOUT_MS = '300';
+    const realFetch = globalThis.fetch;
+    (globalThis as any).fetch = (_input: any, init?: any) => new Promise((_resolve, reject) => {
+      const signal: AbortSignal | undefined = init?.signal ?? (_input instanceof Request ? _input.signal : undefined);
+      signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+    });
     try {
-      const provider = new providerMod.MetaModelProvider();
-      await assert.rejects(provider.complete([{ role: 'user', content: 'hi' }], []), /MODEL_API_FAILED: TIMEOUT/);
+      await withEnv({ MODEL_API_TIMEOUT_MS: '1000' }, async () => {
+        const model = await providerMod.createChatModel();
+        await assert.rejects(orchestrator.runChat(guestReq(), model, { message: 'hi' }), /MODEL_API_FAILED/);
+      });
     } finally {
-      process.env.META_MODEL_BASE_URL = keepBase;
-      process.env.MODEL_API_TIMEOUT_MS = keepTimeout;
-      server.close();
+      globalThis.fetch = realFetch;
     }
   });
 });
@@ -790,50 +1103,33 @@ describe('photo attachments', () => {
     assert.throws(() => providerMod.parseImageDataUrl(`data:image/png;base64,${'A'.repeat(6 * 1024 * 1024)}`), /AI_IMAGE_INVALID/);
   });
 
-  it('sends attached photos as image_url parts', async () => {
-    let seen: any = null;
-    const server = http.createServer((req, res) => {
-      let body = '';
-      req.on('data', (c) => { body += c; });
-      req.on('end', () => {
-        seen = JSON.parse(body);
-        res.setHeader('content-type', 'application/json');
-        res.end(JSON.stringify({ choices: [{ message: { content: 'I see a leak.' } }] }));
-      });
-    });
-    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
-    const keepBase = process.env.META_MODEL_BASE_URL;
-    process.env.META_MODEL_BASE_URL = `http://127.0.0.1:${(server.address() as any).port}`;
+  it('sends attached photos to the model as inline image data', async () => {
+    const api = fakeGemini([geminiText('I see a leak.')]);
     try {
-      const provider = new providerMod.MetaModelProvider();
-      const result = await provider.complete([{ role: 'user', content: 'what is wrong?', images: [pixel] }], []);
-      assert.equal(result.message.content, 'I see a leak.');
-      const parts = seen.messages[0].content;
-      assert.deepEqual(parts[0], { type: 'text', text: 'what is wrong?' });
-      assert.equal(parts[1].image_url.url, pixel);
+      const model = await providerMod.createChatModel();
+      const result = await orchestrator.runChat(guestReq(), model, { message: 'what is wrong?', imageDataUrl: pixel });
+      assert.equal(result.reply, 'I see a leak.');
+      const parts = api.seen[0]!.body.contents[api.seen[0]!.body.contents.length - 1].parts;
+      assert.deepEqual(parts[0], { text: 'what is wrong?' });
+      assert.deepEqual(parts[1], { inlineData: { mimeType: 'image/png', data: pixel.split(',')[1] } });
     } finally {
-      process.env.META_MODEL_BASE_URL = keepBase;
-      server.close();
+      api.restore();
     }
   });
 });
 
 describe('voice transcription', () => {
-  it('forwards audio as multipart and returns the trimmed transcript', async () => {
-    let seen: any = {};
-    const realFetch = globalThis.fetch;
-    (globalThis as any).fetch = async (url: any, init: any) => {
-      seen = { url, auth: init?.headers?.Authorization, isForm: init?.body instanceof FormData };
-      return { ok: true, json: async () => ({ transcript: '  fix the sink please  ' }) };
-    };
+  it('sends audio to the voice model and returns the trimmed transcript', async () => {
+    const api = fakeGemini([geminiText('  fix the sink please  ')]);
     try {
       const text = await voice.transcribeAudio(Buffer.from([1, 2, 3, 4]), 'note.wav', 'audio/wav');
       assert.equal(text, 'fix the sink please');
-      assert.match(seen.url, /\/asr\/transcribe$/);
-      assert.ok(String(seen.auth || '').startsWith('Bearer '));
-      assert.equal(seen.isForm, true);
+      assert.match(api.seen[0]!.url, /\/models\/gemini-3\.8-flash:generateContent$/);
+      const parts = api.seen[0]!.body.contents[0].parts;
+      assert.ok(parts[0].text.startsWith('Transcribe this voice note'));
+      assert.deepEqual(parts[1], { inlineData: { mimeType: 'audio/wav', data: Buffer.from([1, 2, 3, 4]).toString('base64') } });
     } finally {
-      globalThis.fetch = realFetch;
+      api.restore();
     }
   });
 
@@ -858,12 +1154,11 @@ describe('voice transcription', () => {
     } finally {
       process.env.ENABLE_AI_ORCHESTRATOR = keepEnabled;
     }
-    const realFetch = globalThis.fetch;
-    (globalThis as any).fetch = async () => ({ ok: true, json: async () => ({ transcript: '   ' }) });
+    const api = fakeGemini([geminiText('   ')]);
     try {
       await assert.rejects(voice.transcribeAudio(Buffer.from([1]), 'note.wav', 'audio/wav'), /AI_VOICE_EMPTY_TRANSCRIPT/);
     } finally {
-      globalThis.fetch = realFetch;
+      api.restore();
     }
   });
 });
@@ -1270,12 +1565,11 @@ describe('check-in billing consistency', () => {
 
     const first = await checkIn();
     assert.equal(first.statusCode, 200);
-    const now = new Date();
-    const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const period = periodOf();
     const rent = await prisma.pGRentEntry.findUnique({ where: { tenantId_period_entryType: { tenantId: tenant.id, period, entryType: 'RENT' } } });
     const food = await prisma.pGRentEntry.findUnique({ where: { tenantId_period_entryType: { tenantId: tenant.id, period, entryType: 'FOOD' } } });
     assert.equal(rent?.amount, 9500);
-    assert.equal(rent?.dueDate.getDate(), 14);
+    assert.equal(inAppZone(rent!.dueDate).getDate(), 14);
     assert.equal(food?.amount, 800);
 
     const second = await checkIn();

@@ -2,15 +2,17 @@
 
 Public PG discovery, OTP-verified bookings, owner/warden operations, resident
 self-service, and a role-aware AI assistant. Express/TypeScript and Prisma
-(SQLite) power the API; React/Vite/Tailwind power the frontend.
+(PostgreSQL) power the API, with a LangGraph agent for the assistant;
+React/Vite/Tailwind power the frontend.
 
 ## Requirements
 
 - Node.js 22.12+ or a supported newer LTS, with npm. Vite also supports Node
   20.19+, but not older Node 20 releases.
 - Two terminal windows, opened at the repository root (`D:\livingplus` below).
-- Internet for initial dependency installation. Local storage/SQLite need no
-  AWS, PostgreSQL, or Docker.
+- Internet for initial dependency installation. No PostgreSQL install, Docker
+  or cloud account is needed locally: `npm run dev` starts a bundled
+  PostgreSQL server (from npm) for you.
 
 Windows examples use `npm.cmd` / `npx.cmd` to avoid PowerShell's `npm.ps1`
 execution-policy restriction. On macOS/Linux use `npm` / `npx`.
@@ -28,7 +30,7 @@ if (!(Test-Path .env)) { Copy-Item .env.example .env }
 Configure these values in `Project/backend/.env`:
 
 ```dotenv
-DATABASE_URL="file:../database.db"
+DATABASE_URL="postgresql://livingplus:livingplus@localhost:5433/livingplus"
 PORT=4000
 LIVINGPLUS_ROOT_DOMAIN="livingplus.com"
 JWT_SECRET="<stable random secret, at least 32 characters>"
@@ -65,18 +67,22 @@ HTTPS or authorization. Restart Vite after changing frontend environment values.
 
 ### Database
 
+The database is PostgreSQL, managed with Prisma Migrate. With the default
+`DATABASE_URL` (localhost port 5433), `npm.cmd run dev` starts a bundled local
+PostgreSQL (data in `Project/backend/.local-postgres/`, git-ignored), applies
+pending migrations, then starts the API. Point `DATABASE_URL` anywhere else
+(another local PostgreSQL, Cloud SQL) and the bundled server is not started.
+
+To change the schema, start only the database, then create a migration:
+
 ```powershell
 cd D:\livingplus\Project\backend
-npx.cmd prisma validate
-npx.cmd prisma generate
-npx.cmd prisma db push
+npm.cmd run db            # terminal A: database only
+npm.cmd run db:migrate    # terminal B: prisma migrate dev; commit prisma/migrations
 ```
 
-Run `db push` after schema changes too. Review warnings before proceeding; do
-not use `--force-reset` or `--accept-data-loss` on a DB you need. If generation
-reports Windows `EPERM` on Prisma's DLL, stop backend dev servers, regenerate,
-then restart. SQLite paths resolve relative to the schema; this URL places the
-database at `Project/backend/database.db`.
+`npm.cmd run db:studio` opens Prisma Studio. If generation reports Windows
+`EPERM` on Prisma's DLL, stop backend dev servers, regenerate, then restart.
 
 ## Start Both Apps
 
@@ -88,7 +94,9 @@ npm.cmd run dev
 ```
 
 The API listens on `http://localhost:4000`. Startup assigns missing property
-slugs and runs rent/reminder schedulers against the configured database.
+slugs and, with `SCHEDULER_MODE=internal` (the default), runs the rent and
+reminder schedulers. Rent periods and due dates follow `APP_TIMEZONE`
+(default `Asia/Kolkata`), whatever the server's own timezone.
 
 **Terminal 2 - frontend:**
 
@@ -151,16 +159,32 @@ alone does not create that DB user. The active demo resident uses phone
 - **WhatsApp:** enable `ENABLE_WHATSAPP_CLOUD_API` and configure
   `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, approved templates and optionally
   `WHATSAPP_VERSION`. Otherwise use manual/click-to-chat workflows.
-- **AI:** configure `ENABLE_AI_ORCHESTRATOR=true`, `META_MODEL_API_KEY`,
-  `META_MODEL_BASE_URL`, `META_MODEL_NAME` for your compatible provider. Voice
-  additionally requires `/asr/transcribe` support, `META_VOICE_MODEL_NAME`, and
-  browser microphone permission. Chat API compatibility alone does not imply
-  voice support.
+- **AI assistant (any model):** the agent is a LangGraph graph over a
+  LangChain chat model, so the model is pure configuration. Set
+  `ENABLE_AI_ORCHESTRATOR=true` and `AI_MODEL="<provider>:<model>"`, then give
+  that provider its usual credentials:
+
+  | `AI_MODEL` example | Credentials | Package |
+  |---|---|---|
+  | `google:gemini-3.8-flash` | `GOOGLE_API_KEY` ([AI Studio](https://aistudio.google.com/apikey)) | included |
+  | `google:gemini-3.8-flash` on Google Cloud | no key: Vertex AI via ADC (`gcloud auth application-default login`, or the Cloud Run service account) | included |
+  | `openai:<model>` | `OPENAI_API_KEY` | `npm i @langchain/openai` |
+  | `anthropic:<model>` | `ANTHROPIC_API_KEY` | `npm i @langchain/anthropic` |
+  | `ollama:<model>` | none (local) | `npm i @langchain/ollama` |
+
+  Any provider `initChatModel` supports works the same way. Optional:
+  `AI_VOICE_MODEL` picks an audio-capable model for voice notes (defaults to
+  `AI_MODEL`), and `AI_MODEL_OPTIONS` passes provider options as JSON, such as
+  `{"temperature":0.2}` or `{"platformType":"gcp","location":"us-central1"}`
+  for Vertex AI. To spend Google Cloud credits, use Vertex AI or create the AI
+  Studio key in a project with billing linked. `GET /api/pg/ai/status` reports
+  the active provider and model. Voice also needs browser microphone permission.
 - **Maps:** optional frontend `VITE_GOOGLE_MAPS_API_KEY`.
-- **Uploads:** private local files default to `backend/private-uploads`.
-  Set a persistent `UPLOAD_DIR` for deployment, or explicitly configure S3.
-  Configure `PUBLIC_API_URL` when signed media needs a public API origin. Back
-  up the database and private files together.
+- **Uploads:** private files are stored by `UPLOAD_STORAGE`: `local`
+  (default, `backend/private-uploads`), `gcs` (Google Cloud Storage bucket
+  `GCS_BUCKET`) or `s3`. Files are never public; viewers get short-lived signed
+  URLs after access checks. Configure `PUBLIC_API_URL` when local signed media
+  needs a public API origin. Back up the database and files together.
 
 Restart the API after changing backend environment values. Vite embeds
 `VITE_*` values during production builds.
@@ -176,7 +200,9 @@ npm.cmd --prefix Project/frontend run build
 npm.cmd --prefix Project/frontend run lint
 ```
 
-Backend tests use a throwaway SQLite database, not the application DB. Build
+Backend tests start a throwaway PostgreSQL on a free port and apply the real
+migrations (set `TEST_DATABASE_URL` to use an existing empty database instead);
+they never touch the application DB. Build
 before `npm.cmd --prefix Project/backend start`; it runs emitted `src/index.js`.
 Serve `Project/frontend/dist` through a production web server. `vite preview`
 is a bundle preview, not production hosting, and has no `/api` proxy configured.
@@ -184,9 +210,23 @@ is a bundle preview, not production hosting, and has no `/api` proxy configured.
 Production requires apex plus wildcard DNS/TLS, SPA fallback for deep links,
 and `/api` proxying on each app host (or a public API origin with appropriate
 CORS). Hosting-provider configuration is not included. Do not expose local dev
-servers, `.env`, database files or private uploads publicly. The schema uses
-SQLite; PostgreSQL needs an explicit provider/schema migration, not merely a
-different `DATABASE_URL`.
+servers, `.env`, database files or private uploads publicly.
+
+## Deploying on Google Cloud
+
+The backend image (`Project/backend/Dockerfile`) is built for Cloud Run. It
+runs `prisma migrate deploy` on start, stores uploads in Cloud Storage, and
+leaves scheduled jobs to Cloud Scheduler.
+
+| Concern | Google Cloud service | Configuration |
+|---|---|---|
+| Database | Cloud SQL for PostgreSQL | `DATABASE_URL=postgresql://USER:PASS@/livingplus?host=/cloudsql/PROJECT:REGION:INSTANCE`, plus `--add-cloudsql-instances` on the service |
+| Files | Cloud Storage | `UPLOAD_STORAGE=gcs`, `GCS_BUCKET`; grant the service account Storage Object Admin on the bucket and Service Account Token Creator on itself (for signed URLs) |
+| Scheduled jobs | Cloud Scheduler | `SCHEDULER_MODE=external`; HTTP POST jobs to `/internal/cron/monthly-rent` (`5 0 1 * *`, time zone Asia/Kolkata) and `/internal/cron/rent-reminders` (daily), with an OIDC token whose audience matches `CRON_OIDC_AUDIENCE` and service account `CRON_SERVICE_ACCOUNT` |
+| AI assistant | Vertex AI (Gemini) | `AI_MODEL=google:<model>` with no `GOOGLE_API_KEY`: the service account authenticates (grant Vertex AI User) |
+| Agent state | Cloud SQL (same database) | LangGraph checkpoints live in the `langgraph` schema, created automatically |
+
+`/healthz` is a plain liveness endpoint for the service.
 
 ## Latest Local UI Verification
 

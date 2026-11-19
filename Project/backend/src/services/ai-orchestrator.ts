@@ -1,32 +1,35 @@
 // One role-aware orchestrator (PG OS §8): model reasons, backend tools
 // execute. Sensitive tools pause for explicit user confirmation; the backend
 // — never the model — decides what runs.
+//
+// The agent is a LangGraph state graph with a durable checkpointer:
+//
+//   START -> agent -> tools -> agent ... -> END
+//                       \-> confirm (interrupt: waits for the user) -> END
+//
+// * Each conversation is a LangGraph thread (thread_id = ConversationSession.id),
+//   checkpointed in PostgreSQL, so history and paused confirmations survive
+//   restarts and work across Cloud Run instances.
+// * A sensitive call pauses the graph with interrupt(); confirming or canceling
+//   resumes the same thread with Command({ resume }).
+// * The chat model is any LangChain model (see ai-provider.ts).
 
-import { randomUUID } from 'crypto';
+import { randomBytes } from 'crypto';
+import { Annotation, Command, END, GraphRecursionError, MessagesAnnotation, START, StateGraph, interrupt } from '@langchain/langgraph';
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage, trimMessages, type BaseMessage } from '@langchain/core/messages';
 import { prisma } from '../app.js';
 import { actorFromRequest, toolCatalogue, toolDefinitionsFor, type Actor } from './ai-tools.js';
-import type { ChatMessage, ModelProvider } from './ai-provider.js';
+import { modelFailure, modelTimeoutMs, type ToolDefinition } from './ai-provider.js';
+import { getCheckpointer } from './ai-checkpointer.js';
 
 const db = new Proxy({} as Record<string, any>, {
   get: (_target, property) => (prisma as any)[property]
 });
 
 const MAX_ITERATIONS = 6;
-const HISTORY_LIMIT = 20;
+/** Messages (including tool calls/results) of history sent to the model. */
+const HISTORY_MESSAGES = 40;
 const CONFIRM_TTL_MS = 10 * 60 * 1000;
-
-interface PendingConfirmation {
-  userKey: string;
-  role: string;
-  propertyId?: string;
-  tool: string;
-  args: any;
-  preview: string;
-  expiresAt: number;
-  idemKey: string;
-}
-
-const pendingConfirmations = new Map<string, PendingConfirmation>();
 
 function roleSystemPrompt(role: string): string {
   const shared = [
@@ -94,6 +97,14 @@ function previewFor(tool: string, args: any): string {
   return `Run ${tool} with the provided arguments.`;
 }
 
+/**
+ * Minimal surface the agent needs from a chat model. Every LangChain chat model
+ * with tool calling satisfies it; tests pass a scripted stand-in.
+ */
+export interface AgentModel {
+  bindTools?: (tools: any[]) => { invoke: (messages: BaseMessage[], config?: any) => Promise<BaseMessage> };
+}
+
 export interface ChatResult {
   reply: string;
   sessionId: string;
@@ -102,137 +113,291 @@ export interface ChatResult {
   usage?: { prompt_tokens?: number; completion_tokens?: number } | undefined;
 }
 
+/** A sensitive call the graph is paused on, bound to who may confirm it. */
+interface PendingAction {
+  nonce: string;
+  callId: string;
+  tool: string;
+  args: any;
+  preview: string;
+  /** Later calls from the same model turn, answered once this one resolves. */
+  laterCallIds: string[];
+  userKey: string;
+  role: string;
+  propertyId: string | null;
+  expiresAt: number;
+}
+
+type ResumeDecision = { action: 'confirm' | 'cancel' | 'abandon' };
+
+const AgentState = Annotation.Root({
+  ...MessagesAnnotation.spec,
+  pending: Annotation<PendingAction | null>({ reducer: (_current, next) => next, default: () => null }),
+  /** Reply text produced by the confirm node for the API response. */
+  outcome: Annotation<string | null>({ reducer: (_current, next) => next, default: () => null })
+});
+
+type AgentStateType = typeof AgentState.State;
+
+function toLangChainTools(tools: ToolDefinition[]) {
+  return tools.map((fn) => ({ type: 'function', function: { name: fn.name, description: fn.description, parameters: fn.parameters } }));
+}
+
+function messageText(message: BaseMessage | undefined): string {
+  if (!message) return '';
+  const content: any = message.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.filter((part) => part?.type === 'text' && typeof part.text === 'string').map((part) => part.text).join('');
+  return '';
+}
+
+function usageOf(message: BaseMessage | undefined): ChatResult['usage'] {
+  const meta: { input_tokens: number; output_tokens: number } | undefined = (message as any)?.usage_metadata;
+  if (!meta) return undefined;
+  return { prompt_tokens: meta.input_tokens, completion_tokens: meta.output_tokens };
+}
+
+/** Replaces photos in earlier turns with a note, so history stays small. */
+function withoutOldPhotos(messages: BaseMessage[]): BaseMessage[] {
+  let lastHuman = -1;
+  messages.forEach((m, i) => { if (HumanMessage.isInstance(m)) lastHuman = i; });
+  return messages.map((m, i) => {
+    if (i === lastHuman || !HumanMessage.isInstance(m) || !Array.isArray(m.content)) return m;
+    if (!m.content.some((part: any) => part?.type === 'image_url')) return m;
+    return new HumanMessage(`${messageText(m)}\n[photo attached earlier]`);
+  });
+}
+
+/** Tool names that ran successfully since the latest user message. */
+function executedThisTurn(messages: BaseMessage[]): string[] {
+  let start = 0;
+  messages.forEach((m, i) => { if (HumanMessage.isInstance(m)) start = i; });
+  return messages.slice(start)
+    .filter((m): m is ToolMessage => ToolMessage.isInstance(m) && m.status !== 'error' && Boolean(m.name))
+    .map((m) => m.name as string);
+}
+
+function newConfirmationId(threadId: string, nonce: string): string {
+  return `cfm.${threadId}.${nonce}`;
+}
+
+function parseConfirmationId(value: string): { threadId: string; nonce: string } | null {
+  const match = /^cfm\.([A-Za-z0-9_-]{8,64})\.([a-f0-9]{32})$/.exec(value);
+  return match ? { threadId: match[1]!, nonce: match[2]! } : null;
+}
+
+/** Builds the role-scoped agent graph for one request. */
+async function buildAgentGraph(model: AgentModel, actor: Actor, role: string, userKey: string) {
+  const checkpointer = await getCheckpointer();
+  const bound = typeof model.bindTools === 'function' ? model.bindTools(toLangChainTools(toolDefinitionsFor(role))) : null;
+
+  const agent = async (state: AgentStateType) => {
+    if (!bound) throw new Error('AI_MODEL_INIT_FAILED: the configured model does not support tool calling');
+    const history = await trimMessages(withoutOldPhotos(state.messages), {
+      maxTokens: HISTORY_MESSAGES,
+      tokenCounter: (messages) => messages.length,
+      strategy: 'last',
+      startOn: 'human',
+      includeSystem: false
+    });
+    try {
+      const response = await bound.invoke([new SystemMessage(roleSystemPrompt(role)), ...history], { timeout: modelTimeoutMs() });
+      return { messages: [response], outcome: null };
+    } catch (error: any) {
+      throw modelFailure(error);
+    }
+  };
+
+  const tools = async (state: AgentStateType) => {
+    const last = state.messages[state.messages.length - 1] as AIMessage;
+    const results: ToolMessage[] = [];
+    for (const bad of last.invalid_tool_calls ?? []) {
+      results.push(new ToolMessage({ tool_call_id: bad.id || '', name: bad.name || 'tool', status: 'error', content: 'ERROR: arguments were not valid JSON.' }));
+    }
+    const calls = last.tool_calls ?? [];
+    for (let index = 0; index < calls.length; index += 1) {
+      const call = calls[index]!;
+      const callId = call.id || '';
+      const tool = toolCatalogue[call.name];
+      if (!tool || !tool.roles.includes(role)) {
+        results.push(new ToolMessage({ tool_call_id: callId, name: call.name, status: 'error', content: `ERROR: tool ${call.name} is not available to role ${role}.` }));
+        continue;
+      }
+      const args = call.args ?? {};
+      if (tool.requiresConfirmation) {
+        const pending: PendingAction = {
+          nonce: randomBytes(16).toString('hex'),
+          callId,
+          tool: call.name,
+          args,
+          preview: previewFor(call.name, args),
+          laterCallIds: calls.slice(index + 1).map((c) => c.id || ''),
+          userKey,
+          role,
+          propertyId: actor.propertyId ?? null,
+          expiresAt: Date.now() + CONFIRM_TTL_MS
+        };
+        return { messages: results, pending };
+      }
+      try {
+        const result = await tool.execute(actor, args);
+        results.push(new ToolMessage({ tool_call_id: callId, name: call.name, status: 'success', content: JSON.stringify(result).slice(0, 6000) }));
+      } catch (error: any) {
+        results.push(new ToolMessage({ tool_call_id: callId, name: call.name, status: 'error', content: `ERROR: ${String(error?.message || error)}` }));
+      }
+    }
+    return { messages: results };
+  };
+
+  // Pauses until the user decides. Only interrupt() runs before the decision,
+  // so re-running this node on resume cannot repeat any side effect.
+  const confirm = async (state: AgentStateType) => {
+    const pending = state.pending!;
+    const decision = interrupt({ tool: pending.tool, preview: pending.preview }) as ResumeDecision;
+    const skipped = pending.laterCallIds.map((id) => new ToolMessage({
+      tool_call_id: id, name: 'skipped', status: 'error', content: 'NOT RUN: an earlier action in this step needed confirmation. Ask again if it is still needed.'
+    }));
+    const close = (toolContent: string, status: 'success' | 'error', reply: string) => ({
+      messages: [
+        new ToolMessage({ tool_call_id: pending.callId, name: pending.tool, status, content: toolContent }),
+        ...skipped,
+        new AIMessage(reply)
+      ],
+      pending: null,
+      outcome: reply
+    });
+
+    if (decision?.action === 'cancel') return close('CANCELED by the user. Nothing was changed.', 'error', 'Canceled. Nothing was changed.');
+    if (decision?.action !== 'confirm') return close('NOT CONFIRMED: the user moved on. Nothing was changed.', 'error', 'I did not run that action because it was not confirmed.');
+
+    const tool = toolCatalogue[pending.tool];
+    if (!tool || !tool.roles.includes(role)) {
+      return close('ERROR: no longer valid for this persona.', 'error', 'That confirmation is no longer valid for this persona. Please ask again.');
+    }
+    try {
+      const execArgs = pending.tool === 'create_booking_request' ? { ...pending.args, idempotency_key: `idem_${pending.nonce}` } : pending.args;
+      const result = await tool.execute(actor, execArgs);
+      return close(JSON.stringify(result).slice(0, 6000), 'success', `Done. ${pending.preview} Result: ${JSON.stringify(result)}`);
+    } catch (error: any) {
+      const code = String(error?.message || error);
+      const reason = code === 'FORBIDDEN' ? 'That is outside your access' : code;
+      return close(`ERROR: ${code}`, 'error', `I could not complete that: ${reason}. Nothing was changed.`);
+    }
+  };
+
+  const afterAgent = (state: AgentStateType) => {
+    const last = state.messages[state.messages.length - 1] as AIMessage;
+    return (last.tool_calls?.length || last.invalid_tool_calls?.length) ? 'tools' : END;
+  };
+  const afterTools = (state: AgentStateType) => (state.pending ? 'confirm' : 'agent');
+
+  return new StateGraph(AgentState)
+    .addNode('agent', agent)
+    .addNode('tools', tools)
+    .addNode('confirm', confirm)
+    .addEdge(START, 'agent')
+    .addConditionalEdges('agent', afterAgent, ['tools', END])
+    .addConditionalEdges('tools', afterTools, ['agent', 'confirm'])
+    .addEdge('confirm', END)
+    .compile({ checkpointer });
+}
+
+type AgentGraph = Awaited<ReturnType<typeof buildAgentGraph>>;
+
+async function pausedAction(graph: AgentGraph, threadId: string): Promise<PendingAction | null> {
+  const snapshot = await graph.getState({ configurable: { thread_id: threadId } });
+  return snapshot.next.includes('confirm') ? (snapshot.values as AgentStateType).pending : null;
+}
+
+async function resume(graph: AgentGraph, threadId: string, action: ResumeDecision['action']): Promise<AgentStateType> {
+  return graph.invoke(new Command({ resume: { action } }), { configurable: { thread_id: threadId } }) as Promise<AgentStateType>;
+}
+
+async function findSession(id: string | undefined, actor: Actor): Promise<{ id: string } | null> {
+  if (!id) return null;
+  return db.conversationSession.findFirst({
+    where: { id: String(id), ...(actor.userId ? { userId: actor.userId } : {}) },
+    select: { id: true }
+  }).catch(() => null);
+}
+
 export async function runChat(
   req: any,
-  provider: ModelProvider,
+  model: AgentModel,
   input: { message: string; sessionId?: string | undefined; confirmationId?: string | undefined; cancelConfirmationId?: string | undefined; imageDataUrl?: string | undefined }
 ): Promise<ChatResult> {
   const actor: Actor = await actorFromRequest(req);
   const role = ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN', 'PG_TENANT'].includes(actor.role) ? actor.role : 'GUEST';
   const userKey = actor.userId || `guest:${(req as any).ip || 'unknown'}`;
+  const graph = await buildAgentGraph(model, actor, role, userKey);
 
-  if (input.cancelConfirmationId) {
-    const pending = pendingConfirmations.get(input.cancelConfirmationId);
-    if (!pending || pending.userKey !== userKey || pending.role !== role || pending.propertyId !== actor.propertyId || pending.expiresAt < Date.now()) {
-      pendingConfirmations.delete(input.cancelConfirmationId);
-      return { reply: 'That confirmation is no longer active. Nothing was changed.', sessionId: input.sessionId || '' };
+  // Confirm / cancel: resume the paused thread named by the confirmation token.
+  const decisionToken = input.confirmationId || input.cancelConfirmationId;
+  if (decisionToken) {
+    const canceling = Boolean(input.cancelConfirmationId);
+    const fallbackSession = input.sessionId || '';
+    const inactive = canceling ? 'That confirmation is no longer active. Nothing was changed.' : 'That confirmation expired. Please ask again and I will prepare it fresh.';
+    const token = parseConfirmationId(decisionToken);
+    const session = token && (!input.sessionId || input.sessionId === token.threadId) ? await findSession(token.threadId, actor) : null;
+    const pending = session ? await pausedAction(graph, session.id) : null;
+    if (!session || !pending || pending.nonce !== token!.nonce) return { reply: inactive, sessionId: fallbackSession };
+    // Bound to the same caller, persona and PG host that prepared it.
+    if (pending.userKey !== userKey || pending.role !== role || pending.propertyId !== (actor.propertyId ?? null)) {
+      return { reply: inactive, sessionId: fallbackSession };
     }
-    pendingConfirmations.delete(input.cancelConfirmationId);
-    if (input.sessionId) {
-      await db.conversationSession.updateMany({
-        where: { id: input.sessionId, ...(actor.userId ? { userId: actor.userId } : {}) },
-        data: { stateJson: '[]' }
-      }).catch(() => undefined);
+    if (pending.expiresAt < Date.now()) {
+      await resume(graph, session.id, 'abandon');
+      return { reply: inactive, sessionId: session.id };
     }
-    return { reply: 'Canceled. Nothing was changed.', sessionId: input.sessionId || '' };
+    const final = await resume(graph, session.id, canceling ? 'cancel' : 'confirm');
+    const ran = !canceling && executedThisTurn(final.messages).includes(pending.tool);
+    return { reply: final.outcome || 'Done.', sessionId: session.id, ...(ran ? { toolCalls: [pending.tool] } : {}) };
   }
 
-  // Confirmation resume path: execute a previously previewed sensitive call.
-  if (input.confirmationId) {
-    const pending = pendingConfirmations.get(input.confirmationId);
-    if (!pending || pending.userKey !== userKey || pending.role !== role || pending.propertyId !== actor.propertyId || pending.expiresAt < Date.now()) {
-      pendingConfirmations.delete(input.confirmationId);
-      return { reply: 'That confirmation expired. Please ask again and I will prepare it fresh.', sessionId: input.sessionId || '' };
-    }
-    pendingConfirmations.delete(input.confirmationId);
-    const tool = toolCatalogue[pending.tool];
-    if (!tool || !tool.roles.includes(role)) return { reply: 'That confirmation is no longer valid for this persona. Please ask again.', sessionId: input.sessionId || '' };
-    try {
-      const execArgs = pending.tool === 'create_booking_request' ? { ...pending.args, idempotency_key: pending.idemKey } : pending.args;
-      const result = await tool.execute(actor, execArgs);
-      return {
-        reply: `Done. ${previewFor(pending.tool, pending.args)} Result: ${JSON.stringify(result)}`,
-        sessionId: input.sessionId || '', toolCalls: [pending.tool]
-      };
-    } catch (error: any) {
-      const code = String(error?.message || error);
-      const reason = code === 'FORBIDDEN' ? 'That is outside your access' : code;
-      return { reply: `I could not complete that: ${reason}. Nothing was changed.`, sessionId: input.sessionId || '' };
-    }
-  }
-
-  // Session history (short-lived conversational context, PG OS §10).
-  let session: any = null;
-  if (input.sessionId) {
-    session = await db.conversationSession.findFirst({
-      where: { id: String(input.sessionId), ...(actor.userId ? { userId: actor.userId } : {}) }
-    }).catch(() => null);
-  }
-  const history: ChatMessage[] = session ? JSON.parse(session.stateJson || '[]') : [];
-
-  const messages: ChatMessage[] = [
-    { role: 'system', content: roleSystemPrompt(role) },
-    ...history.slice(-HISTORY_LIMIT),
-    { role: 'user', content: input.message, ...(input.imageDataUrl ? { images: [input.imageDataUrl] } : {}) }
-  ];
-  const tools = toolDefinitionsFor(role);
-  const executed: string[] = [];
-  let usage;
-
-  for (let i = 0; i < MAX_ITERATIONS; i += 1) {
-    const response = await provider.complete(messages, tools);
-    usage = response.usage;
-    const message = response.message;
-    messages.push({ role: 'assistant', content: message.content, ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}) });
-
-    if (!message.tool_calls?.length) {
-      const reply = message.content?.trim() || 'I could not produce an answer. Please rephrase.';
-      const saved = await persistSession(session, actor, [...history, { role: 'user', content: input.message }, { role: 'assistant', content: reply }], true);
-      return { reply, sessionId: saved, toolCalls: executed, usage };
-    }
-
-    for (const call of message.tool_calls) {
-      const tool = toolCatalogue[call.name];
-      if (!tool || !tool.roles.includes(role)) {
-        messages.push({ role: 'tool', tool_call_id: call.id, content: `ERROR: tool ${call.name} is not available to role ${role}.` });
-        continue;
-      }
-      let args: any = {};
-      try {
-        args = JSON.parse(call.arguments || '{}');
-      } catch {
-        messages.push({ role: 'tool', tool_call_id: call.id, content: 'ERROR: arguments were not valid JSON.' });
-        continue;
-      }
-      if (tool.requiresConfirmation) {
-        const confirmationId = `cfm_${randomUUID().replace(/-/g, '')}`;
-        pendingConfirmations.set(confirmationId, { userKey, role, ...(actor.propertyId ? { propertyId: actor.propertyId } : {}), tool: call.name, args, preview: previewFor(call.name, args), expiresAt: Date.now() + CONFIRM_TTL_MS, idemKey: `idem_${confirmationId}` });
-        const saved = await persistSession(session, actor, [...history, { role: 'user', content: input.message }], true);
-        return {
-          reply: `Before I proceed: ${previewFor(call.name, args)} Reply to confirm and I will run it.`,
-          sessionId: saved, needsConfirmation: { confirmationId, tool: call.name, preview: previewFor(call.name, args) }, toolCalls: executed, usage
-        };
-      }
-      try {
-        const result = await tool.execute(actor, args);
-        executed.push(call.name);
-        messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result).slice(0, 6000) });
-      } catch (error: any) {
-        messages.push({ role: 'tool', tool_call_id: call.id, content: `ERROR: ${String(error?.message || error)}` });
-      }
-    }
-  }
-
-  const saved = await persistSession(session, actor, [...history, { role: 'user', content: input.message }], true);
-  return { reply: 'That needed more steps than I can take in one turn. Try a smaller request.', sessionId: saved, toolCalls: executed, usage };
-}
-
-async function persistSession(session: any, actor: Actor, history: ChatMessage[], create = false): Promise<string> {
-  const stateJson = JSON.stringify(history.slice(-HISTORY_LIMIT).map((m) => (m.images?.length ? { role: m.role, content: `${m.content || ''}\n[photo attached earlier]` } : m)));
-  try {
-    if (session && !create) {
-      await db.conversationSession.update({ where: { id: session.id }, data: { stateJson } });
-      return session.id;
-    }
-    if (session) {
-      await db.conversationSession.update({ where: { id: session.id }, data: { stateJson } });
-      return session.id;
-    }
-    const created = await db.conversationSession.create({
-      data: { userId: actor.userId, channel: 'web', role: actor.role, stateJson }
+  // A new message: continue the caller's thread, or start one.
+  let session = await findSession(input.sessionId, actor);
+  if (!session) {
+    session = await db.conversationSession.create({
+      data: { userId: actor.userId, channel: 'web', role: actor.role, stateJson: '[]' },
+      select: { id: true }
     });
-    return created.id;
-  } catch {
-    return session?.id || '';
   }
+  const threadId = session!.id;
+  const config = { configurable: { thread_id: threadId }, recursionLimit: MAX_ITERATIONS * 2 + 1 };
+
+  // The user moved on instead of answering a pending confirmation: close it out.
+  if (await pausedAction(graph, threadId)) await resume(graph, threadId, 'abandon');
+
+  const userMessage = input.imageDataUrl
+    ? new HumanMessage({ content: [{ type: 'text', text: input.message }, { type: 'image_url', image_url: { url: input.imageDataUrl } }] })
+    : new HumanMessage(input.message);
+
+  let final: AgentStateType;
+  try {
+    final = await graph.invoke({ messages: [userMessage], pending: null, outcome: null }, config) as AgentStateType;
+  } catch (error: any) {
+    if (error instanceof GraphRecursionError || error?.name === 'GraphRecursionError') {
+      const reply = 'That needed more steps than I can take in one turn. Try a smaller request.';
+      // Close the turn so the thread stays a valid conversation for the model.
+      await graph.updateState({ configurable: { thread_id: threadId } }, { messages: [new AIMessage(reply)] }, 'agent').catch(() => undefined);
+      return { reply, sessionId: threadId, toolCalls: [] };
+    }
+    throw error;
+  }
+
+  const executed = executedThisTurn(final.messages);
+  const lastAi = [...final.messages].reverse().find((m) => AIMessage.isInstance(m));
+  const usage = usageOf(lastAi);
+
+  const pending = await pausedAction(graph, threadId);
+  if (pending) {
+    const confirmationId = newConfirmationId(threadId, pending.nonce);
+    return {
+      reply: `Before I proceed: ${pending.preview} Reply to confirm and I will run it.`,
+      sessionId: threadId, needsConfirmation: { confirmationId, tool: pending.tool, preview: pending.preview }, toolCalls: executed, usage
+    };
+  }
+
+  const reply = messageText(lastAi).trim() || 'I could not produce an answer. Please rephrase.';
+  return { reply, sessionId: threadId, toolCalls: executed, usage };
 }

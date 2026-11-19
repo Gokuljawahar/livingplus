@@ -11,6 +11,7 @@ import { sendDueRentReminders } from './pg-rent-reminders.js';
 import { createExpense, listExpenses } from './pg-expenses.js';
 import { notifyWhatsAppTemplate } from './pg-notifications.js';
 import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
+import { periodOf } from '../utils/app-time.js';
 const db = new Proxy({}, {
     get: (_target, property) => prisma[property]
 });
@@ -704,7 +705,7 @@ export const toolCatalogue = {
                 properties: properties.map((p) => ({ property_id: p.id, name: p.name })),
                 total_beds: totalBeds, occupied_beds: activeTenants, available_beds: availableBeds,
                 occupancy_rate: totalBeds ? Math.round((activeTenants / totalBeds) * 100) : 0,
-                pending_bookings: pendingBookings, period: str(args.period) || new Date().toISOString().slice(0, 7)
+                pending_bookings: pendingBookings, period: str(args.period) || periodOf()
             };
         }
     },

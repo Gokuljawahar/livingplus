@@ -1,44 +1,47 @@
-export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
+/** Session history entry persisted between chat turns (text only). */
 export interface ChatMessage {
-    role: ChatRole;
+    role: 'user' | 'assistant';
     content: string | null;
-    tool_calls?: ProviderToolCall[] | undefined;
-    tool_call_id?: string;
-    images?: string[];
-    name?: string;
-}
-export interface ProviderToolCall {
-    id: string;
-    name: string;
-    arguments: string;
 }
 export interface ToolDefinition {
     name: string;
     description: string;
     parameters: Record<string, unknown>;
 }
-export interface ModelResponse {
-    message: ChatMessage;
-    usage?: {
-        prompt_tokens?: number;
-        completion_tokens?: number;
-    };
-}
-export interface ModelProvider {
-    readonly name: string;
-    readonly configured: boolean;
-    complete(messages: ChatMessage[], tools: ToolDefinition[]): Promise<ModelResponse>;
-}
+export type ModelPurpose = 'chat' | 'voice';
 export declare const aiEnabled: () => boolean;
+export interface ModelConfig {
+    /** LangChain "provider:model" id, e.g. "google:gemini-3.8-flash". */
+    model: string;
+    /** Provider-specific constructor options, passed through untouched. */
+    options: Record<string, unknown>;
+}
+/** Reads the model configuration for a purpose from the environment. */
+export declare function modelConfig(purpose?: ModelPurpose): ModelConfig;
+/** "google:gemini-3.8-flash" -> { provider: "google", name: "gemini-3.8-flash" }. */
+export declare function describeModel(model: string): {
+    provider: string;
+    name: string;
+};
+/**
+ * Builds the configured LangChain chat model. Throws AI_ORCHESTRATOR_NOT_CONFIGURED
+ * when the assistant is off or no model is set, and AI_MODEL_INIT_FAILED when the
+ * provider package is missing or rejects the configuration.
+ */
+export declare function createChatModel(purpose?: ModelPurpose): Promise<BaseChatModel>;
+export interface ModelStatus {
+    enabled: boolean;
+    configured: boolean;
+    provider: string;
+    model: string;
+    error?: string;
+}
+/** Reports whether the configured model can be constructed, without calling it. */
+export declare function modelStatus(): Promise<ModelStatus>;
+/** Normalizes provider failures to the MODEL_API_FAILED code the API maps to 502. */
+export declare function modelFailure(error: any): Error;
+export declare const modelTimeoutMs: () => number;
 export declare const MAX_IMAGE_BYTES: number;
 export declare function parseImageDataUrl(value: unknown): string;
-export declare class MetaModelProvider implements ModelProvider {
-    readonly name = "meta-model-api";
-    readonly configured: boolean;
-    private readonly baseUrl;
-    private readonly apiKey;
-    private readonly model;
-    constructor();
-    complete(messages: ChatMessage[], tools: ToolDefinition[]): Promise<ModelResponse>;
-}
 //# sourceMappingURL=ai-provider.d.ts.map

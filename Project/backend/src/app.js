@@ -1,8 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
-import { access, mkdir, writeFile } from 'fs/promises';
-import { randomUUID } from 'crypto';
+import { access } from 'fs/promises';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import routes from './routes/index.js';
@@ -10,6 +9,8 @@ import { decryptRequest, encryptResponse } from './middleware/encryption.middlew
 import { authenticate } from './middleware/auth.middleware.js';
 import { getJwtSecret } from './utils/auth-config.js';
 import { resolvePgHost } from './middleware/pg-host.middleware.js';
+import { cronRoutes } from './routes/cron.routes.js';
+import { directUploadUrl, localUploadPath, newFileKey, putFile, storageKind, viewUrl } from './services/storage.js';
 const app = express();
 export const prisma = new PrismaClient();
 app.use(cors());
@@ -18,29 +19,16 @@ app.use(express.urlencoded({ limit: '100kb', extended: true }));
 import path from 'path';
 import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Liveness probe and scheduled jobs: plain HTTP, outside /api encryption and PG host routing.
+app.get('/healthz', (_req, res) => { res.json({ ok: true }); });
+app.use('/internal/cron', cronRoutes(prisma));
 app.use('/api', resolvePgHost(prisma));
-const uploadStorage = process.env.UPLOAD_STORAGE === 's3' ? 's3' : 'local';
-const localUploadDir = process.env.UPLOAD_DIR
-    ? path.resolve(process.env.UPLOAD_DIR)
-    : path.resolve(__dirname, '../private-uploads');
 app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
 app.use('/api/uploads', express.static(path.resolve(__dirname, '../uploads')));
-// S3 proxy upload endpoint — placed BEFORE encryption middleware
-// so it can receive multipart/form-data without encryption.
-// This avoids S3 CORS issues that cause failures on mobile browsers.
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+// Proxy upload endpoint — placed BEFORE encryption middleware so it can
+// receive multipart/form-data. Uploading through the API (instead of a direct
+// bucket URL) avoids storage CORS issues on mobile browsers.
 import sharp from "sharp";
-const s3Client = new S3Client({ region: process.env.S3_BUCKET_REGION || 'ap-south-1' });
-function localUploadPath(fileKey) {
-    const match = /^local\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(webp|pdf)$/i.exec(fileKey);
-    return match ? path.join(localUploadDir, `${match[1]}.${match[2]}`) : null;
-}
-function localMediaUrl(req, fileKey) {
-    const token = jwt.sign({ purpose: 'LOCAL_MEDIA', fileKey }, getJwtSecret(), { expiresIn: '1h' });
-    const apiOrigin = process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}`;
-    return `${apiOrigin.replace(/\/$/, '')}/api/local-media/${token}`;
-}
 const s3Upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
@@ -116,26 +104,12 @@ app.post('/api/upload-s3', authenticate, authorizePropertyStaffUpload, s3Upload.
         else if (imageBuffer.indexOf(Buffer.from('%PDF-')) < 0 || imageBuffer.indexOf(Buffer.from('%PDF-')) > 1024) {
             return res.status(400).json({ error: 'PDF file is invalid' });
         }
-        const fileKey = uploadStorage === 'local'
-            ? `local/${randomUUID()}.${contentType === 'application/pdf' ? 'pdf' : 'webp'}`
-            : `uploads/${Date.now()}-${randomUUID()}.${contentType === 'application/pdf' ? 'pdf' : 'webp'}`;
-        if (uploadStorage === 'local') {
-            await mkdir(localUploadDir, { recursive: true });
-            await writeFile(localUploadPath(fileKey), imageBuffer, { flag: 'wx', mode: 0o600 });
-        }
-        else {
-            const command = new PutObjectCommand({
-                Bucket: process.env.S3_BUCKET_NAME,
-                Key: fileKey,
-                Body: imageBuffer,
-                ContentType: contentType,
-            });
-            await s3Client.send(command);
-        }
+        const fileKey = newFileKey(contentType === 'application/pdf' ? 'pdf' : 'webp');
+        await putFile(fileKey, imageBuffer, contentType);
         res.json({ fileKey });
     }
     catch (error) {
-        console.error("Failed to upload to S3:", error);
+        console.error(`Failed to upload to ${storageKind()} storage:`, error);
         res.status(500).json({ error: "Failed to upload image" });
     }
 });
@@ -173,10 +147,10 @@ app.get('/api/local-media/:token', async (req, res) => {
         return res.sendStatus(403);
     }
 });
-// S3 presigned URL endpoints (kept for backwards compatibility)
+// Direct-upload signed URL endpoint (kept for backwards compatibility)
 app.post('/api/upload-url', authenticate, authorizePropertyStaffUpload, async (req, res) => {
     try {
-        if (uploadStorage !== 's3') {
+        if (storageKind() === 'local') {
             return res.status(409).json({ message: 'Use the authenticated multipart upload endpoint for local storage' });
         }
         const { filename, mimeType } = req.body;
@@ -185,12 +159,7 @@ app.post('/api/upload-url', authenticate, authorizePropertyStaffUpload, async (r
         }
         const sanitizedFilename = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
         const fileKey = `uploads/${Date.now()}-${sanitizedFilename}`;
-        const command = new PutObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME || 'livingplus-dev-uploads',
-            Key: fileKey,
-            ContentType: mimeType,
-        });
-        const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
+        const uploadUrl = await directUploadUrl(fileKey, mimeType.toLowerCase());
         res.json({ uploadUrl, fileKey });
     }
     catch (error) {
@@ -198,7 +167,6 @@ app.post('/api/upload-url', authenticate, authorizePropertyStaffUpload, async (r
         res.status(500).json({ error: "Internal server error" });
     }
 });
-const signedUrlCache = new Map();
 app.get(/^\/api\/view-image\/(.+)$/, authenticate, async (req, res) => {
     try {
         const fileKey = req.params[0];
@@ -222,30 +190,10 @@ app.get(/^\/api\/view-image\/(.+)$/, authenticate, async (req, res) => {
         }));
         if (!hasAccess)
             return res.status(403).json({ message: 'You do not have access to this document' });
-        if (uploadStorage === 'local') {
-            const filePath = localUploadPath(fileKey);
-            if (!filePath)
-                return res.status(404).json({ message: 'Document not found' });
-            try {
-                await access(filePath);
-            }
-            catch {
-                return res.status(404).json({ message: 'Document not found' });
-            }
-            return res.json({ viewUrl: localMediaUrl(req, fileKey) });
-        }
-        const now = Date.now();
-        const cached = signedUrlCache.get(fileKey);
-        if (cached && cached.expiresAt > now) {
-            return res.json({ viewUrl: cached.url });
-        }
-        const command = new GetObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME || 'livingplus-dev-uploads',
-            Key: fileKey,
-        });
-        const viewUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-        signedUrlCache.set(fileKey, { url: viewUrl, expiresAt: now + 50 * 60 * 1000 });
-        res.json({ viewUrl });
+        const url = await viewUrl(req, fileKey);
+        if (!url)
+            return res.status(404).json({ message: 'Document not found' });
+        res.json({ viewUrl: url });
     }
     catch (error) {
         console.error("Failed to generate view URL:", error);
@@ -265,36 +213,11 @@ app.post('/api/view-image/bulk', async (req, res) => {
         const publicKeys = new Set(properties.flatMap((property) => Array.isArray(property.photoUrls) ? property.photoUrls : []));
         const allowedKeys = [...new Set(keys)].filter((key) => publicKeys.has(key));
         const urls = {};
-        const now = Date.now();
-        if (uploadStorage === 'local') {
-            await Promise.all(allowedKeys.map(async (fileKey) => {
-                const filePath = localUploadPath(fileKey);
-                if (!filePath)
-                    return;
-                try {
-                    await access(filePath);
-                    urls[fileKey] = localMediaUrl(req, fileKey);
-                }
-                catch {
-                    return;
-                }
-            }));
-            return res.json({ urls });
-        }
         await Promise.all(allowedKeys.map(async (fileKey) => {
             try {
-                const cached = signedUrlCache.get(fileKey);
-                if (cached && cached.expiresAt > now) {
-                    urls[fileKey] = cached.url;
-                    return;
-                }
-                const command = new GetObjectCommand({
-                    Bucket: process.env.S3_BUCKET_NAME || 'livingplus-dev-uploads',
-                    Key: fileKey,
-                });
-                const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-                signedUrlCache.set(fileKey, { url, expiresAt: now + 50 * 60 * 1000 });
-                urls[fileKey] = url;
+                const url = await viewUrl(req, fileKey);
+                if (url)
+                    urls[fileKey] = url;
             }
             catch (err) {
                 console.error(`Failed to generate url for ${fileKey}`, err);

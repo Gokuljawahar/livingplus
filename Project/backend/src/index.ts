@@ -24,8 +24,14 @@ const PORT = process.env.PORT || 4000;
 
 const server = app.listen(PORT, async () => {
   console.log(`Server is running on port ${PORT}`);
-  startMonthlyRentScheduler(prisma);
-  startRentReminderScheduler(prisma);
+  // On Cloud Run, set SCHEDULER_MODE=external and trigger /internal/cron/* from
+  // Cloud Scheduler: instances scale to zero and may run in parallel.
+  if (process.env.SCHEDULER_MODE === 'external') {
+    console.log('[scheduler] External mode: jobs run via /internal/cron/*');
+  } else {
+    startMonthlyRentScheduler(prisma);
+    startRentReminderScheduler(prisma);
+  }
 });
 
 server.on('error', (err) => {
@@ -39,6 +45,7 @@ const shutdown = (signal: string): void => {
       console.error('HTTP server shutdown error:', error);
       process.exitCode = 1;
     }
+    void import('./services/ai-checkpointer.js').then(({ closeCheckpointer }) => closeCheckpointer());
     void prisma.$disconnect().catch((disconnectError) => {
       console.error('Prisma shutdown error:', disconnectError);
       process.exitCode = 1;

@@ -3,6 +3,7 @@
 // the owner. Shares round to whole rupees with the remainder settled on the
 // largest share so the parts always sum to the bill total.
 import { logAudit } from './pg-audit.js';
+import { dueDateIn, periodOf, zonedDate } from '../utils/app-time.js';
 
 export interface SplitRow {
   tenantId: string;
@@ -29,12 +30,12 @@ export function calculateMonthlyRent(tenant: {
   bed?: { room?: { maintenanceFee?: number | null; utilitiesSurcharge?: number | null } | null } | null;
   property?: { rentDueDay?: number | null } | null;
 }, at = new Date()): MonthlyRentDetails {
-  const period = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}`;
+  const period = periodOf(at);
   const dueDay = Math.min(28, Math.max(1, tenant.property?.rentDueDay || 5));
   return {
     period,
     amount: tenant.monthlyRent + (tenant.bed?.room?.maintenanceFee || 0) + (tenant.bed?.room?.utilitiesSurcharge || 0),
-    dueDate: new Date(at.getFullYear(), at.getMonth(), dueDay)
+    dueDate: dueDateIn(at, dueDay)
   };
 }
 
@@ -127,7 +128,7 @@ export async function approveElectricityBill(db: any, actorId: string | null, bi
         update: { amount: row.share, status: 'DUE' },
         create: {
           tenantId: tenant.id, period: bill.period, entryType: 'ELECTRICITY',
-          amount: row.share, dueDate: new Date((year as number), (month as number) - 1, dueDay),
+          amount: row.share, dueDate: zonedDate(year as number, (month as number) - 1, dueDay),
           invoiceCode: `ELEC-${bill.period}-${tenant.id.slice(0, 8).toUpperCase()}`, status: 'DUE'
         }
       });
