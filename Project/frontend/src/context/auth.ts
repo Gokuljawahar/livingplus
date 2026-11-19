@@ -6,6 +6,8 @@ export interface User {
   name: string;
   role: string;
   profileImage?: string;
+  /** A Google account is linked for "Sign in with Google". */
+  googleLinked?: boolean;
   propertyAccess?: { propertyId: string; role: string }[];
 }
 

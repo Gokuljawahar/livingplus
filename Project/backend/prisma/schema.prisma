@@ -16,6 +16,10 @@ model User {
   name       String
   role       String   @default("PG_OWNER")
   profileImage String?
+  // Google account linked by the user after a password sign-in (Firebase uid).
+  // Google sign-in matches this id, never the email typed at registration.
+  googleUid      String?   @unique
+  googleLinkedAt DateTime?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   pgAccess   PGPropertyAccess[]

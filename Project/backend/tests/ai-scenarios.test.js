@@ -1081,6 +1081,127 @@ describe('Firebase phone verification (OTP_PROVIDER=firebase)', () => {
         }
     });
 });
+describe('Sign in with Google (ENABLE_GOOGLE_SIGN_IN=true)', () => {
+    let auth;
+    let phoneVerification;
+    let googleOwner;
+    const keep = {};
+    const envKeys = ['ENABLE_GOOGLE_SIGN_IN', 'FIREBASE_PROJECT_ID', 'FIREBASE_WEB_API_KEY', 'ADMIN_GOOGLE_EMAILS'];
+    const respond = () => ({
+        statusCode: 200,
+        body: undefined,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    });
+    const nowSeconds = () => Math.floor(Date.now() / 1000);
+    // Fake Firebase Admin verifier: "g:<email>:<uid>[:<age seconds>][:<provider>][:<verified>]".
+    const fakeVerifier = async (idToken) => {
+        const [kind, email, uid, age = '5', provider = 'google.com', verified = 'yes'] = idToken.split(':');
+        if (kind !== 'g')
+            throw new Error('Firebase ID token has invalid signature');
+        return { email, email_verified: verified === 'yes', name: 'Google Name', uid: uid, auth_time: nowSeconds() - Number(age), firebase: { sign_in_provider: provider } };
+    };
+    const signIn = async (firebaseIdToken, propertyId) => {
+        const res = respond();
+        await auth.googleLogin({ body: { firebaseIdToken }, ...(propertyId ? { pgPropertyId: propertyId } : {}) }, res);
+        return res;
+    };
+    before(async () => {
+        for (const key of envKeys)
+            keep[key] = process.env[key];
+        process.env.ENABLE_GOOGLE_SIGN_IN = 'true';
+        process.env.FIREBASE_PROJECT_ID = 'livingplus-demo';
+        process.env.FIREBASE_WEB_API_KEY = 'AIza-test-web-key';
+        process.env.ADMIN_GOOGLE_EMAILS = ' Founder@Example.com , ops@example.com';
+        auth = await import('../src/controllers/pg-auth.controller.js');
+        phoneVerification = await import('../src/services/phone-verification.js');
+        phoneVerification.setFirebaseVerifierForTests(fakeVerifier);
+        googleOwner = await prisma.user.create({ data: { phone: '9400000004', email: 'Owner.Google@Example.com', password: 'x', name: 'Google Owner', role: 'PG_OWNER' } });
+        await prisma.user.create({ data: { phone: '9400000005', email: 'resident.google@example.com', password: 'x', name: 'Google Resident', role: 'PG_TENANT' } });
+    });
+    after(() => {
+        phoneVerification.setFirebaseVerifierForTests(null);
+        for (const key of envKeys) {
+            if (keep[key] === undefined)
+                delete process.env[key];
+            else
+                process.env[key] = keep[key];
+        }
+    });
+    const link = async (firebaseIdToken, user) => {
+        const res = respond();
+        await auth.linkGoogle({ body: { firebaseIdToken }, user }, res);
+        return res;
+    };
+    it('never signs a staff account in just because the Google email matches', async () => {
+        const res = await signIn('g:owner.google@example.com:uid-o');
+        assert.equal(res.statusCode, 403);
+        assert.equal(res.body.code, 'GOOGLE_NOT_LINKED');
+        assert.equal(res.body.token, undefined);
+    });
+    it('links Google after a password sign-in, then signs in by that Google account', async () => {
+        // The Google email differs from the (unverified) email on the account: the link is by Google uid.
+        const linked = await link('g:asha.personal@gmail.com:uid-o', { userId: googleOwner.id, role: 'PG_OWNER' });
+        assert.equal(linked.statusCode, 200);
+        assert.equal(linked.body.googleLinked, true);
+        const res = await signIn('g:asha.personal@gmail.com:uid-o');
+        assert.equal(res.statusCode, 200);
+        assert.ok(res.body.token);
+        assert.equal(res.body.user.id, googleOwner.id);
+        assert.equal(res.body.user.role, 'PG_OWNER');
+    });
+    it('keeps one Google account to one LivingPlus account, and only for staff', async () => {
+        const other = await prisma.user.create({ data: { phone: '9400000006', email: 'second.owner@example.com', password: 'x', name: 'Second Owner', role: 'PG_OWNER' } });
+        assert.equal((await link('g:asha.personal@gmail.com:uid-o', { userId: other.id, role: 'PG_OWNER' })).statusCode, 409);
+        const resident = await prisma.user.findFirst({ where: { phone: '9400000005' } });
+        assert.equal((await link('g:resident@gmail.com:uid-r2', { userId: resident.id, role: 'PG_TENANT' })).statusCode, 403);
+        assert.equal((await link('g:founder@example.com:uid-a', { userId: 'env-admin', role: 'SUPER_ADMIN' })).statusCode, 400);
+        assert.equal((await link('g:x@gmail.com:uid-x', {})).statusCode, 401);
+        assert.equal((await link('g:old@gmail.com:uid-z:900', { userId: other.id, role: 'PG_OWNER' })).statusCode, 401, 'stale token');
+    });
+    it('stops Google sign-in after unlinking', async () => {
+        const res = respond();
+        await auth.unlinkGoogle({ user: { userId: googleOwner.id, role: 'PG_OWNER' } }, res);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.body.googleLinked, false);
+        assert.equal((await signIn('g:asha.personal@gmail.com:uid-o')).statusCode, 403);
+        assert.equal((await link('g:asha.personal@gmail.com:uid-o', { userId: googleOwner.id, role: 'PG_OWNER' })).statusCode, 200, 'relink for later tests');
+    });
+    it('signs listed admin emails in as super admin', async () => {
+        const res = await signIn('g:founder@example.com:uid-a');
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.body.user.role, 'SUPER_ADMIN');
+    });
+    it('refuses unknown emails, residents and PGs the owner has no access to', async () => {
+        assert.equal((await signIn('g:stranger@example.com:uid-s')).statusCode, 403);
+        assert.equal((await signIn('g:resident.google@example.com:uid-r')).statusCode, 403);
+        assert.equal((await signIn('g:asha.personal@gmail.com:uid-o', ids.prop.id)).statusCode, 403, 'linked owner, but not on this PG');
+    });
+    it('refuses forged, stale, unverified and non-Google tokens', async () => {
+        assert.equal((await signIn('forged')).statusCode, 401);
+        assert.equal((await signIn('g:owner.google@example.com:uid-o:900')).statusCode, 401, 'older than 10 minutes');
+        assert.equal((await signIn('g:owner.google@example.com:uid-o:5:password')).statusCode, 401, 'not a Google sign-in');
+        assert.equal((await signIn('g:owner.google@example.com:uid-o:5:google.com:no')).statusCode, 401, 'email not verified');
+    });
+    it('is off unless enabled, and publishes its config when on', async () => {
+        const { getPublicConfig } = await import('../src/controllers/pg.controller.js');
+        const res = respond();
+        await getPublicConfig({}, res);
+        assert.deepEqual(res.body.googleSignIn, {
+            firebase: { apiKey: 'AIza-test-web-key', authDomain: 'livingplus-demo.firebaseapp.com', projectId: 'livingplus-demo', appId: '' }
+        });
+        process.env.ENABLE_GOOGLE_SIGN_IN = 'false';
+        try {
+            assert.equal((await signIn('g:owner.google@example.com:uid-o')).statusCode, 404);
+            const off = respond();
+            await getPublicConfig({}, off);
+            assert.equal(off.body.googleSignIn, null);
+        }
+        finally {
+            process.env.ENABLE_GOOGLE_SIGN_IN = 'true';
+        }
+    });
+});
 describe('semantic PG search', () => {
     let search;
     let embeddingsMod;
@@ -1317,6 +1438,13 @@ describe('HTTP hardening', () => {
         assert.equal(limited.status, 429);
         assert.ok(limited.headers.get('ratelimit-policy'));
         assert.equal((await send('198.51.100.9')).status, 400, 'other callers are unaffected');
+    });
+    it('gives Google sign-in its own rate limit, separate from OTP verification', async () => {
+        const post = (path) => fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.50' }, body: '{}' });
+        for (let i = 0; i < 10; i += 1)
+            await post('/api/auth/otp-verify');
+        assert.equal((await post('/api/auth/otp-verify')).status, 429, 'OTP budget used up');
+        assert.notEqual((await post('/api/auth/google')).status, 429, 'Google sign-in still allowed');
     });
     it('redacts secrets from structured logs', async () => {
         const { pino } = await import('pino');

@@ -72,7 +72,12 @@ const FIREBASE_MESSAGES: Record<string, string> = {
   'auth/invalid-verification-code': 'Invalid verification code',
   'auth/code-expired': 'Code expired. Request a new one.',
   'auth/captcha-check-failed': 'Verification check failed. Request a new code.',
-  'auth/network-request-failed': 'Network error. Check your connection and retry.'
+  'auth/network-request-failed': 'Network error. Check your connection and retry.',
+  // Setup problems on the Firebase project, not the user's fault.
+  'auth/operation-not-allowed': 'SMS codes are not enabled for this number\'s country yet. Please contact the PG.',
+  'auth/billing-not-enabled': 'SMS verification is not available right now. Please contact the PG.',
+  'auth/invalid-app-credential': 'Verification check failed. Refresh the page and try again.',
+  'auth/unauthorized-domain': 'Phone verification is not set up for this address yet.'
 };
 
 /** User-facing message for an OTP failure from either Firebase or the API. */

@@ -11,6 +11,9 @@ import { getAuth } from 'firebase-admin/auth';
 
 export type OtpProvider = 'firebase' | 'sms';
 
+/** "Sign in with Google" for owners, wardens and admins (needs the Firebase web config). */
+export const googleSignInEnabled = (): boolean => process.env.ENABLE_GOOGLE_SIGN_IN === 'true' && firebaseWebConfig() !== null;
+
 export const otpProvider = (): OtpProvider => (process.env.OTP_PROVIDER === 'firebase' ? 'firebase' : 'sms');
 
 /** Public Firebase web config for the browser SDK (these values are not secrets). */
@@ -34,7 +37,15 @@ export interface VerifiedPhone {
   uid: string;
 }
 
-type Verifier = (idToken: string) => Promise<{ phone_number?: string; auth_time: number; uid: string; firebase?: { sign_in_provider?: string } }>;
+type Verifier = (idToken: string) => Promise<{
+  phone_number?: string;
+  email?: string;
+  email_verified?: boolean;
+  name?: string;
+  auth_time: number;
+  uid: string;
+  firebase?: { sign_in_provider?: string };
+}>;
 
 let verifierOverride: Verifier | null = null;
 
@@ -73,4 +84,29 @@ export async function verifyFirebasePhoneToken(idToken: string, now = Date.now()
   if (!phone || decoded.firebase?.sign_in_provider !== 'phone') throw new Error('PHONE_TOKEN_INVALID');
   if (!decoded.auth_time || now / 1000 - decoded.auth_time > MAX_TOKEN_AGE_SECONDS) throw new Error('PHONE_TOKEN_INVALID');
   return { phone, authTime: decoded.auth_time, uid: decoded.uid };
+}
+
+export interface VerifiedGoogleAccount {
+  /** Lower-cased, verified by Google. */
+  email: string;
+  name: string;
+  uid: string;
+}
+
+/**
+ * Verifies a Firebase ID token from a Google sign-in and returns the Google
+ * account's verified email. Throws GOOGLE_TOKEN_INVALID for anything else.
+ */
+export async function verifyFirebaseGoogleToken(idToken: string, now = Date.now()): Promise<VerifiedGoogleAccount> {
+  let decoded;
+  try {
+    decoded = await firebaseVerifier()(idToken);
+  } catch (error: any) {
+    if (error?.message === 'FIREBASE_NOT_CONFIGURED') throw error;
+    throw new Error('GOOGLE_TOKEN_INVALID');
+  }
+  const email = String(decoded.email || '').trim().toLowerCase();
+  if (!email || decoded.email_verified !== true || decoded.firebase?.sign_in_provider !== 'google.com') throw new Error('GOOGLE_TOKEN_INVALID');
+  if (!decoded.auth_time || now / 1000 - decoded.auth_time > MAX_TOKEN_AGE_SECONDS) throw new Error('GOOGLE_TOKEN_INVALID');
+  return { email, name: String(decoded.name || '').trim(), uid: decoded.uid };
 }

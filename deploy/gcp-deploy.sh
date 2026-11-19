@@ -17,6 +17,9 @@
 #   FIREBASE_PROJECT_ID, FIREBASE_WEB_API_KEY, FIREBASE_APP_ID
 #                        enable Firebase Phone Auth; without them, OTP demo mode
 #                        (codes shown on screen) is turned on.
+#   ENABLE_GOOGLE_SIGN_IN=true  "Sign in with Google" for owners, wardens and
+#                        admins (uses the same Firebase project).
+#   ADMIN_GOOGLE_EMAILS  comma-separated Google emails that sign in as platform admin
 #   VITE_GOOGLE_MAPS_API_KEY  map picker in the owner workspace
 #   SQL_TIER             default: db-f1-micro (smallest; fine for a demo)
 #   SEED_DEMO_DATA=1     load the fictional demo PGs, rooms and residents once
@@ -139,6 +142,11 @@ if [ -n "${LANGSMITH_API_KEY:-}" ]; then
 fi
 if [ -n "${FIREBASE_PROJECT_ID:-}" ] && [ -n "${FIREBASE_WEB_API_KEY:-}" ]; then
   ENV_VARS+=",OTP_PROVIDER=firebase,FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID},FIREBASE_WEB_API_KEY=${FIREBASE_WEB_API_KEY},FIREBASE_APP_ID=${FIREBASE_APP_ID:-}"
+  if [ "${ENABLE_GOOGLE_SIGN_IN:-false}" = "true" ]; then
+    ENV_VARS+=",ENABLE_GOOGLE_SIGN_IN=true"
+    # gcloud splits --set-env-vars on commas: switch the delimiter for the email list.
+    if [ -n "${ADMIN_GOOGLE_EMAILS:-}" ]; then ENV_VARS="^|^${ENV_VARS//,/|}|ADMIN_GOOGLE_EMAILS=${ADMIN_GOOGLE_EMAILS}"; fi
+  fi
 else
   echo "  No Firebase config: enabling OTP demo mode (codes shown on screen)."
   ENV_VARS+=",OTP_DEMO_MODE=true"

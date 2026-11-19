@@ -7,8 +7,8 @@ import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { logger } from '../utils/logger.js';
 import { isGenderPolicy, isStrongPassword, MESSAGES } from '@livingplus/shared';
 import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
-import { adminResetPasswordBody, changePasswordBody, loginBody, otpRequestBody, otpVerifyBody, registerBody, updateProfileBody } from '../validation/request.schemas.js';
-import { otpProvider, verifyFirebasePhoneToken } from '../services/phone-verification.js';
+import { adminResetPasswordBody, changePasswordBody, googleLoginBody, loginBody, otpRequestBody, otpVerifyBody, registerBody, updateProfileBody } from '../validation/request.schemas.js';
+import { googleSignInEnabled, otpProvider, verifyFirebaseGoogleToken, verifyFirebasePhoneToken } from '../services/phone-verification.js';
 function normalizePhone(phone) {
     const digits = phone.replace(/\D/g, '');
     return digits.length === 10 ? `91${digits}` : digits;
@@ -20,7 +20,8 @@ function toUserResponse(user) {
         phone: user.phone,
         name: user.name,
         role: user.role,
-        profileImage: user.profileImage
+        profileImage: user.profileImage,
+        googleLinked: Boolean(user.googleUid)
     };
 }
 function createToken(user, propertyId) {
@@ -53,6 +54,24 @@ async function residentSessionForPhone(phone, propertyId) {
         return { forbidden: true };
     return { token: createToken(user, propertyId || tenant.propertyId), user: toUserResponse(user) };
 }
+/** On a PG host, staff may sign in only to the PGs they own or are warden of. */
+async function hasPropertyAccess(user, propertyId) {
+    if (!propertyId || user.role === 'SUPER_ADMIN')
+        return true;
+    const propertyAccess = await prisma.pGPropertyAccess.findFirst({
+        where: { propertyId, userId: user.id, role: user.role === 'PG_WARDEN' ? 'WARDEN' : 'OWNER' },
+        select: { id: true }
+    });
+    return Boolean(propertyAccess);
+}
+/** Google accounts allowed to sign in as platform admin (ADMIN_GOOGLE_EMAILS, comma-separated). */
+function isAdminGoogleEmail(email) {
+    return String(process.env.ADMIN_GOOGLE_EMAILS || '')
+        .split(',')
+        .map((entry) => entry.trim().toLowerCase())
+        .filter(Boolean)
+        .includes(email);
+}
 export const login = async (req, res) => {
     // Shape check only; the rules below still validate values.
     const input = parseBody(loginBody, req, res, INVALID_REQUEST);
@@ -84,18 +103,8 @@ export const login = async (req, res) => {
         if (!user || !await bcrypt.compare(String(password), user.password)) {
             return res.status(401).json({ message: 'Invalid credentials' });
         }
-        if (propertyId && user.role !== 'SUPER_ADMIN') {
-            const propertyAccess = await prisma.pGPropertyAccess.findFirst({
-                where: {
-                    propertyId,
-                    userId: user.id,
-                    role: user.role === 'PG_WARDEN' ? 'WARDEN' : 'OWNER'
-                },
-                select: { id: true }
-            });
-            if (!propertyAccess)
-                return res.status(403).json({ message: 'This account does not have access to this PG' });
-        }
+        if (!await hasPropertyAccess(user, propertyId))
+            return res.status(403).json({ message: 'This account does not have access to this PG' });
         res.json({ token: createToken(user, propertyId), user: toUserResponse(user) });
     }
     catch (error) {
@@ -167,6 +176,120 @@ export const register = async (req, res) => {
             return res.status(400).json({ message: 'An account with this phone or email already exists' });
         logger.error({ err: error }, 'PG registration error');
         res.status(500).json({ message: 'Failed to create PG account' });
+    }
+};
+/**
+ * "Sign in with Google": the browser signs in with Firebase (Google provider)
+ * and sends the Firebase ID token. Staff accounts sign in only with a Google
+ * account they linked themselves after a password sign-in (matched by the
+ * Google uid, never by the unverified email typed at registration), plus the
+ * platform admins in ADMIN_GOOGLE_EMAILS. Residents keep using phone OTP.
+ */
+export const googleLogin = async (req, res) => {
+    const input = parseBody(googleLoginBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const idToken = typeof input.firebaseIdToken === 'string' ? input.firebaseIdToken.trim() : '';
+    const propertyId = req.pgPropertyId;
+    if (!googleSignInEnabled())
+        return res.status(404).json({ message: 'Google sign-in is not enabled' });
+    if (!idToken)
+        return res.status(400).json({ message: 'Google sign-in is required' });
+    let account;
+    try {
+        account = await verifyFirebaseGoogleToken(idToken);
+    }
+    catch (error) {
+        if (error?.message === 'FIREBASE_NOT_CONFIGURED') {
+            logger.error('ENABLE_GOOGLE_SIGN_IN=true but FIREBASE_PROJECT_ID is not set');
+            return res.status(503).json({ message: 'Google sign-in is not available right now' });
+        }
+        return res.status(401).json({ message: 'Google sign-in failed. Please try again.' });
+    }
+    try {
+        if (isAdminGoogleEmail(account.email)) {
+            const admin = { id: 'env-admin', role: 'SUPER_ADMIN' };
+            return res.json({
+                token: createToken(admin, propertyId),
+                user: { id: admin.id, email: account.email, name: account.name || 'Super Admin', role: admin.role, profileImage: null }
+            });
+        }
+        const user = await prisma.user.findUnique({ where: { googleUid: account.uid } });
+        if (!user) {
+            return res.status(403).json({
+                code: 'GOOGLE_NOT_LINKED',
+                message: 'This Google account is not linked yet. Sign in with your mobile number and password, then link Google under Account security.'
+            });
+        }
+        if (user.role === 'PG_TENANT')
+            return res.status(403).json({ message: 'Residents sign in with their phone number on the resident portal.' });
+        if (!await hasPropertyAccess(user, propertyId))
+            return res.status(403).json({ message: 'This account does not have access to this PG' });
+        res.json({ token: createToken(user, propertyId), user: toUserResponse(user) });
+    }
+    catch (error) {
+        logger.error({ err: error }, 'Google sign-in error');
+        res.status(500).json({ message: 'Internal server error' });
+    }
+};
+const STAFF_ROLES = ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'];
+/**
+ * Links the Google account in the Firebase ID token to the signed-in staff
+ * account. Doing this while signed in with the password proves the person
+ * controls both, so later Google sign-ins can trust the link.
+ */
+export const linkGoogle = async (req, res) => {
+    const input = parseBody(googleLoginBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const { userId } = req.user || {};
+    if (!googleSignInEnabled())
+        return res.status(404).json({ message: 'Google sign-in is not enabled' });
+    if (!userId)
+        return res.status(401).json({ message: 'Unauthorized' });
+    if (userId === 'env-admin')
+        return res.status(400).json({ message: 'The platform admin uses ADMIN_GOOGLE_EMAILS instead of linking.' });
+    const idToken = typeof input.firebaseIdToken === 'string' ? input.firebaseIdToken.trim() : '';
+    if (!idToken)
+        return res.status(400).json({ message: 'Google sign-in is required' });
+    let account;
+    try {
+        account = await verifyFirebaseGoogleToken(idToken);
+    }
+    catch (error) {
+        if (error?.message === 'FIREBASE_NOT_CONFIGURED')
+            return res.status(503).json({ message: 'Google sign-in is not available right now' });
+        return res.status(401).json({ message: 'Google sign-in failed. Please try again.' });
+    }
+    try {
+        const user = await prisma.user.findUnique({ where: { id: String(userId) } });
+        if (!user)
+            return res.status(404).json({ message: 'User not found' });
+        if (!STAFF_ROLES.includes(user.role))
+            return res.status(403).json({ message: 'Only owners, wardens and admins can link Google.' });
+        const holder = await prisma.user.findUnique({ where: { googleUid: account.uid }, select: { id: true } });
+        if (holder && holder.id !== user.id)
+            return res.status(409).json({ message: 'This Google account is already linked to another LivingPlus account.' });
+        const updated = await prisma.user.update({ where: { id: user.id }, data: { googleUid: account.uid, googleLinkedAt: new Date() } });
+        res.json(toUserResponse(updated));
+    }
+    catch (error) {
+        logger.error({ err: error }, 'Google link error');
+        res.status(500).json({ message: 'Could not link Google account' });
+    }
+};
+/** Removes the Google link; the account signs in with its password again. */
+export const unlinkGoogle = async (req, res) => {
+    const { userId } = req.user || {};
+    if (!userId || userId === 'env-admin')
+        return res.status(400).json({ message: 'No linked Google account' });
+    try {
+        const updated = await prisma.user.update({ where: { id: String(userId) }, data: { googleUid: null, googleLinkedAt: null } });
+        res.json(toUserResponse(updated));
+    }
+    catch (error) {
+        logger.error({ err: error }, 'Google unlink error');
+        res.status(500).json({ message: 'Could not unlink Google account' });
     }
 };
 function hashOtp(code) {

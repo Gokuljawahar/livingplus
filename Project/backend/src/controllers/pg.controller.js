@@ -11,7 +11,7 @@ import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { buildGuestBookingWhere, isPlaceholderResidentName } from '../utils/guest-bookings.js';
 import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
 import { periodOf, periodRange } from '../utils/app-time.js';
-import { firebaseWebConfig, otpProvider } from '../services/phone-verification.js';
+import { firebaseWebConfig, googleSignInEnabled, otpProvider } from '../services/phone-verification.js';
 import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
 import { minSemanticScore, scheduleSearchIndex, semanticScores, semanticSearchEnabled } from '../services/semantic-search.js';
 import { bookingRequestBody, paymentClaimBody, paymentClaimReviewBody, rentEntryBody, rentPaymentBody } from '../validation/pg.schemas.js';
@@ -149,7 +149,8 @@ export const getPublicConfig = async (_req, res) => {
     res.json({
         whatsappCloudApiEnabled: featureFlags.whatsappCloudApi,
         upiPaymentEnabled: featureFlags.upiPayment,
-        phoneVerification: { provider, ...(provider === 'firebase' ? { firebase: firebaseWebConfig() } : {}) }
+        phoneVerification: { provider, ...(provider === 'firebase' ? { firebase: firebaseWebConfig() } : {}) },
+        googleSignIn: googleSignInEnabled() ? { firebase: firebaseWebConfig() } : null
     });
 };
 /**

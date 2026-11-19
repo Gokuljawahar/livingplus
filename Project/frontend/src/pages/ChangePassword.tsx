@@ -8,6 +8,7 @@ import { Lock, Loader2, ArrowLeft } from 'lucide-react';
 import PasswordInput from '../components/PasswordInput';
 import { apiErrorMessage } from '../utils/api-error';
 import { changePasswordSchema, type ChangePasswordForm } from '../validation/forms';
+import GoogleLinkSection from '../components/GoogleLinkSection';
 
 function FieldError({ message }: { message?: string | undefined }) {
   return message ? <p role="alert" className="mt-1 text-xs font-medium text-red-600">{message}</p> : null;
@@ -111,6 +112,8 @@ export default function ChangePassword() {
           </button>
         </form>
       </div>
+
+      <GoogleLinkSection />
     </div>
   );
 }

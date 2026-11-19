@@ -28,6 +28,9 @@ export declare const otpVerifyBody: z.ZodObject<{
     code: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
     firebaseIdToken: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
 }, z.core.$strip>;
+export declare const googleLoginBody: z.ZodObject<{
+    firebaseIdToken: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
+}, z.core.$strip>;
 export declare const changePasswordBody: z.ZodObject<{
     currentPassword: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
     newPassword: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;

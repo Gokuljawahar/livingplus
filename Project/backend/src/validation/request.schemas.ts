@@ -13,6 +13,7 @@ export const registerBody = z.object({
 });
 export const otpRequestBody = z.object({ phone: t(30), purpose: t(30) });
 export const otpVerifyBody = z.object({ phone: t(30), purpose: t(30), code: t(20), firebaseIdToken: t(8192) });
+export const googleLoginBody = z.object({ firebaseIdToken: t(8192) });
 export const changePasswordBody = z.object({ currentPassword: t(200), newPassword: t(200) });
 export const adminResetPasswordBody = z.object({ userId: t(100), newPassword: t(200) });
 export const updateProfileBody = z.object({ name: t(200), profileImage: t(1_000_000) });
