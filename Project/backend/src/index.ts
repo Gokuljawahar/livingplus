@@ -20,6 +20,10 @@ const [{ default: app, prisma }, { startMonthlyRentScheduler }, { startRentRemin
   import('./utils/pg-slug.js')
 ]);
 
+if (process.env.OTP_DEMO_MODE === 'true') {
+  logger.warn('OTP_DEMO_MODE is on: verification codes are shown on screen. Use only for demos.');
+}
+
 const backfilledSlugs = await assignMissingPgSlugs(prisma);
 if (backfilledSlugs) logger.info(`[PG host routing] Assigned ${backfilledSlugs} property slugs`);
 

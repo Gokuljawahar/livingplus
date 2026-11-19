@@ -223,5 +223,21 @@ app.post('/api/view-image/bulk', async (req, res) => {
     }
 });
 app.use('/api', routes);
+// Optional: serve the built frontend from this service (one Cloud Run service
+// for the whole app). Hashed assets are cached long-term; index.html is not.
+if (process.env.FRONTEND_DIST_DIR) {
+    const frontendDir = path.resolve(process.env.FRONTEND_DIST_DIR);
+    app.use(express.static(frontendDir, {
+        index: false,
+        setHeaders: (res, filePath) => {
+            res.setHeader('Cache-Control', filePath.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache');
+        }
+    }));
+    // Single-page app: every other GET renders index.html.
+    app.get(/^\/(?!(api|internal|uploads)(\/|$)|healthz$).*/, (_req, res) => {
+        res.setHeader('Cache-Control', 'no-cache');
+        res.sendFile(path.join(frontendDir, 'index.html'));
+    });
+}
 export default app;
 //# sourceMappingURL=app.js.map

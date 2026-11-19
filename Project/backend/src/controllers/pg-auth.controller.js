@@ -159,10 +159,12 @@ export const register = async (req, res) => {
 function hashOtp(code) {
     return createHash('sha256').update(code).digest('hex');
 }
+/** Demo deployments without SMS: codes are shown on screen (never use with real users). */
+const otpDemoMode = () => process.env.OTP_DEMO_MODE === 'true';
 async function sendSms(phone, message) {
     const apiUrl = process.env.SMS_API_URL;
     if (!apiUrl) {
-        if (process.env.NODE_ENV === 'production')
+        if (process.env.NODE_ENV === 'production' && !otpDemoMode())
             throw new Error('SMS delivery is not configured');
         return null;
     }
@@ -181,7 +183,7 @@ export const requestOtp = async (req, res) => {
     const propertyId = req.pgPropertyId;
     if (phone.length < 10)
         return res.status(400).json({ message: 'A valid phone number is required' });
-    if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production') {
+    if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production' && process.env.SINGLE_HOST_MODE !== 'true') {
         return res.status(400).json({ message: 'Open your PG-specific resident portal to sign in' });
     }
     if (otpProvider() === 'firebase') {
@@ -203,7 +205,8 @@ export const requestOtp = async (req, res) => {
         await prisma.otpCode.create({
             data: { phone, propertyId: propertyId || null, purpose, codeHash: hashOtp(code), expiresAt: new Date(Date.now() + 5 * 60 * 1000) }
         });
-        res.json({ message: 'Verification code sent', ...(process.env.SMS_API_URL || process.env.NODE_ENV === 'production' ? {} : { devCode: code }) });
+        const showCode = !process.env.SMS_API_URL && (process.env.NODE_ENV !== 'production' || otpDemoMode());
+        res.json({ message: 'Verification code sent', ...(showCode ? { devCode: code } : {}) });
     }
     catch (error) {
         logger.error({ err: error }, 'PG OTP request error');
@@ -214,7 +217,7 @@ export const verifyOtp = async (req, res) => {
     const phone = normalizePhone(String(req.body.phone || ''));
     const purpose = ['BOOKING', 'TENANT_LOGIN'].includes(String(req.body.purpose)) ? String(req.body.purpose) : 'BOOKING';
     const propertyId = req.pgPropertyId;
-    if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production') {
+    if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production' && process.env.SINGLE_HOST_MODE !== 'true') {
         return res.status(400).json({ message: 'Open your PG-specific resident portal to sign in' });
     }
     try {

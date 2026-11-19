@@ -1019,6 +1019,30 @@ describe('request body validation (Zod)', () => {
   });
 });
 
+describe('OTP demo mode', () => {
+  it('shows codes on screen in production only when OTP_DEMO_MODE is on', async () => {
+    const auth = await import('../src/controllers/pg-auth.controller.js');
+    const keep = { env: process.env.NODE_ENV, demo: process.env.OTP_DEMO_MODE };
+    const request = async (phone: string) => {
+      const res: any = { statusCode: 200, status(c: number) { this.statusCode = c; return this; }, json(b: unknown) { this.body = b; return this; } };
+      await auth.requestOtp({ body: { phone, purpose: 'BOOKING' } } as any, res);
+      return res;
+    };
+    process.env.NODE_ENV = 'production';
+    try {
+      delete process.env.OTP_DEMO_MODE;
+      assert.equal((await request('9822200001')).statusCode, 500, 'production without SMS refuses to send');
+      process.env.OTP_DEMO_MODE = 'true';
+      const demo = await request('9822200002');
+      assert.equal(demo.statusCode, 200);
+      assert.match(demo.body.devCode, /^\d{6}$/);
+    } finally {
+      if (keep.env === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = keep.env;
+      if (keep.demo === undefined) delete process.env.OTP_DEMO_MODE; else process.env.OTP_DEMO_MODE = keep.demo;
+    }
+  });
+});
+
 describe('Firebase phone verification (OTP_PROVIDER=firebase)', () => {
   let auth: any;
   let phoneVerification: any;

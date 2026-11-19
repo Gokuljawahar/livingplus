@@ -4,7 +4,7 @@ import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/auth';
 import AppLayout from './components/layout/AppLayout';
-import { resolveAppHost } from './utils/pg-host';
+import { resolveAppHost, isPathModeHost } from './utils/pg-host';
 
 // Lazy load PG and account pages.
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -45,7 +45,7 @@ const ProtectedRoute = ({ children, roles }: { children: React.ReactNode; roles?
 function AppRoutes() {
   const { user, isLoading } = useAuth();
   const host = resolveAppHost();
-  const isLocalPathMode = host.kind === 'public' && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+  const isLocalPathMode = host.kind === 'public' && isPathModeHost();
   const isPropertyHost = host.kind === 'property';
   const isAdminHost = host.kind === 'platform-admin';
   const ownerPath = isPropertyHost ? '/owner/manage' : '/pg/manage';

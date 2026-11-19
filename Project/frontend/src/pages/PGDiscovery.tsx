@@ -21,7 +21,7 @@ import toast from 'react-hot-toast';
 import api from '../api/axios';
 import { useAuth } from '../context/auth';
 import { RESIDENT_TOKEN_KEY } from '../utils/session';
-import { resolveAppHost } from '../utils/pg-host';
+import { resolveAppHost, isPathModeHost } from '../utils/pg-host';
 import {
   clearGuestSession,
   getGuestSession,
@@ -109,7 +109,7 @@ export default function PGDiscovery() {
   const signedIn = Boolean(user || guest);
   const guestPhone = guest?.phone || '';
   const canResidentSignIn =
-    ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname) || resolveAppHost().kind === 'property';
+    isPathModeHost() || resolveAppHost().kind === 'property';
   const [aiRequest, setAiRequest] = useState<{ query: string; nonce: number } | null>(null);
   const isStaff = ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'].includes(user?.role || '');
   const isOnboarded = stays.length > 0 || user?.role === 'PG_TENANT';

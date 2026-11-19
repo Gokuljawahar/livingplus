@@ -244,6 +244,38 @@ servers, `.env`, database files or private uploads publicly.
 
 ## Deploying on Google Cloud
 
+### One command (demo / buildathon)
+
+`deploy/gcp-deploy.sh` deploys the whole app as **one Cloud Run service** (API
+plus the built frontend, from the root `Dockerfile`) with Cloud SQL, Cloud
+Storage, Secret Manager and Cloud Scheduler. It is idempotent and
+`DRY_RUN=1` prints every command first.
+
+```bash
+gcloud auth login && gcloud config set project YOUR_PROJECT
+DRY_RUN=1 deploy/gcp-deploy.sh          # review
+GOOGLE_API_KEY=... SEED_DEMO_DATA=1 deploy/gcp-deploy.sh
+```
+
+- Secrets (JWT, encryption key, admin and database passwords) are generated
+  once into Secret Manager; the script prints how to read the admin password.
+- `GOOGLE_API_KEY` (optional) turns on semantic search; without it the
+  assistant uses Vertex AI through the service account.
+- Firebase settings (optional) turn on Firebase Phone Auth; without them the
+  service runs in **OTP demo mode** (`OTP_DEMO_MODE=true`: codes are shown on
+  screen). Never use demo mode with real users.
+- A `*.run.app` URL has no per-PG subdomains, so the image runs in
+  **single-host mode** (`SINGLE_HOST_MODE` / `VITE_SINGLE_HOST_MODE`): owner and
+  resident portals use paths (`/pg/manage`, `/pg/resident`) as in local
+  development. For production with `{slug}.yourdomain` hosts, put a global
+  external HTTPS load balancer with a wildcard certificate in front of Cloud
+  Run and turn single-host mode off.
+- Cost: Cloud Run scales to zero; Cloud SQL `db-f1-micro` runs continuously
+  (a few dollars a month at list price). Delete the instance after the event
+  if you do not need it: `gcloud sql instances delete livingplus-db`.
+
+### Manual setup reference
+
 The backend image (`Project/backend/Dockerfile`) is built for Cloud Run. It
 runs `prisma migrate deploy` on start, stores uploads in Cloud Storage, and
 leaves scheduled jobs to Cloud Scheduler.

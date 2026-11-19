@@ -7,7 +7,7 @@ import { SidebarProvider } from '../context/SidebarContext';
 import { useSidebar } from '../context/sidebar';
 import Sidebar from '../components/layout/Sidebar';
 import { RESIDENT_TOKEN_KEY } from '../utils/session';
-import { resolveAppHost } from '../utils/pg-host';
+import { resolveAppHost, isPathModeHost } from '../utils/pg-host';
 import { useOtpCooldown } from '../hooks/useOtpCooldown';
 import AIChatPanel from '../components/AIChatPanel';
 import RoomChange from '../components/RoomChange';
@@ -73,7 +73,7 @@ function ResidentPortalView() {
   const [paymentForm, setPaymentForm] = useState({ tenantId: '', rentEntryId: '', amount: '', reference: '' });
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
-  const canFindPg = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname) || resolveAppHost().kind === 'public';
+  const canFindPg = isPathModeHost() || resolveAppHost().kind === 'public';
 
   useEffect(() => {
     if (step !== 'portal') return;

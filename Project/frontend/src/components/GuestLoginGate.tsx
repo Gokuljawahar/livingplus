@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../context/auth';
 import { normalizePhoneDigits, saveGuestSession, type GuestSession } from '../utils/guest-session';
 import { useOtpCooldown } from '../hooks/useOtpCooldown';
-import { resolveAppHost } from '../utils/pg-host';
+import { resolveAppHost, isPathModeHost } from '../utils/pg-host';
 import { phoneOtpErrorMessage, startPhoneVerification, type PhoneChallenge } from '../utils/phone-otp';
 
 interface GuestLoginGateProps {
@@ -63,7 +63,7 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
       const resident = data.resident;
       if (resident?.token && resident?.user) {
         login(resident.token, resident.user);
-        const canReachResident = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname) || resolveAppHost().kind === 'property';
+        const canReachResident = isPathModeHost() || resolveAppHost().kind === 'property';
         if (canReachResident) {
           toast.success('Welcome back — opening your stays');
           navigate('/resident');
@@ -151,7 +151,7 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
             </button>
           </form>
         )}
-        {(['localhost', '127.0.0.1', '::1'].includes(window.location.hostname) || resolveAppHost().kind === 'property') && (
+        {(isPathModeHost() || resolveAppHost().kind === 'property') && (
           <p className="mt-5 border-t border-slate-100 pt-4 text-center text-sm text-slate-500">
             Already onboarded?{' '}
             <a href="/resident" className="font-bold text-[#02224B] hover:underline">
