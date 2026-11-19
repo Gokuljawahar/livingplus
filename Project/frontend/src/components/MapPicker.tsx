@@ -168,7 +168,7 @@ function MapPickerView({ onAddressChange, onLocationSelect, defaultAddress, init
     <div className="flex flex-col gap-3">
       <div className="relative w-full h-[300px] rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-slate-100">
         {loading ? (
-          <div className="absolute inset-0 flex items-center justify-center text-[#02224B] z-10">
+          <div className="absolute inset-0 flex items-center justify-center text-navy-900 z-10">
             <Loader2 className="w-8 h-8 animate-spin" />
           </div>
         ) : null}
@@ -183,7 +183,7 @@ function MapPickerView({ onAddressChange, onLocationSelect, defaultAddress, init
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search for an area or address..."
               aria-label="Search for an area or address"
-              className="w-full bg-white rounded-lg py-2.5 pl-9 pr-4 text-sm shadow-md border-none focus:ring-2 focus:ring-[#02224B] outline-none"
+              className="w-full bg-white rounded-lg py-2.5 pl-9 pr-4 text-sm shadow-md border-none focus:ring-2 focus:ring-navy-900 outline-none"
             />
             {suggestions.length > 0 && (
               <ul role="listbox" className="absolute left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-lg bg-white text-sm shadow-lg">
@@ -215,7 +215,7 @@ function MapPickerView({ onAddressChange, onLocationSelect, defaultAddress, init
         {/* Center Marker Overlay */}
         {!loading && (
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center pb-8">
-            <MapPin className="w-8 h-8 text-[#02224B] drop-shadow-md" fill="#02224B" />
+            <MapPin className="w-8 h-8 text-navy-900 drop-shadow-md" fill="#02224B" />
           </div>
         )}
 
@@ -224,7 +224,7 @@ function MapPickerView({ onAddressChange, onLocationSelect, defaultAddress, init
           <button
             type="button"
             onClick={handleLocateMe}
-            className="absolute bottom-4 right-4 bg-white p-2 rounded-full shadow-md border border-slate-100 text-slate-700 hover:text-[#02224B] transition-colors z-10"
+            className="absolute bottom-4 right-4 bg-white p-2 rounded-full shadow-md border border-slate-100 text-slate-700 hover:text-navy-900 transition-colors z-10"
             title="Locate Me"
           >
             <Crosshair className="w-5 h-5" />
@@ -233,12 +233,12 @@ function MapPickerView({ onAddressChange, onLocationSelect, defaultAddress, init
       </div>
 
       <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-        <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Selected Address</p>
+        <p className="text-xs text-slate-500 font-medium mb-1">Selected Address</p>
         <div className="flex items-center gap-2">
           {addressLoading ? (
-            <Loader2 className="w-4 h-4 animate-spin text-[#02224B]" />
+            <Loader2 className="w-4 h-4 animate-spin text-navy-900" />
           ) : (
-            <MapPin className="w-4 h-4 text-[#02224B] shrink-0" />
+            <MapPin className="w-4 h-4 text-navy-900 shrink-0" />
           )}
           <p className="text-sm text-slate-800 line-clamp-2">
             {currentAddress || 'Move the map to select an address...'}

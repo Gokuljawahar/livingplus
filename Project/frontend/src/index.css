@@ -1,39 +1,152 @@
 @import "tailwindcss";
 
+/* LivingPlus design tokens: see DESIGN.md §3 and §13. Use these names in
+   components instead of raw hex values. Contrast ratios are listed in DESIGN.md. */
+@theme {
+  --color-navy-900: #02224B;
+  --color-navy-700: #0A3B75;
+  --color-ink: #24364F;
+  --color-muted: #5A6B82;
+  --color-field-border: #7A8AA0;
+  --color-hairline: #E2E7EE;
+  --color-canvas: #FFFFFF;
+  --color-surface: #F5F7FA;
+  --color-amber-500: #FEB109;
+  --color-amber-600: #E39E00;
+  --color-amber-50: #FFF6DD;
+
+  /* Status: one colour and one word per state, everywhere. */
+  --color-positive: #17734A;
+  --color-positive-bg: #E7F5EE;
+  --color-attention: #B5470B;
+  --color-attention-bg: #FDEEE4;
+  --color-negative: #B42318;
+  --color-negative-bg: #FDECEA;
+  --color-info: #0A3B75;
+  --color-info-bg: #EAF1FA;
+  --color-closed: #5A6B82;
+  --color-closed-bg: #F1F4F8;
+
+  --font-display: "Anek Latin Variable", "Anek Latin", system-ui, sans-serif;
+  --font-sans: "Mukta", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --radius-field: 6px;
+  --radius-button: 10px;
+  --radius-card: 14px;
+
+  /* The single shadow tier: only for things that float above the page. */
+  --shadow-float: 0 1px 2px rgb(2 34 75 / 0.06), 0 8px 24px rgb(2 34 75 / 0.12);
+}
+
 @layer base {
-  :root {
-    --brand-primary: #02224B;
-    --brand-secondary: #FEB109;
-    --brand-dark: #011632;
-    --brand-blue: #02224B;
-    --brand-yellow: #FEB109;
-    --bg-main: #F8FAFB;
-    --sidebar-bg: #FFFFFF;
-    --text-primary: #1E293B;
-    --text-secondary: #64748B;
-    --border-color: #E2E8F0;
+  html {
+    -webkit-text-size-adjust: 100%;
   }
 
   body {
-    @apply bg-[#F8FAFB] text-[#1E293B] font-sans antialiased;
+    background-color: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    color: var(--color-navy-900);
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
+  /* Inputs at 16px so iOS never zooms; borders meet the 3:1 rule for controls. */
+  input, select, textarea {
+    font-size: max(16px, 1em);
+  }
+
+  /* One visible focus style everywhere: navy reads on white and on amber. */
+  :focus-visible {
+    outline: 2px solid var(--color-navy-900);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
 @layer components {
+  /* Cards sit on the surface with a hairline: no shadow (DESIGN.md §3.3). */
   .card {
-    @apply bg-white rounded-xl border border-slate-100 shadow-sm p-6;
-  }
-  
-  .btn-primary {
-    @apply bg-[#02224B] hover:bg-[#0A3B75] text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center gap-2;
+    background-color: var(--color-canvas);
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius-card);
+    padding: 1.25rem;
   }
 
+  /* Primary: the one thing to do on this view. Amber fill, navy text. */
+  .btn-primary,
   .btn-accent {
-    @apply bg-[#FEB109] hover:bg-[#E59E00] text-[#02224B] font-bold py-2 px-4 rounded-lg transition-colors flex items-center gap-2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 44px;
+    padding: 0.625rem 1.125rem;
+    border-radius: var(--radius-button);
+    background-color: var(--color-amber-500);
+    color: var(--color-navy-900);
+    font-weight: 600;
+    transition: background-color 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .btn-primary:hover,
+  .btn-accent:hover {
+    background-color: var(--color-amber-600);
+  }
+  .btn-primary:disabled,
+  .btn-accent:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  /* Secondary: cancel, back and other actions. */
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 44px;
+    padding: 0.625rem 1.125rem;
+    border-radius: var(--radius-button);
+    border: 1px solid var(--color-field-border);
+    background-color: var(--color-canvas);
+    color: var(--color-navy-900);
+    font-weight: 600;
+    transition: background-color 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .btn-secondary:hover {
+    background-color: var(--color-surface);
   }
 
   .stat-card {
-    @apply bg-white p-6 rounded-xl border border-slate-100 shadow-sm flex flex-col gap-1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 1rem 1.25rem;
+    border-radius: var(--radius-card);
+    border: 1px solid var(--color-hairline);
+    background-color: var(--color-canvas);
+  }
+
+  /* Money and counts line up in columns. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
   }
 }
 

@@ -1,4 +1,4 @@
-import { LogOut, Building2, X, BedDouble } from 'lucide-react';
+import { LogOut, X, BedDouble } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/auth';
@@ -18,7 +18,7 @@ export default function Sidebar() {
   // Each area shows only its own links: a resident site never links to the owner workspace and vice versa.
   const area = areaOf(location.pathname);
   const navItems: NavItem[] = area === 'resident'
-    ? [{ icon: Building2, label: 'My stay', path: location.pathname }]
+    ? [] // the resident site lists its own sections instead
     : [{ icon: BedDouble, label: 'PG Operations', path: ROUTES.ownerHome }];
 
 
@@ -47,8 +47,8 @@ export default function Sidebar() {
         </div>
 
         <nav className="flex-1 overflow-y-auto px-6 space-y-6 pb-6 scrollbar-hide">
-          <div className="space-y-1">
-            <p className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Main Menu</p>
+          {navItems.length > 0 && <div className="space-y-1">
+            <p className="px-3 text-[13px] font-medium text-muted mb-2">Main menu</p>
             {navItems.map((item) => {
               if (item.children) {
                 return (
@@ -75,10 +75,10 @@ export default function Sidebar() {
                                       onClick={() => {
                                         if (window.innerWidth < 1024) close();
                                       }}
-                                      className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                                      className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all text-sm ${
                                         isActive 
-                                          ? 'bg-amber-50/50 text-[#02224B] font-semibold border-r-4 border-[#FEB109] rounded-r-none' 
-                                          : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                                          ? 'bg-amber-50 text-navy-900 font-bold border-r-4 border-amber-500 rounded-r-none shadow-xs' 
+                                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'
                                       }`}
                                     >
                                       {subChild.icon && <subChild.icon className="w-4 h-4" />}
@@ -99,10 +99,10 @@ export default function Sidebar() {
                             onClick={() => {
                               if (window.innerWidth < 1024) close();
                             }}
-                            className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                            className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all text-sm ${
                               isActive 
-                                ? 'bg-amber-50/50 text-[#02224B] font-semibold border-r-4 border-[#FEB109] rounded-r-none' 
-                                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                                ? 'bg-amber-50 text-navy-900 font-bold border-r-4 border-amber-500 rounded-r-none shadow-xs' 
+                                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'
                             }`}
                           >
                             {child.icon && <child.icon className="w-4 h-4" />}
@@ -123,10 +123,10 @@ export default function Sidebar() {
                   onClick={() => {
                     if (window.innerWidth < 1024) close();
                   }}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                  className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all text-sm ${
                     isActive 
-                      ? 'bg-amber-50/50 text-[#02224B] font-semibold border-r-4 border-[#FEB109] rounded-r-none' 
-                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                      ? 'bg-amber-50 text-navy-900 font-bold border-r-4 border-amber-500 rounded-r-none shadow-xs' 
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'
                   }`}
                 >
                   <item.icon className="w-5 h-5" />
@@ -134,11 +134,11 @@ export default function Sidebar() {
                 </Link>
               );
             })}
-          </div>
+          </div>}
 
           {sectionNav && (
             <div className="space-y-1">
-              <p className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Workspace</p>
+              <p className="px-3 text-[13px] font-medium text-muted mb-2">{area === 'resident' ? 'Your stay' : 'Workspace'}</p>
               {sectionNav.map((item) => (
                 <button
                   key={item.id}
@@ -147,10 +147,10 @@ export default function Sidebar() {
                     if (window.innerWidth < 1024) close();
                   }}
                   aria-current={item.active ? 'page' : undefined}
-                  className={`flex w-full items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                  className={`flex w-full items-center gap-3 px-3 py-2 rounded-xl transition-all text-sm ${
                     item.active
-                      ? 'bg-amber-50/50 text-[#02224B] font-semibold border-r-4 border-[#FEB109] rounded-r-none'
-                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                      ? 'bg-amber-50 text-navy-900 font-bold border-r-4 border-amber-500 rounded-r-none shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'
                   }`}
                 >
                   <item.icon className="w-5 h-5" />

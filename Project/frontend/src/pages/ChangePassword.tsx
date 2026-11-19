@@ -44,7 +44,7 @@ export default function ChangePassword() {
   return (
     <div className="max-w-md mx-auto py-12 px-4">
       <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-[#02224B] rounded-2xl flex items-center justify-center text-white font-bold text-3xl mx-auto mb-4 shadow-lg shadow-blue-950/10">
+        <div className="w-16 h-16 bg-navy-900 rounded-2xl flex items-center justify-center text-white font-bold text-3xl mx-auto mb-4 shadow-lg shadow-blue-950/10">
           <Lock className="w-8 h-8" />
         </div>
         <h1 className="text-2xl font-bold text-slate-900">Change Password</h1>
@@ -54,7 +54,7 @@ export default function ChangePassword() {
       <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-8">
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-6">
           <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Current Password</label>
+            <label className="block text-xs font-bold text-slate-400 mb-2">Current Password</label>
             <Controller
               name="currentPassword"
               control={control}
@@ -67,7 +67,7 @@ export default function ChangePassword() {
 
           <div className="space-y-4 pt-4 border-t border-slate-50">
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">New Password</label>
+              <label className="block text-xs font-bold text-slate-400 mb-2">New Password</label>
               <Controller
                 name="newPassword"
                 control={control}
@@ -79,7 +79,7 @@ export default function ChangePassword() {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Confirm New Password</label>
+              <label className="block text-xs font-bold text-slate-400 mb-2">Confirm New Password</label>
               <Controller
                 name="confirmPassword"
                 control={control}

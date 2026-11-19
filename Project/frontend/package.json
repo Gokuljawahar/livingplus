@@ -13,6 +13,8 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@fontsource-variable/anek-latin": "5.3.0",
+    "@fontsource/mukta": "5.3.0",
     "@hookform/resolvers": "7.0.7",
     "@livingplus/shared": "file:../shared",
     "@tailwindcss/vite": "^4.3.0",

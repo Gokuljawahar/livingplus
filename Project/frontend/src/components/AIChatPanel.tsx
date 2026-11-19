@@ -277,85 +277,184 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
   if (!open) {
     if (hideLauncher) return null;
     return (
-      <button onClick={() => setOpen(true)} aria-label="Open PG assistant" className="fixed bottom-5 right-5 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-[#02224B] text-white shadow-lg hover:bg-[#0A3B75]">
-        <MessageCircle className="h-5 w-5" />
+      <button
+        onClick={() => setOpen(true)}
+        aria-label="Open PG assistant"
+        className={`fixed ${isResidentPage ? 'bottom-20 lg:bottom-6' : 'bottom-6'} right-6 z-50 flex items-center gap-2 rounded-full bg-navy-900 text-white px-4 py-3 shadow-xl transition-all duration-200 group border border-white/20`}
+      >
+        <div className="relative">
+          <MessageCircle className="h-5 w-5 text-amber-500" />
+          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+        </div>
+        <span className="text-xs font-bold pr-1">PG Concierge</span>
       </button>
     );
   }
 
+  const SUGGESTED_PROMPTS: Record<AssistantPersona, string[]> = {
+    guest: ['Single rooms under ₹8,000', 'PGs with food included', 'How does deposit refund work?'],
+    resident: ['When is my rent due?', 'How to request room swap?', 'Report WiFi / maintenance'],
+    warden: ['Pending booking requests', 'Open maintenance tickets'],
+    owner: ['Occupancy summary', 'Rent collection status', 'Draft vacancy update']
+  };
+
   return (
-    <section aria-label="PG assistant" className="fixed bottom-5 right-5 z-50 flex h-[480px] w-[min(92vw,380px)] flex-col border border-slate-200 bg-white shadow-xl">
-      <header className="flex items-center justify-between bg-[#02224B] px-4 py-3 text-white">
-        <div><p className="text-sm font-semibold">PG Assistant</p><p className="text-[11px] text-blue-200">Answers come from live property data</p></div>
-        <button onClick={() => setOpen(false)} aria-label="Close assistant" className="p-1 hover:bg-white/10"><X className="h-4 w-4" /></button>
+    <section
+      aria-label="PG assistant"
+      className="fixed bottom-6 right-6 z-50 flex h-[520px] w-[min(94vw,400px)] flex-col rounded-3xl border border-slate-200/90 bg-white shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+    >
+      <header className="flex items-center justify-between bg-navy-900 px-5 py-3.5 text-white shadow-xs">
+        <div className="flex items-center gap-2.5">
+          <div className="h-8 w-8 rounded-xl bg-amber-500 text-navy-900 flex items-center justify-center font-bold shadow-xs">
+            <MessageCircle className="h-4.5 w-4.5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-bold tracking-tight">LivingPlus Assistant</p>
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live
+              </span>
+            </div>
+            <p className="text-[11px] text-blue-200/80">Context-aware · Verifies property records</p>
+          </div>
+        </div>
+        <button
+          onClick={() => setOpen(false)}
+          aria-label="Close assistant"
+          className="rounded-full p-1.5 text-blue-200 hover:bg-white/10 hover:text-white transition-colors"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </header>
-      <div className="flex-1 space-y-3 overflow-y-auto p-4 text-sm">
+
+      <div className="flex-1 space-y-3 overflow-y-auto p-4 text-xs sm:text-sm bg-slate-50/40">
         {!messages.length && (
-          <>
-            <p className="text-slate-500">{copy.welcome}</p>
-            {limited && (
-              <p className="border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                Browsing as a guest — onboard as a resident to unlock photo issue reports and voice notes.
-              </p>
-            )}
-          </>
+          <div className="space-y-3 pt-2">
+            <div className="rounded-2xl border border-blue-100 bg-white p-4 shadow-xs">
+              <p className="text-slate-700 leading-relaxed font-medium">{copy.welcome}</p>
+              {limited && (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/70 p-2.5 text-[11px] text-amber-900 font-medium leading-relaxed">
+                  🔒 <strong>Guest mode:</strong> Onboard as a resident on your PG's site to unlock voice notes and photo-based maintenance reporting.
+                </div>
+              )}
+            </div>
+
+            {/* Quick Suggestion Chips */}
+            <div className="pt-2">
+              <p className="text-[11px] font-bold text-slate-400 px-1 mb-2">Try asking</p>
+              <div className="flex flex-wrap gap-1.5">
+                {SUGGESTED_PROMPTS[persona].map((promptText) => (
+                  <button
+                    key={promptText}
+                    type="button"
+                    onClick={() => {
+                      setInput(promptText);
+                      inputRef.current?.focus();
+                    }}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-navy-900 hover:border-amber-500 hover:bg-amber-50/50 transition-all shadow-xs text-left"
+                  >
+                    {promptText}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         )}
+
         {messages.map((msg, i) => (
-          <div key={i} className={`max-w-[90%] px-3 py-2 ${msg.from === 'user' ? 'ml-auto bg-[#02224B] text-white' : 'bg-slate-100 text-slate-800'}`}>
+          <div
+            key={i}
+            className={`max-w-[88%] px-3.5 py-2.5 text-xs sm:text-sm leading-relaxed ${
+              msg.from === 'user'
+                ? 'ml-auto rounded-2xl rounded-tr-xs bg-navy-900 text-white shadow-xs font-medium'
+                : 'rounded-2xl rounded-tl-xs bg-white text-slate-800 border border-slate-200/80 shadow-xs'
+            }`}
+          >
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
                 p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
-                h1: ({ children }) => <h3 className="mb-2 text-base font-semibold">{children}</h3>,
-                h2: ({ children }) => <h3 className="mb-2 text-sm font-semibold">{children}</h3>,
-                h3: ({ children }) => <h3 className="mb-1 font-semibold">{children}</h3>,
-                ul: ({ children }) => <ul className="mb-2 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>,
-                ol: ({ children }) => <ol className="mb-2 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>,
+                h1: ({ children }) => <h3 className="mb-2 text-base font-bold">{children}</h3>,
+                h2: ({ children }) => <h3 className="mb-2 text-sm font-bold">{children}</h3>,
+                h3: ({ children }) => <h3 className="mb-1 font-bold">{children}</h3>,
+                ul: ({ children }) => <ul className="mb-2 list-disc space-y-1 pl-4 last:mb-0">{children}</ul>,
+                ol: ({ children }) => <ol className="mb-2 list-decimal space-y-1 pl-4 last:mb-0">{children}</ol>,
                 li: ({ children }) => <li className="pl-0.5">{children}</li>,
-                strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                code: ({ children }) => <code className="rounded bg-black/5 px-1 py-0.5 text-[0.92em]">{children}</code>
+                strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                code: ({ children }) => <code className="rounded bg-black/5 px-1 py-0.5 text-[0.92em] font-mono">{children}</code>
               }}
             >
               {msg.text}
             </ReactMarkdown>
           </div>
         ))}
-        {(busy || transcribing) && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
+
+        {(busy || transcribing) && (
+          <div className="flex items-center gap-2 text-xs text-slate-400 bg-white px-3 py-2 rounded-2xl w-fit border border-slate-100 shadow-xs">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-navy-900" />
+            <span>Thinking…</span>
+          </div>
+        )}
       </div>
+
       {photo && (
         <div className="flex items-center gap-2 border-t border-slate-200 bg-slate-50 p-2 text-xs text-slate-600">
-          <img src={photo} alt="Attached issue" className="h-10 w-10 object-cover" />
-          <span>Photo will be sent with your message</span>
-          <button onClick={() => setPhoto(null)} aria-label="Remove photo" className="ml-auto p-1 hover:bg-slate-200"><X className="h-3.5 w-3.5" /></button>
+          <img src={photo} alt="Attached issue" className="h-10 w-10 object-cover rounded-lg border border-slate-200" />
+          <span className="font-medium">Photo attached to message</span>
+          <button onClick={() => setPhoto(null)} aria-label="Remove photo" className="ml-auto p-1 hover:bg-slate-200 rounded-full transition-colors"><X className="h-3.5 w-3.5" /></button>
         </div>
       )}
+
       {recording && (
-        <div className="flex items-center gap-2 border-t border-red-200 bg-red-50 p-2 text-xs font-semibold text-red-700">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-red-600" />
-          <span>Recording… tap stop to transcribe (max {MAX_RECORD_SECONDS}s)</span>
+        <div className="flex items-center gap-2 border-t border-red-200 bg-red-50 p-2.5 text-xs font-semibold text-red-700 animate-pulse">
+          <span className="h-2 w-2 rounded-full bg-red-600" />
+          <span>Recording voice note… tap stop to transcribe (max {MAX_RECORD_SECONDS}s)</span>
         </div>
       )}
+
       {pending && !unavailable && (
-        <div className="border-t border-amber-200 bg-amber-50 p-3 text-sm">
-          <p className="text-amber-900">{pending.preview}</p>
-          <div className="mt-2 flex gap-2">
-            <button onClick={() => { setPending(null); void send(pending.confirmationId); }} className="bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white">Confirm</button>
-            <button onClick={() => void send(undefined, pending.confirmationId)} className="border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Cancel</button>
+        <div className="border-t border-amber-200 bg-amber-50 p-3.5 text-xs">
+          <p className="text-amber-900 font-medium leading-relaxed">{pending.preview}</p>
+          <div className="mt-2.5 flex gap-2">
+            <button onClick={() => { setPending(null); void send(pending.confirmationId); }} className="rounded-lg bg-emerald-700 px-3 py-1.5 font-bold text-white shadow-xs hover:bg-emerald-800 transition-colors">Confirm action</button>
+            <button onClick={() => void send(undefined, pending.confirmationId)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50 transition-colors">Cancel</button>
           </div>
         </div>
       )}
-      <form onSubmit={(e) => { e.preventDefault(); void send(); }} className="flex gap-2 border-t border-slate-200 p-3">
+
+      <form onSubmit={(e) => { e.preventDefault(); void send(); }} className="flex items-center gap-2 border-t border-slate-200 bg-white p-3">
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { void attachPhoto(e.target.files?.[0]); e.target.value = ''; }} />
         {!limited && (
-          <button type="button" onClick={() => fileRef.current?.click()} aria-label="Attach a photo" className="px-2 text-slate-500 hover:text-slate-800"><ImagePlus className="h-4 w-4" /></button>
-        )}
-        <input ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} placeholder={copy.placeholder} aria-label={copy.placeholder} className="w-full border border-slate-300 px-3 py-2 text-sm" />
-        {!limited && (
-          <button type="button" onClick={() => void toggleRecording()} aria-label={recording ? 'Stop recording' : 'Record a voice note'} className={`px-2 ${recording ? 'text-red-600' : 'text-slate-500 hover:text-slate-800'}`}>
-            {recording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+          <button type="button" onClick={() => fileRef.current?.click()} aria-label="Attach a photo" className="p-2 text-slate-400 hover:text-navy-900 hover:bg-slate-100 rounded-xl transition-colors" title="Attach issue photo">
+            <ImagePlus className="h-4.5 w-4.5" />
           </button>
         )}
-        <button disabled={busy} aria-label="Send" className="bg-[#02224B] px-3 text-white disabled:opacity-60"><Send className="h-4 w-4" /></button>
+        <input
+          ref={inputRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder={copy.placeholder}
+          aria-label={copy.placeholder}
+          className="w-full rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2 text-xs sm:text-sm font-medium outline-none focus:bg-white focus:ring-2 focus:ring-navy-900/15 focus:border-navy-900 transition-all"
+        />
+        {!limited && (
+          <button
+            type="button"
+            onClick={() => void toggleRecording()}
+            aria-label={recording ? 'Stop recording' : 'Record a voice note'}
+            className={`p-2 rounded-xl transition-colors ${recording ? 'text-red-600 bg-red-50' : 'text-slate-400 hover:text-navy-900 hover:bg-slate-100'}`}
+            title={recording ? 'Stop voice note' : 'Record voice note'}
+          >
+            {recording ? <Square className="h-4.5 w-4.5" /> : <Mic className="h-4.5 w-4.5" />}
+          </button>
+        )}
+        <button
+          disabled={busy || !input.trim()}
+          aria-label="Send"
+          className="btn-primary p-2.5 rounded-xl shadow-xs disabled:opacity-40 transition-all"
+        >
+          <Send className="h-4 w-4" />
+        </button>
       </form>
     </section>
   );

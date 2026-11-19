@@ -75,11 +75,11 @@ export default function RegisterPage() {
       }} />}
       <div className="min-h-screen lg:h-screen bg-slate-50 flex">
         {/* Left Side: Animated Illustration */}
-        <div className="hidden lg:flex w-[45%] bg-[#02224B] text-white p-8 lg:p-10 flex-col justify-between relative overflow-hidden">
+        <div className="hidden lg:flex w-[45%] bg-navy-900 text-white p-8 lg:p-10 flex-col justify-between relative overflow-hidden">
           {/* Background Patterns */}
           <div className="absolute inset-0 opacity-10">
             <div className="absolute top-20 left-10 w-64 h-64 bg-white rounded-full mix-blend-overlay filter blur-3xl opacity-50 animate-blob"></div>
-            <div className="absolute top-40 right-10 w-72 h-72 bg-[#FEB109] rounded-full mix-blend-overlay filter blur-3xl opacity-50 animate-blob animation-delay-2000"></div>
+            <div className="absolute top-40 right-10 w-72 h-72 bg-amber-500 rounded-full mix-blend-overlay filter blur-3xl opacity-50 animate-blob animation-delay-2000"></div>
             <div className="absolute -bottom-8 left-20 w-80 h-80 bg-blue-400 rounded-full mix-blend-overlay filter blur-3xl opacity-50 animate-blob animation-delay-4000"></div>
           </div>
 
@@ -138,7 +138,7 @@ export default function RegisterPage() {
         {/* Right Side: Registration Form */}
         <div className="flex-1 flex flex-col justify-start py-8 lg:py-12 px-4 sm:px-6 lg:px-20 xl:px-32 relative min-h-screen lg:min-h-0 lg:overflow-y-auto">
           <div className="absolute top-8 right-8 hidden lg:block">
-            <Link to="/" className="text-sm font-medium text-slate-500 hover:text-[#02224B] transition-colors">
+            <Link to="/" className="text-sm font-medium text-slate-500 hover:text-navy-900 transition-colors">
               Back to home
             </Link>
           </div>
@@ -167,7 +167,7 @@ export default function RegisterPage() {
             {/* Progress Bar */}
             <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mb-6">
               <div
-                className="bg-[#02224B] h-full transition-all duration-500 ease-out"
+                className="bg-navy-900 h-full transition-all duration-500 ease-out"
                 style={{ width: `${(step / 2) * 100}%` }}
               />
             </div>
@@ -190,7 +190,7 @@ export default function RegisterPage() {
                   <button
                     onClick={() => void handleContinue()}
                     disabled={loading || phone.replace(/\D/g, '').length !== 12}
-                    className="w-full py-4 bg-[#02224B] hover:bg-[#0A3B75] text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mt-8 disabled:opacity-70 disabled:cursor-not-allowed"
+                    className="w-full py-4 bg-navy-900 hover:bg-navy-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mt-8 disabled:opacity-70 disabled:cursor-not-allowed"
                   >
                     Continue
                   </button>
@@ -208,7 +208,7 @@ export default function RegisterPage() {
                         type="text"
                         aria-label="Owner name"
                         {...register('name')}
-                        className={`w-full px-4 py-3 bg-slate-50 border-slate-200 rounded-xl focus:ring-[#02224B] focus:border-[#02224B] ${errors.name ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
+                        className={`w-full px-4 py-3 bg-slate-50 border-slate-200 rounded-xl focus:ring-navy-900 focus:border-navy-900 ${errors.name ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
                         placeholder="Your full name"
                       />
                     </div>
@@ -221,7 +221,7 @@ export default function RegisterPage() {
                       type="text"
                       aria-label="PG / Hostel name"
                       {...register('propertyName')}
-                      className={`w-full border border-slate-200 bg-slate-50 px-4 py-3 focus:border-[#02224B] focus:ring-[#02224B] ${errors.propertyName ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
+                      className={`w-full border border-slate-200 bg-slate-50 px-4 py-3 focus:border-navy-900 focus:ring-navy-900 ${errors.propertyName ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
                       placeholder="e.g. Cedar House PG"
                     />
                     {errors.propertyName && <p className="mt-1 text-xs text-red-500">{errors.propertyName.message}</p>}
@@ -264,7 +264,7 @@ export default function RegisterPage() {
                       ariaLabel="Set password"
                       required={false}
                       onChange={field.onChange}
-                      inputClassName={`border border-slate-200 px-4 ${errors.password ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'focus:border-[#02224B] focus:ring-[#02224B]'}`}
+                      inputClassName={`border border-slate-200 px-4 ${errors.password ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'focus:border-navy-900 focus:ring-navy-900'}`}
                     />
                       )}
                     />
@@ -283,7 +283,7 @@ export default function RegisterPage() {
                       ariaLabel="Confirm password"
                       required={false}
                       onChange={field.onChange}
-                      inputClassName={`border border-slate-200 px-4 ${errors.confirmPassword ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'focus:border-[#02224B] focus:ring-[#02224B]'}`}
+                      inputClassName={`border border-slate-200 px-4 ${errors.confirmPassword ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'focus:border-navy-900 focus:ring-navy-900'}`}
                     />
                       )}
                     />
@@ -295,7 +295,7 @@ export default function RegisterPage() {
                   <button
                     onClick={handleSubmit(onRegister)}
                     disabled={loading}
-                    className="w-full py-3 bg-[#02224B] hover:bg-[#0A3B75] text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mt-4 disabled:opacity-70"
+                    className="w-full py-3 bg-navy-900 hover:bg-navy-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mt-4 disabled:opacity-70"
                   >
                     {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Create PG owner account'}
                   </button>
@@ -305,12 +305,12 @@ export default function RegisterPage() {
 
             <div className="mt-8 text-center text-sm text-slate-500">
               Already have an account?{' '}
-              <Link to={ROUTES.ownerLogin} className="font-semibold text-[#02224B] hover:underline">
+              <Link to={ROUTES.ownerLogin} className="font-semibold text-navy-900 hover:underline">
                 Sign in
               </Link>
             </div>
             <div className="mt-6 text-center lg:hidden">
-              <Link to="/" className="text-sm font-medium text-slate-500 hover:text-[#02224B] transition-colors flex items-center justify-center gap-1">
+              <Link to="/" className="text-sm font-medium text-slate-500 hover:text-navy-900 transition-colors flex items-center justify-center gap-1">
                 &larr; Back to home
               </Link>
             </div>

@@ -4,19 +4,16 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowUpDown,
-  BedDouble,
   Building2,
-  CalendarDays,
-  ChevronDown,
-  IndianRupee,
+  Check,
   Loader2,
   LogOut,
   MapPin,
+  Menu,
   MessageCircle,
   Search,
   SlidersHorizontal,
   Sparkles,
-  UserRound,
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -60,6 +57,8 @@ interface PGProperty {
     roomType?: string;
     hasAc?: boolean;
     foodIncluded?: boolean;
+    foodCharge?: number | null;
+    depositAmount?: number | null;
     monthlyRent: number;
     availableBeds: number;
     beds: { id: string; label: string }[];
@@ -90,13 +89,16 @@ const PRICE_BANDS = [
 ];
 
 const SORTS = [
-  { value: 'featured', label: 'Sort: Featured' },
-  { value: 'price-asc', label: 'Price: Low to High' },
-  { value: 'price-desc', label: 'Price: High to Low' },
-  { value: 'beds-desc', label: 'Most beds available' },
+  { value: 'featured', label: 'Best match' },
+  { value: 'price-asc', label: 'Lowest rent' },
+  { value: 'price-desc', label: 'Highest rent' },
+  { value: 'beds-desc', label: 'Most beds free' },
 ];
 
 const GENDER_LABELS: Record<string, string> = { MEN: 'Men', WOMEN: 'Women', ANY: 'Co-living' };
+
+const rupees = (amount: number) => `₹${amount.toLocaleString('en-IN')}`;
+const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]!.toUpperCase()).join('');
 
 function keywordMatch(property: PGProperty, text: string): boolean {
   return `${property.name} ${property.locality} ${property.city} ${property.address}`.toLowerCase().includes(text);
@@ -148,6 +150,7 @@ export default function PGDiscovery() {
   // Booking-request modal state.
   const [selectedProperty, setSelectedProperty] = useState<PGProperty | null>(null);
   const [selectedBed, setSelectedBed] = useState('');
+  const [step, setStep] = useState<'details' | 'bed' | 'you' | 'verify'>('details');
   const [submitting, setSubmitting] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
@@ -281,6 +284,7 @@ export default function PGDiscovery() {
   const openRequest = (property: PGProperty) => {
     const verifiedPhone = guest?.phone || '';
     setSelectedProperty(property);
+    setStep('details');
     setSelectedBed('');
     setRequest({ residentName: user?.name || '', phone: verifiedPhone, email: '', moveInDate: '', notes: '' });
     // Reuse the login OTP token for the first booking when the number matches.
@@ -382,39 +386,55 @@ export default function PGDiscovery() {
 
   const filterPanel = (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <p className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
-          <SlidersHorizontal className="h-4 w-4" /> Filters
-          {activeFilterCount > 0 && (
-            <span className="bg-[#02224B] px-1.5 py-0.5 text-[11px] font-bold text-white">{activeFilterCount}</span>
-          )}
-        </p>
-        {activeFilterCount > 0 && (
-          <button onClick={clearFilters} className="text-xs font-semibold text-slate-500 hover:text-[#02224B]">
-            Clear all
-          </button>
-        )}
-      </div>
+      {activeFilterCount > 0 && (
+        <button onClick={clearFilters} className="text-sm font-semibold text-navy-700 underline-offset-2 hover:underline">
+          Clear all filters
+        </button>
+      )}
 
       <section>
-        <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Resident policy</h3>
-        <div className="mt-2 space-y-1.5">
-          {['', 'WOMEN', 'MEN', 'ANY'].map((value) => (
-            <label key={value || 'all'} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-              <input type="radio" name="gender" checked={gender === value} onChange={() => setGender(value)} className="accent-[#02224B]" />
-              {value === '' ? 'All' : GENDER_LABELS[value]}
-            </label>
-          ))}
+        <h3 className="text-xs font-bold text-slate-500">Resident policy</h3>
+        <div className="mt-2.5 grid grid-cols-2 gap-1.5">
+          {['', 'WOMEN', 'MEN', 'ANY'].map((value) => {
+            const isChecked = gender === value;
+            return (
+              <label
+                key={value || 'all'}
+                className={`flex cursor-pointer items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                  isChecked
+                    ? 'border-navy-900 bg-navy-900 text-white shadow-sm'
+                    : 'border-slate-200 bg-slate-50/70 text-slate-700 hover:bg-slate-100 hover:border-slate-300'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="gender"
+                  checked={isChecked}
+                  onChange={() => setGender(value)}
+                  className="sr-only"
+                />
+                {value === '' ? 'All PGs' : GENDER_LABELS[value]}
+              </label>
+            );
+          })}
         </div>
       </section>
 
       <section>
-        <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Monthly rent</h3>
-        <div className="mt-2 space-y-1.5">
+        <h3 className="text-xs font-bold text-slate-500">Monthly budget</h3>
+        <div className="mt-2.5 space-y-1.5">
           {PRICE_BANDS.map((band) => {
             const active = minRent === band.min && maxRent === band.max;
             return (
-              <label key={band.label} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+              <label
+                key={band.label}
+                className={`flex cursor-pointer items-center justify-between px-3 py-2 rounded-xl text-xs font-medium border transition-all ${
+                  active
+                    ? 'border-amber-400 bg-amber-50/70 text-slate-900 font-semibold'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <span>{band.label}</span>
                 <input
                   type="radio"
                   name="price-band"
@@ -423,216 +443,261 @@ export default function PGDiscovery() {
                     setMinRent(band.min);
                     setMaxRent(band.max);
                   }}
-                  className="accent-[#02224B]"
+                  className="accent-navy-900 h-3.5 w-3.5"
                 />
-                {band.label}
               </label>
             );
           })}
         </div>
-        <div className="mt-2 flex items-center gap-2">
-          <input
-            aria-label="Minimum rent"
-            type="number"
-            min="0"
-            value={minRent}
-            onChange={(event) => setMinRent(event.target.value)}
-            placeholder="Min"
-            className="w-full border border-slate-300 px-2 py-1.5 text-sm"
-          />
-          <span className="text-slate-400">–</span>
-          <input
-            aria-label="Maximum rent"
-            type="number"
-            min="0"
-            value={maxRent}
-            onChange={(event) => setMaxRent(event.target.value)}
-            placeholder="Max"
-            className="w-full border border-slate-300 px-2 py-1.5 text-sm"
-          />
+        <div className="mt-3 flex items-center gap-2">
+          <div className="relative flex-1">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-400">₹</span>
+            <input
+              aria-label="Minimum rent"
+              type="number"
+              min="0"
+              value={minRent}
+              onChange={(event) => setMinRent(event.target.value)}
+              placeholder="Min"
+              className="w-full rounded-lg border border-slate-200 bg-slate-50/50 py-1.5 pl-6 pr-2 text-xs font-medium focus:bg-white focus:border-navy-900 focus:ring-1 focus:ring-navy-900 outline-none transition-all"
+            />
+          </div>
+          <span className="text-slate-400 text-xs font-bold">–</span>
+          <div className="relative flex-1">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-400">₹</span>
+            <input
+              aria-label="Maximum rent"
+              type="number"
+              min="0"
+              value={maxRent}
+              onChange={(event) => setMaxRent(event.target.value)}
+              placeholder="Max"
+              className="w-full rounded-lg border border-slate-200 bg-slate-50/50 py-1.5 pl-6 pr-2 text-xs font-medium focus:bg-white focus:border-navy-900 focus:ring-1 focus:ring-navy-900 outline-none transition-all"
+            />
+          </div>
         </div>
       </section>
 
       <section>
-        <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Room type</h3>
-        <div className="mt-2 space-y-1.5">
-          {ROOM_TYPES.map((type) => (
-            <label key={type.value} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={roomTypes.includes(type.value)}
-                onChange={() => toggleInList(roomTypes, type.value, setRoomTypes)}
-                className="accent-[#02224B]"
-              />
-              {type.label}
-            </label>
-          ))}
+        <h3 className="text-xs font-bold text-slate-500">Room sharing</h3>
+        <div className="mt-2.5 space-y-1.5">
+          {ROOM_TYPES.map((type) => {
+            const isChecked = roomTypes.includes(type.value);
+            return (
+              <label
+                key={type.value}
+                className={`flex cursor-pointer items-center justify-between px-3 py-2 rounded-xl text-xs font-medium border transition-all ${
+                  isChecked
+                    ? 'border-navy-900 bg-navy-900/5 text-navy-900 font-semibold'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <span>{type.label}</span>
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={() => toggleInList(roomTypes, type.value, setRoomTypes)}
+                  className="accent-navy-900 h-3.5 w-3.5 rounded"
+                />
+              </label>
+            );
+          })}
         </div>
       </section>
 
       <section>
-        <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Comfort</h3>
-        <div className="mt-2 space-y-1.5">
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" checked={acOnly} onChange={(event) => setAcOnly(event.target.checked)} className="accent-[#02224B]" />
-            AC only
+        <h3 className="text-xs font-bold text-slate-500">Amenities & Inclusions</h3>
+        <div className="mt-2.5 space-y-2">
+          <label className="flex cursor-pointer items-center justify-between px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-all">
+            <span>Air Conditioning (AC)</span>
+            <input
+              type="checkbox"
+              checked={acOnly}
+              onChange={(event) => setAcOnly(event.target.checked)}
+              className="accent-navy-900 h-3.5 w-3.5 rounded"
+            />
           </label>
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" checked={foodOnly} onChange={(event) => setFoodOnly(event.target.checked)} className="accent-[#02224B]" />
-            Food included
+          <label className="flex cursor-pointer items-center justify-between px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-all">
+            <span>Home-Style Food Included</span>
+            <input
+              type="checkbox"
+              checked={foodOnly}
+              onChange={(event) => setFoodOnly(event.target.checked)}
+              className="accent-navy-900 h-3.5 w-3.5 rounded"
+            />
           </label>
         </div>
       </section>
 
       {amenityCounts.length > 0 && (
         <section>
-          <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Amenities</h3>
-          <div className="mt-2 max-h-48 space-y-1.5 overflow-y-auto pr-1">
-            {amenityCounts.map(([amenity, count]) => (
-              <label key={amenity} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={amenities.includes(amenity)}
-                  onChange={() => toggleInList(amenities, amenity, setAmenities)}
-                  className="accent-[#02224B]"
-                />
-                <span className="flex-1">{amenity}</span>
-                <span className="text-xs text-slate-400">({count})</span>
-              </label>
-            ))}
+          <h3 className="text-xs font-bold text-slate-500">Popular facilities</h3>
+          <div className="mt-2.5 max-h-48 space-y-1 overflow-y-auto pr-1">
+            {amenityCounts.map(([amenity, count]) => {
+              const isChecked = amenities.includes(amenity);
+              return (
+                <label key={amenity} className="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-slate-700 hover:bg-slate-50 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => toggleInList(amenities, amenity, setAmenities)}
+                    className="accent-navy-900 h-3.5 w-3.5 rounded"
+                  />
+                  <span className="flex-1 font-medium">{amenity}</span>
+                  <span className="text-[11px] text-slate-400 font-semibold">{count}</span>
+                </label>
+              );
+            })}
           </div>
         </section>
       )}
     </div>
   );
 
+  const priceFacts = (property: PGProperty) => {
+    const open = property.rooms.filter(matchesRoom);
+    const rooms = open.length ? open : property.rooms;
+    const cheapest = rooms.reduce<PGProperty['rooms'][number] | null>((low, room) => (!low || room.monthlyRent < low.monthlyRent ? room : low), null);
+    const rents = rooms.map((room) => room.monthlyRent);
+    return {
+      from: cheapest?.monthlyRent ?? null,
+      to: rents.length ? Math.max(...rents) : null,
+      food: !cheapest ? null : (cheapest.foodCharge ?? 0) > 0 ? `+ ${rupees(cheapest.foodCharge!)} food (optional)` : cheapest.foodIncluded ? 'Food included' : 'No food',
+      deposit: cheapest && (cheapest.depositAmount ?? 0) > 0 ? `Deposit ${rupees(cheapest.depositAmount!)}` : 'Deposit not listed'
+    };
+  };
+  const availabilityText = (beds: number) => (beds <= 0 ? 'Fully occupied' : beds <= 3 ? `${beds} bed${beds === 1 ? '' : 's'} left` : `${beds} beds available`);
+  const quickChips: { label: string; active: boolean; toggle: () => void }[] = [
+    { label: 'Women', active: gender === 'WOMEN', toggle: () => setGender(gender === 'WOMEN' ? '' : 'WOMEN') },
+    { label: 'Men', active: gender === 'MEN', toggle: () => setGender(gender === 'MEN' ? '' : 'MEN') },
+    { label: 'Co-living', active: gender === 'ANY', toggle: () => setGender(gender === 'ANY' ? '' : 'ANY') },
+    { label: 'Under ₹8,000', active: !minRent && maxRent === '8000', toggle: () => { setMinRent(''); setMaxRent(maxRent === '8000' && !minRent ? '' : '8000'); } },
+    { label: 'Food available', active: foodOnly, toggle: () => setFoodOnly(!foodOnly) },
+    { label: 'AC', active: acOnly, toggle: () => setAcOnly(!acOnly) }
+  ];
+  const facts = selectedProperty ? priceFacts(selectedProperty) : null;
+  const chosenBed = selectedProperty?.rooms.flatMap((room) => room.beds.map((bed) => ({ room, bed }))).find(({ bed }) => bed.id === selectedBed) ?? null;
+  const stepIndex = step === 'bed' ? 1 : step === 'you' ? 2 : step === 'verify' ? 3 : 0;
+  const stepTitle = { details: '', bed: 'Choose a bed', you: 'Your details', verify: 'Verify your phone' }[step];
+  const fieldClass = 'mt-1.5 block w-full rounded-[6px] border border-field-border bg-white px-3 py-2.5 text-ink outline-none focus:border-navy-900';
+  const labelClass = 'block text-sm font-medium text-navy-900';
+
   return (
-    <main className="min-h-screen bg-slate-100 text-slate-900">
-      {/* Store-style header: brand, one search bar, account. */}
-      <header className="bg-[#02224B] text-white">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3">
-          <Link to={ROUTES.guestHome} className="flex items-center gap-2 text-lg font-bold">
-            <Building2 className="h-5 w-5 text-[#FEB109]" /> LivingPlus PG
+    <main className="min-h-screen bg-surface text-ink">
+      <a href="#results" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-2 focus:z-50 focus:rounded-[6px] focus:bg-white focus:px-3 focus:py-2">
+        Skip to results
+      </a>
+      <header className="sticky top-0 z-40 bg-navy-900 text-white">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 sm:px-6">
+          <Link to={ROUTES.guestHome} className="flex items-center gap-2 font-display text-xl font-bold text-white">
+            <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-amber-500 text-navy-900" aria-hidden="true">
+              <Building2 className="h-5 w-5" />
+            </span>
+            LivingPlus
           </Link>
           <form
+            role="search"
             onSubmit={(event) => {
               event.preventDefault();
               if (activeTab !== 'search') navigate(ROUTES.guestHome);
             }}
-            className="flex min-w-52 flex-1 items-stretch overflow-hidden bg-white text-slate-900"
-            role="search"
+            className="order-last flex w-full items-center gap-1 rounded-full bg-white p-1 pl-2 text-ink md:order-none md:w-auto md:flex-1"
           >
             <select
-              aria-label="Search within locality"
+              aria-label="Locality"
               value={queryScope}
               onChange={(event) => setQueryScope(event.target.value)}
-              className="hidden max-w-36 border-r border-slate-200 bg-slate-50 px-2 text-xs font-medium text-slate-600 outline-none sm:block"
+              className="hidden max-w-44 rounded-full bg-transparent px-2 py-1.5 text-sm font-medium text-navy-900 outline-none sm:block"
             >
               <option value="">All localities</option>
               {localityOptions.map((locality) => (
-                <option key={locality} value={locality}>
-                  {locality}
-                </option>
+                <option key={locality} value={locality}>{locality}</option>
               ))}
             </select>
+            <span className="hidden h-6 w-px bg-hairline sm:block" aria-hidden="true" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search PG name, locality or landmark…"
+              placeholder="Search PG name, locality or landmark"
               aria-label="Search PGs"
-              className="w-full px-3 py-2.5 text-sm outline-none placeholder:text-slate-400"
+              className="min-w-0 flex-1 bg-transparent px-2 py-1.5 outline-none placeholder:text-muted"
             />
             <button
               type="button"
               onClick={() => setAiRequest({ query, nonce: Date.now() })}
-              aria-label="Ask AI about this search"
-              title="Ask AI about this search"
-              className="px-3 text-slate-400 hover:text-[#02224B]"
+              aria-label="Ask the assistant about this search"
+              title="Ask the assistant about this search"
+              className="flex h-10 w-10 items-center justify-center rounded-full text-navy-700 hover:bg-surface"
             >
               <Sparkles className="h-5 w-5" />
             </button>
-            <button type="submit" aria-label="Search" className="bg-[#FEB109] px-4 text-[#02224B] hover:bg-[#e5a200]">
+            <button type="submit" aria-label="Search" className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500 text-navy-900 hover:bg-amber-600">
               <Search className="h-5 w-5" />
             </button>
           </form>
-          <div className="flex items-center gap-3 text-sm">
-            <span className="hidden items-center gap-1.5 font-medium text-blue-100 md:inline-flex">
-              <UserRound className="h-4 w-4" />
-              {profileName || (guestPhone ? `+${guestPhone}` : 'Guest')}
-            </span>
+          <nav aria-label="Other sites" className="ml-auto flex items-center gap-1 text-sm md:ml-0">
+            <a href={residentHome} className="hidden rounded-[8px] px-3 py-2 font-medium text-white/85 hover:bg-white/10 hover:text-white md:block">
+              {stays.length > 0 ? 'My stay' : 'Residents'}
+            </a>
+            <a href={ROUTES.ownerLogin} className="hidden rounded-[8px] px-3 py-2 font-medium text-white/85 hover:bg-white/10 hover:text-white md:block">
+              For PG owners
+            </a>
             {signedIn && (
-              <button
-                onClick={signOut}
-                className="inline-flex items-center gap-1 font-semibold text-blue-100 hover:text-white"
-              >
+              <button onClick={signOut} className="hidden items-center gap-1.5 rounded-[8px] px-3 py-2 font-medium text-white/85 hover:bg-white/10 hover:text-white md:inline-flex" title={profileName || (guestPhone ? `+${guestPhone}` : undefined)}>
                 <LogOut className="h-4 w-4" /> Sign out
               </button>
             )}
-          </div>
+            <details className="relative md:hidden">
+              <summary aria-label="Menu" className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-[8px] hover:bg-white/10">
+                <Menu className="h-6 w-6" />
+              </summary>
+              <div className="absolute right-0 mt-2 w-56 rounded-[14px] border border-hairline bg-white p-2 text-navy-900 shadow-[var(--shadow-float)]">
+                <a href={residentHome} className="block rounded-[8px] px-3 py-2.5 font-medium hover:bg-surface">{stays.length > 0 ? 'My stay' : 'Residents'}</a>
+                <a href={ROUTES.ownerLogin} className="block rounded-[8px] px-3 py-2.5 font-medium hover:bg-surface">For PG owners</a>
+                {signedIn && (
+                  <button onClick={signOut} className="block w-full rounded-[8px] px-3 py-2.5 text-left font-medium hover:bg-surface">Sign out</button>
+                )}
+              </div>
+            </details>
+          </nav>
         </div>
-        <nav className="border-t border-white/10">
-          <div className="mx-auto flex max-w-7xl items-center gap-1 px-4 text-sm">
-            <Link
-              to={ROUTES.guestHome}
-              className={`px-3 py-2 font-semibold ${activeTab === 'search' ? 'text-[#FEB109] underline underline-offset-4' : 'text-blue-100 hover:text-white'}`}
-            >
-              Search PGs
-            </Link>
-            <Link
-              to={ROUTES.guestRequests}
-              className={`px-3 py-2 font-semibold ${activeTab === 'requests' ? 'text-[#FEB109] underline underline-offset-4' : 'text-blue-100 hover:text-white'}`}
-            >
-              My requests
-            </Link>
-            <span className="ml-auto flex items-center">
-              <a href={residentHome} className="px-3 py-2 font-semibold text-blue-100 hover:text-white">
-                {stays.length > 0 ? 'My stay' : 'Residents'}
-              </a>
-              <a href={ROUTES.ownerLogin} className="px-3 py-2 font-semibold text-blue-100 hover:text-white">
-                For PG owners
-              </a>
-            </span>
-          </div>
-        </nav>
       </header>
 
-      {/* Onboarded residents see their profile strip above search. */}
+      <nav aria-label="Guest" className="border-b border-hairline bg-white">
+        <div className="mx-auto flex max-w-7xl gap-6 px-4 sm:px-6">
+          {[
+            { to: ROUTES.guestHome, label: 'Find a PG', active: activeTab === 'search' },
+            { to: ROUTES.guestRequests, label: 'My requests', active: activeTab === 'requests' }
+          ].map((tab) => (
+            <Link
+              key={tab.to}
+              to={tab.to}
+              aria-current={tab.active ? 'page' : undefined}
+              className={`-mb-px border-b-2 py-3 text-[15px] font-semibold ${tab.active ? 'border-navy-900 text-navy-900' : 'border-transparent text-muted hover:text-navy-900'}`}
+            >
+              {tab.label}
+            </Link>
+          ))}
+        </div>
+      </nav>
+
       {stays.length > 0 && (
-        <section className="border-b border-slate-200 bg-white">
-          <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-            <p className="text-sm text-slate-600">
-              Welcome back, <span className="font-bold text-[#02224B]">{stays[0]?.name}</span>
+        <section className="border-b border-hairline bg-amber-50">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm sm:px-6">
+            <p>
+              You're staying at <span className="font-semibold text-navy-900">{stays[0]?.property.name}</span>
+              {ownPropertyIds.size > 0 ? '. It is hidden from these results; to move rooms, use Room change on your resident site.' : '.'}
             </p>
-            {stays.slice(0, 3).map((stay) => (
-              <p key={stay.id} className="flex items-center gap-1.5 text-sm text-slate-600">
-                <BedDouble className="h-4 w-4 text-slate-400" />
-                {stay.property.name}
-                {stay.bed ? ` · Room ${stay.bed.room.roomNumber}, ${stay.bed.label}` : ''} · ₹
-                {stay.monthlyRent.toLocaleString('en-IN')}/mo
-              </p>
-            ))}
-            <a href={residentHome} className="ml-auto text-sm font-bold text-[#02224B] hover:underline">
-              Open your resident site →
-            </a>
-            {ownPropertyIds.size > 0 && (
-              <p className="w-full text-xs text-slate-500">
-                Your current PG{ownPropertyIds.size > 1 ? 's are' : ' is'} hidden from search. To change rooms, use
-                Room change in your{' '}
-                <a href={residentHome} className="font-bold text-[#02224B] hover:underline">
-                  resident site
-                </a>
-                .
-              </p>
-            )}
+            <a href={residentHome} className="font-semibold text-navy-700 underline-offset-2 hover:underline">Open your resident site</a>
           </div>
         </section>
       )}
 
       {activeTab === 'requests' && guestPhone ? (
-        <section className="mx-auto max-w-5xl px-4 py-8">
-          <h1 className="text-xl font-bold text-[#02224B]">My booking requests</h1>
-          <p className="mt-1 text-sm text-slate-500">Signed in as +{guestPhone}. Live status of every request from this number.</p>
-          <div className="mt-4 border border-slate-200 bg-white px-5">
+        <section className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+          <h1 className="text-2xl font-bold">My requests</h1>
+          <p className="mt-1 text-muted">Requests sent from +{guestPhone}, with their latest status.</p>
+          <div className="mt-5 rounded-[14px] border border-hairline bg-white px-5">
             <MyRequests
               guestToken={guest?.guestToken || ''}
               refreshKey={requestsRefresh}
@@ -644,294 +709,344 @@ export default function PGDiscovery() {
           </div>
         </section>
       ) : (
-        <section className="mx-auto max-w-7xl gap-6 px-4 py-6 lg:grid lg:grid-cols-[240px_minmax(0,1fr)]">
-          <details
-            className="mb-4 border border-slate-200 bg-white lg:hidden"
-            open={mobileFiltersOpen}
-            onToggle={(event) => setMobileFiltersOpen((event.target as HTMLDetailsElement).open)}
-          >
-            <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-bold text-slate-900">
-              <span className="inline-flex items-center gap-2">
-                <SlidersHorizontal className="h-4 w-4" /> Filters
-                {activeFilterCount > 0 && (
-                  <span className="bg-[#02224B] px-1.5 py-0.5 text-[11px] font-bold text-white">{activeFilterCount}</span>
-                )}
-              </span>
-              <ChevronDown className="h-4 w-4 text-slate-400" />
-            </summary>
-            <div className="border-t border-slate-100 px-4 py-4">{filterPanel}</div>
-          </details>
+        <section id="results" className="mx-auto max-w-7xl px-4 pb-16 pt-4 sm:px-6">
+          <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-hide sm:mx-0 sm:flex-wrap sm:px-0" role="group" aria-label="Quick filters">
+            {quickChips.map((chip) => (
+              <button
+                key={chip.label}
+                type="button"
+                aria-pressed={chip.active}
+                onClick={chip.toggle}
+                className={`h-9 shrink-0 rounded-full border px-4 text-sm font-medium ${chip.active ? 'border-navy-900 bg-amber-50 text-navy-900' : 'border-hairline bg-white text-ink hover:border-field-border'}`}
+              >
+                {chip.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setMobileFiltersOpen(true)}
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-hairline bg-white px-4 text-sm font-medium text-ink hover:border-field-border"
+            >
+              <SlidersHorizontal className="h-4 w-4" /> More filters
+              {activeFilterCount > 0 && <span className="tabular rounded-full bg-navy-900 px-1.5 text-xs text-white">{activeFilterCount}</span>}
+            </button>
+          </div>
 
-          <aside className="hidden border border-slate-200 bg-white p-4 lg:block lg:self-start lg:sticky lg:top-4">
-            {filterPanel}
-          </aside>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-ink" aria-live="polite">
+              <span className="tabular font-semibold text-navy-900">{filteredProperties.length}</span>{' '}
+              {filteredProperties.length === 1 ? 'PG' : 'PGs'}
+              {query.trim() ? <> for “{query.trim()}”</> : ' in Chennai'}
+              {query.trim() && semanticScores && semanticScores.size > 0 && (
+                <span className="ml-2 text-sm text-muted" title="Includes PGs that match what you described, not just the exact words">including close matches</span>
+              )}
+            </p>
+            <label className="flex items-center gap-1.5 text-sm text-muted">
+              <ArrowUpDown className="h-4 w-4" aria-hidden="true" />
+              <span className="sr-only">Sort</span>
+              <select
+                value={sort}
+                onChange={(event) => setSort(event.target.value)}
+                className="rounded-[6px] bg-transparent py-1 font-medium text-navy-900 outline-none"
+              >
+                {SORTS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
 
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
-              <p className="text-sm text-slate-600">
-                <span className="font-bold text-slate-900">{filteredProperties.length}</span>{' '}
-                {filteredProperties.length === 1 ? 'result' : 'results'}
-                {query.trim() ? (
-                  <>
-                    {' '}for <span className="font-semibold text-[#02224B]">“{query.trim()}”</span>
-                  </>
-                ) : (
-                  ' across Chennai'
-                )}
-                {query.trim() && semanticScores && semanticScores.size > 0 && (
-                  <span className="ml-2 border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800" title="Includes PGs that match what you described, not just the exact words">
-                    Smart search
-                  </span>
-                )}
-              </p>
-              <label className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-                <ArrowUpDown className="h-3.5 w-3.5" />
-                <select
-                  aria-label="Sort results"
-                  value={sort}
-                  onChange={(event) => setSort(event.target.value)}
-                  className="border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700"
-                >
-                  {SORTS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+          {loading ? (
+            <div className="mt-4 grid gap-x-5 gap-y-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-busy="true" aria-label="Loading PGs">
+              {[0, 1, 2, 3].map((key) => (
+                <div key={key} className="animate-pulse">
+                  <div className="aspect-[4/3] rounded-[14px] bg-hairline" />
+                  <div className="mt-3 h-4 w-2/3 rounded bg-hairline" />
+                  <div className="mt-2 h-3 w-1/3 rounded bg-hairline" />
+                </div>
+              ))}
             </div>
-
-            {loading ? (
-              <div className="flex justify-center bg-white py-20">
-                <Loader2 className="h-7 w-7 animate-spin text-[#02224B]" />
-              </div>
-            ) : filteredProperties.length === 0 ? (
-              <div className="bg-white py-20 text-center">
-                <Building2 className="mx-auto h-8 w-8 text-slate-300" />
-                <p className="mt-3 font-semibold text-slate-700">No PGs match those filters</p>
-                <p className="mt-1 text-sm text-slate-500">Try a different search or clear some filters.</p>
-                {activeFilterCount > 0 && (
-                  <button onClick={clearFilters} className="mt-4 border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">
-                    Clear all filters
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {filteredProperties.map((property) => {
-                  const rent = startingRent(property);
-                  return (
-                    <article key={property.id} className="flex flex-col border border-slate-200 bg-white">
-                      <div className="aspect-[16/9] overflow-hidden bg-slate-200">
+          ) : filteredProperties.length === 0 ? (
+            <div className="mt-6 rounded-[14px] border border-hairline bg-white px-6 py-12 text-center">
+              <h2 className="text-xl font-semibold">No PGs match these filters</h2>
+              <p className="mx-auto mt-1 max-w-sm text-muted">Remove a filter or raise your budget to see more PGs.</p>
+              {activeFilterCount > 0 && (
+                <button onClick={clearFilters} className="btn-secondary mt-5">Clear filters</button>
+              )}
+            </div>
+          ) : (
+            <ul className="mt-4 grid gap-x-5 gap-y-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {filteredProperties.map((property) => {
+                const price = priceFacts(property);
+                return (
+                  <li key={property.id}>
+                    <button
+                      type="button"
+                      onClick={() => openRequest(property)}
+                      className="group block w-full rounded-[14px] text-left"
+                      aria-label={`${property.name}, ${property.locality}. ${price.from !== null ? `From ${rupees(price.from)} a month.` : ''} ${availabilityText(property.availableBeds)}`}
+                    >
+                      <div className="relative aspect-[4/3] overflow-hidden rounded-[14px] bg-closed-bg">
                         {property.photoUrls?.[0] ? (
-                          <SecureImage srcKey={property.photoUrls[0]} alt={property.name} className="h-full w-full object-cover" />
+                          <SecureImage srcKey={property.photoUrls[0]} alt="" className="h-full w-full object-cover" />
                         ) : (
-                          <div className="flex h-full items-center justify-center">
-                            <Building2 className="h-9 w-9 text-slate-400" />
+                          <div className="flex h-full items-center justify-center font-display text-4xl font-bold text-navy-900/25" aria-hidden="true">
+                            {initials(property.name)}
                           </div>
                         )}
+                        <span className="absolute left-3 top-3 rounded-full bg-white px-2.5 py-1 text-[13px] font-semibold text-navy-900 shadow-[var(--shadow-float)]">
+                          {GENDER_LABELS[property.genderPolicy] || property.genderPolicy}
+                        </span>
                       </div>
-                      <div className="flex flex-1 flex-col p-4">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="text-base font-bold text-[#02224B]">{property.name}</h2>
-                          <span className="bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold uppercase text-slate-600">
-                            {GENDER_LABELS[property.genderPolicy] || property.genderPolicy}
+                      <div className="mt-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <h2 className="font-sans text-[17px] font-semibold leading-snug text-navy-900 group-hover:underline">{property.name}</h2>
+                          <span className={`shrink-0 text-sm font-medium ${property.availableBeds <= 0 ? 'text-muted' : property.availableBeds <= 3 ? 'text-attention' : 'text-positive'}`}>
+                            {availabilityText(property.availableBeds)}
                           </span>
                         </div>
-                        <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
-                          <MapPin className="h-3.5 w-3.5" />
-                          {property.locality}, {property.city}
+                        <p className="mt-0.5 flex items-center gap-1 text-sm text-muted">
+                          <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> {property.locality}, {property.city}
                         </p>
-                        <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
-                          <BedDouble className="h-3.5 w-3.5" />
-                          {property.availableBeds} {property.availableBeds === 1 ? 'bed' : 'beds'} available
-                        </p>
-                        {property.amenities?.length > 0 && (
-                          <p className="mt-1 line-clamp-1 text-xs text-slate-500">{property.amenities.slice(0, 3).join(' · ')}</p>
-                        )}
-                        <div className="mt-3 flex items-end justify-between border-t border-slate-100 pt-3">
-                          <p className="text-xs text-slate-500">
-                            from{' '}
-                            <span className="text-lg font-bold text-slate-900">
-                              <IndianRupee className="mr-0.5 inline h-4 w-4" />
-                              {Number.isFinite(rent) ? rent.toLocaleString('en-IN') : '—'}
-                            </span>
-                            /mo
+                        {price.from !== null && (
+                          <p className="mt-1.5 text-ink">
+                            <span className="tabular font-semibold text-navy-900">{rupees(price.from)}</span>/mo
+                            <span className="text-sm text-muted"> {price.food}</span>
                           </p>
-                        </div>
-                        <div className="mt-3 flex gap-2">
-                          <button
-                            onClick={() => openRequest(property)}
-                            disabled={!property.availableBeds}
-                            className="flex-1 bg-[#02224B] px-3 py-2 text-sm font-semibold text-white hover:bg-[#0A3B75] disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            Request a bed
-                          </button>
-                          {property.managerPhone && (
-                            <a
-                              href={`https://wa.me/${property.managerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello, I am interested in ${property.name} in ${property.locality}.`)}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              aria-label={`WhatsApp inquiry for ${property.name}`}
-                              className="inline-flex items-center border border-slate-300 px-3 py-2 text-emerald-700"
-                            >
-                              <MessageCircle className="h-4 w-4" />
-                            </a>
-                          )}
-                        </div>
+                        )}
+                        <p className="text-sm text-muted">{price.deposit}</p>
                       </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </section>
       )}
 
-      {selectedProperty && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeRequest();
-          }}
-        >
-          <section role="dialog" aria-modal="true" aria-labelledby="booking-title" className="max-h-[90vh] w-full max-w-lg overflow-y-auto bg-white p-6 shadow-xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-bold uppercase text-amber-700">Booking request</p>
-                <h2 id="booking-title" className="mt-1 text-xl font-bold text-[#02224B]">
-                  {selectedProperty.name}
-                </h2>
-              </div>
-              <button onClick={closeRequest} aria-label="Close booking request" className="p-1 text-slate-500 hover:bg-slate-100">
-                <X className="h-5 w-5" />
-              </button>
+      {mobileFiltersOpen && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-navy-900/50 sm:items-center sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileFiltersOpen(false); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="filters-title" className="max-h-[88vh] w-full max-w-md overflow-y-auto rounded-t-[14px] bg-white p-5 shadow-[var(--shadow-float)] sm:rounded-[14px]">
+            <div className="flex items-center justify-between">
+              <h2 id="filters-title" className="text-xl font-semibold">Filters</h2>
+              <button onClick={() => setMobileFiltersOpen(false)} aria-label="Close filters" className="flex h-11 w-11 items-center justify-center rounded-full hover:bg-surface"><X className="h-5 w-5" /></button>
             </div>
-            <form onSubmit={submitRequest} className="mt-6 space-y-4">
-              <label className="block text-sm font-medium text-slate-700">
-                Available bed
-                <select
-                  required
-                  value={selectedBed}
-                  onChange={(event) => setSelectedBed(event.target.value)}
-                  className="mt-1.5 w-full border border-slate-300 bg-white px-3 py-2.5"
-                >
-                  <option value="">Choose a bed</option>
-                  {selectedProperty.rooms
-                    .filter(matchesRoom)
-                    .flatMap((room) =>
-                      room.beds.map((bed) => (
-                        <option key={bed.id} value={bed.id}>
-                          Room {room.roomNumber} · {bed.label} · ₹{room.monthlyRent.toLocaleString('en-IN')}/month
-                        </option>
-                      ))
-                    )}
-                </select>
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                Full name
-                <input
-                  required
-                  value={request.residentName}
-                  onChange={(event) => setRequest({ ...request, residentName: event.target.value })}
-                  className="mt-1.5 w-full border border-slate-300 px-3 py-2.5"
-                />
-              </label>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block text-sm font-medium text-slate-700">
-                  Phone
-                  <input
-                    required
-                    type="tel"
-                    value={request.phone}
-                    onChange={(event) => {
-                      const nextPhone = event.target.value;
-                      setRequest({ ...request, phone: nextPhone });
-                      if (guest && nextPhone.replace(/\D/g, '') !== guest.phone) {
-                        setPhoneToken('');
-                        setOtpSent(false);
-                      }
-                    }}
-                    className="mt-1.5 w-full border border-slate-300 px-3 py-2.5"
-                  />
-                </label>
-                <label className="block text-sm font-medium text-slate-700">
-                  Move-in date
-                  <input
-                    required
-                    type="date"
-                    min={new Date().toISOString().slice(0, 10)}
-                    value={request.moveInDate}
-                    onChange={(event) => setRequest({ ...request, moveInDate: event.target.value })}
-                    className="mt-1.5 w-full border border-slate-300 px-3 py-2.5"
-                  />
-                </label>
-              </div>
-              <label className="block text-sm font-medium text-slate-700">
-                Email <span className="font-normal text-slate-400">(optional)</span>
-                <input
-                  type="email"
-                  value={request.email}
-                  onChange={(event) => setRequest({ ...request, email: event.target.value })}
-                  className="mt-1.5 w-full border border-slate-300 px-3 py-2.5"
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                Note <span className="font-normal text-slate-400">(optional)</span>
-                <textarea
-                  rows={2}
-                  value={request.notes}
-                  onChange={(event) => setRequest({ ...request, notes: event.target.value })}
-                  className="mt-1.5 w-full resize-y border border-slate-300 px-3 py-2.5"
-                />
-              </label>
-              <div className="border border-slate-200 bg-slate-50 p-3">
-                <p className="text-sm font-medium text-slate-700">
-                  Phone verification {phoneToken ? <span className="font-semibold text-emerald-700">· verified</span> : null}
-                </p>
-                {!phoneToken && (
-                  <div className="mt-2 flex flex-col gap-2">
-                    {!otpSent ? (
-                      <button
-                        type="button"
-                        disabled={otpLoading || otpCooldown > 0}
-                        onClick={() => void sendOtp()}
-                        className="border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
-                      >
-                        {otpCooldown > 0 ? `Resend in ${otpCooldown}s` : 'Send verification code'}
-                      </button>
-                    ) : (
-                      <div className="flex gap-2">
-                        <input
-                          aria-label="6-digit verification code"
-                          value={otpCode}
-                          onChange={(event) => setOtpCode(event.target.value)}
-                          placeholder="6-digit code"
-                          inputMode="numeric"
-                          className="w-full border border-slate-300 bg-white px-3 py-2 text-sm"
-                        />
-                        <button
-                          type="button"
-                          disabled={otpLoading || !otpCode}
-                          onClick={() => void verifyOtp()}
-                          className="shrink-0 bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                        >
-                          Verify
-                        </button>
-                      </div>
-                    )}
+            <div className="mt-2">{filterPanel}</div>
+            <button onClick={() => setMobileFiltersOpen(false)} className="btn-primary mt-6 w-full">
+              Show {filteredProperties.length} {filteredProperties.length === 1 ? 'PG' : 'PGs'}
+            </button>
+          </section>
+        </div>
+      )}
+
+      {selectedProperty && facts && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-navy-900/50 sm:items-center sm:p-4"
+          onMouseDown={(event) => { if (event.target === event.currentTarget) closeRequest(); }}
+          onKeyDown={(event) => { if (event.key === 'Escape') closeRequest(); }}
+        >
+          <section role="dialog" aria-modal="true" aria-labelledby="booking-title" className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-t-[14px] bg-white shadow-[var(--shadow-float)] sm:rounded-[14px]">
+            <div className="flex items-start justify-between gap-4 border-b border-hairline px-5 py-4">
+              <div className="min-w-0">
+                {step !== 'details' && (
+                  <p className="text-sm text-muted">Step {stepIndex} of 3 · {stepTitle}</p>
+                )}
+                <h2 id="booking-title" className="truncate text-xl font-bold">{selectedProperty.name}</h2>
+                {step === 'details' && <p className="text-sm text-muted">{selectedProperty.locality}, {selectedProperty.city}</p>}
+                {step !== 'details' && (
+                  <div className="mt-2 flex gap-1" aria-hidden="true">
+                    {[1, 2, 3].map((n) => <span key={n} className={`h-1 w-10 rounded-full ${n <= stepIndex ? 'bg-navy-900' : 'bg-hairline'}`} />)}
                   </div>
                 )}
               </div>
-              <button
-                disabled={submitting || !phoneToken}
-                className="flex w-full items-center justify-center gap-2 bg-[#02224B] px-4 py-3 font-semibold text-white hover:bg-[#0A3B75] disabled:opacity-60"
-              >
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarDays className="h-4 w-4" />}
-                Send request
+              <button onClick={closeRequest} aria-label="Close booking request" autoFocus className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-surface">
+                <X className="h-5 w-5" />
               </button>
-            </form>
+            </div>
+
+            {step === 'details' ? (
+              <>
+                <div className="overflow-y-auto px-5 py-4">
+                  {selectedProperty.photoUrls?.[0] && (
+                    <SecureImage srcKey={selectedProperty.photoUrls[0]} alt={`Photo of ${selectedProperty.name}`} className="mb-4 aspect-[4/3] w-full rounded-[14px] object-cover" />
+                  )}
+                  <dl className="divide-y divide-hairline">
+                    {[
+                      ['For', GENDER_LABELS[selectedProperty.genderPolicy] || selectedProperty.genderPolicy],
+                      ['Rent', facts.from === null ? 'Ask the owner' : facts.to !== null && facts.to !== facts.from ? `${rupees(facts.from)} – ${rupees(facts.to)} a month` : `${rupees(facts.from)} a month`],
+                      ['Food', facts.food ?? 'Ask the owner'],
+                      ['Deposit', facts.deposit === 'Deposit not listed' ? 'Not listed: ask the owner' : facts.deposit.replace('Deposit ', '')],
+                      ['Beds', availabilityText(selectedProperty.availableBeds)],
+                      ['Address', selectedProperty.address]
+                    ].map(([term, value]) => (
+                      <div key={term} className="flex justify-between gap-4 py-2.5">
+                        <dt className="text-muted">{term}</dt>
+                        <dd className="tabular text-right font-medium text-navy-900">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {selectedProperty.description && <p className="mt-4 max-w-prose text-ink">{selectedProperty.description}</p>}
+                  {selectedProperty.amenities?.length > 0 && (
+                    <>
+                      <h3 className="mt-5 font-sans text-base font-semibold">What's here</h3>
+                      <ul className="mt-2 flex flex-wrap gap-2">
+                        {selectedProperty.amenities.map((amenity) => (
+                          <li key={amenity} className="flex items-center gap-1.5 rounded-full border border-hairline px-3 py-1 text-sm"><Check className="h-3.5 w-3.5 text-positive" aria-hidden="true" />{amenity}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  {selectedProperty.houseRules?.length > 0 && (
+                    <>
+                      <h3 className="mt-5 font-sans text-base font-semibold">House rules</h3>
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-ink">
+                        {selectedProperty.houseRules.map((rule) => <li key={rule}>{rule}</li>)}
+                      </ul>
+                    </>
+                  )}
+                  {selectedProperty.managerPhone && (
+                    <a
+                      href={`https://wa.me/${selectedProperty.managerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello, I'm interested in ${selectedProperty.name} in ${selectedProperty.locality}.`)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn-secondary mt-5 w-full"
+                    >
+                      <MessageCircle className="h-4 w-4" /> Message the owner on WhatsApp
+                    </a>
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-4 border-t border-hairline px-5 py-3">
+                  <p className="text-ink">
+                    {facts.from !== null ? <>From <span className="tabular font-semibold text-navy-900">{rupees(facts.from)}</span>/mo</> : 'Rent on request'}
+                  </p>
+                  <button onClick={() => setStep('bed')} disabled={!selectedProperty.availableBeds} className="btn-primary">
+                    {selectedProperty.availableBeds ? 'Request a bed' : 'Fully occupied'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <form onSubmit={submitRequest} className="flex min-h-0 flex-1 flex-col">
+                <div className="space-y-4 overflow-y-auto px-5 py-4">
+                  {step === 'bed' && (
+                    <>
+                      <label className={labelClass}>
+                        Available bed
+                        <select required value={selectedBed} onChange={(event) => setSelectedBed(event.target.value)} className={fieldClass}>
+                          <option value="">Choose a bed</option>
+                          {selectedProperty.rooms.filter(matchesRoom).flatMap((room) =>
+                            room.beds.map((bed) => (
+                              <option key={bed.id} value={bed.id}>
+                                Room {room.roomNumber}, {bed.label} · {rupees(room.monthlyRent)}/mo
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </label>
+                      <label className={labelClass}>
+                        Move-in date
+                        <input required type="date" min={new Date().toISOString().slice(0, 10)} value={request.moveInDate} onChange={(event) => setRequest({ ...request, moveInDate: event.target.value })} className={fieldClass} />
+                      </label>
+                    </>
+                  )}
+                  {step === 'you' && (
+                    <>
+                      <label className={labelClass}>
+                        Full name
+                        <input required autoComplete="name" value={request.residentName} onChange={(event) => setRequest({ ...request, residentName: event.target.value })} className={fieldClass} />
+                      </label>
+                      <label className={labelClass}>
+                        Phone
+                        <input
+                          required
+                          type="tel"
+                          autoComplete="tel"
+                          value={request.phone}
+                          onChange={(event) => {
+                            const nextPhone = event.target.value;
+                            setRequest({ ...request, phone: nextPhone });
+                            if (normalizePhoneDigits(nextPhone) !== (guest?.phone || '')) {
+                              setPhoneToken('');
+                              setOtpSent(false);
+                            }
+                          }}
+                          aria-describedby="phone-hint"
+                          className={fieldClass}
+                        />
+                      </label>
+                      <p id="phone-hint" className="-mt-2 text-sm text-muted">We'll send a code to this number. The owner uses it to contact you.</p>
+                      <label className={labelClass}>
+                        Email <span className="font-normal text-muted">(optional)</span>
+                        <input type="email" autoComplete="email" value={request.email} onChange={(event) => setRequest({ ...request, email: event.target.value })} className={fieldClass} />
+                      </label>
+                      <label className={labelClass}>
+                        Note for the owner <span className="font-normal text-muted">(optional)</span>
+                        <textarea rows={2} value={request.notes} onChange={(event) => setRequest({ ...request, notes: event.target.value })} className={`${fieldClass} resize-y`} />
+                      </label>
+                    </>
+                  )}
+                  {step === 'verify' && (
+                    <>
+                      <dl className="rounded-[14px] border border-hairline bg-surface px-4 py-1">
+                        {[
+                          ['Bed', chosenBed ? `Room ${chosenBed.room.roomNumber}, ${chosenBed.bed.label}` : ''],
+                          ['Move-in', request.moveInDate ? new Date(`${request.moveInDate}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''],
+                          ['Rent', chosenBed ? `${rupees(chosenBed.room.monthlyRent)} a month` : ''],
+                          ['Food', chosenBed ? ((chosenBed.room.foodCharge ?? 0) > 0 ? `${rupees(chosenBed.room.foodCharge!)} a month (optional)` : chosenBed.room.foodIncluded ? 'Included' : 'Not available') : ''],
+                          ['Deposit', chosenBed && (chosenBed.room.depositAmount ?? 0) > 0 ? rupees(chosenBed.room.depositAmount!) : 'Not listed: ask the owner']
+                        ].map(([term, value]) => (
+                          <div key={term} className="flex justify-between gap-4 py-2">
+                            <dt className="text-muted">{term}</dt>
+                            <dd className="tabular text-right font-medium text-navy-900">{value}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                      <p className="text-sm text-muted">Sending a request holds the bed while the owner reviews it. You'll see their reply in My requests, and you can cancel any time before they answer.</p>
+                      {phoneToken ? (
+                        <p className="flex items-center gap-2 rounded-[10px] bg-positive-bg px-3 py-2.5 font-medium text-positive">
+                          <Check className="h-4 w-4" aria-hidden="true" /> +{normalizePhoneDigits(request.phone)} is verified
+                        </p>
+                      ) : !otpSent ? (
+                        <button type="button" disabled={otpLoading || otpCooldown > 0} onClick={() => void sendOtp()} className="btn-secondary w-full">
+                          {otpLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                          {otpCooldown > 0 ? `Send again in ${otpCooldown}s` : `Send code to +${normalizePhoneDigits(request.phone)}`}
+                        </button>
+                      ) : (
+                        <div className="flex items-end gap-2">
+                          <label className={`${labelClass} flex-1`}>
+                            Verification code
+                            <input aria-label="6-digit verification code" value={otpCode} onChange={(event) => setOtpCode(event.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={6} className={`${fieldClass} tabular tracking-[0.2em]`} />
+                          </label>
+                          <button type="button" disabled={otpLoading || !otpCode} onClick={() => void verifyOtp()} className="btn-secondary">
+                            {otpLoading && <Loader2 className="h-4 w-4 animate-spin" />} Verify
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-3 border-t border-hairline px-5 py-3">
+                  <button type="button" onClick={() => setStep(step === 'bed' ? 'details' : step === 'you' ? 'bed' : 'you')} className="btn-secondary">Back</button>
+                  {step === 'verify' ? (
+                    <button type="submit" disabled={submitting || !phoneToken} className="btn-primary">
+                      {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Send request
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={(event) => {
+                        const form = (event.currentTarget as HTMLButtonElement).form;
+                        if (form && !form.reportValidity()) return;
+                        setStep(step === 'bed' ? 'you' : 'verify');
+                      }}
+                    >
+                      Next
+                    </button>
+                  )}
+                </div>
+              </form>
+            )}
           </section>
         </div>
       )}

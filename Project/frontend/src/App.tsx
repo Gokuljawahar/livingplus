@@ -26,8 +26,8 @@ const ProtectedRoute = ({ children, roles }: { children: React.ReactNode; roles?
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFB]">
-        <div className="w-10 h-10 border-4 border-[#02224B] border-t-[#FEB109] rounded-full animate-spin" />
+      <div className="min-h-screen flex items-center justify-center bg-surface">
+        <div className="w-10 h-10 border-4 border-navy-900 border-t-amber-500 rounded-full animate-spin" />
       </div>
     );
   }
@@ -44,8 +44,8 @@ const ProtectedRoute = ({ children, roles }: { children: React.ReactNode; roles?
 };
 
 const Spinner = () => (
-  <div className="min-h-screen flex items-center justify-center bg-[#F8FAFB]">
-    <div className="w-10 h-10 border-4 border-[#02224B] border-t-[#FEB109] rounded-full animate-spin" />
+  <div className="min-h-screen flex items-center justify-center bg-surface">
+    <div className="w-10 h-10 border-4 border-navy-900 border-t-amber-500 rounded-full animate-spin" />
   </div>
 );
 

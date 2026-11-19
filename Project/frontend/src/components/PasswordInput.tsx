@@ -40,7 +40,7 @@ export default function PasswordInput({
         autoComplete={autoComplete}
         aria-label={ariaLabel}
         onChange={(event) => onChange(event.target.value)}
-        className={`w-full rounded-xl border-slate-100 bg-slate-50 py-3 pl-11 pr-12 text-sm transition-all focus:bg-white focus:ring-2 focus:ring-[#02224B] ${inputClassName}`}
+        className={`w-full rounded-xl border-slate-100 bg-slate-50 py-3 pl-11 pr-12 text-sm transition-all focus:bg-white focus:ring-2 focus:ring-navy-900 ${inputClassName}`}
         placeholder={placeholder}
       />
       <button

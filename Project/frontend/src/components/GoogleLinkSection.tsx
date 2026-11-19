@@ -51,7 +51,7 @@ export default function GoogleLinkSection() {
 
   return (
     <section aria-labelledby="google-link-heading" className="mt-6 rounded-3xl border border-slate-100 bg-white p-8 shadow-sm">
-      <h2 id="google-link-heading" className="text-sm font-bold uppercase tracking-wider text-slate-400">Sign in with Google</h2>
+      <h2 id="google-link-heading" className="text-sm font-bold text-slate-400">Sign in with Google</h2>
       <p className="mt-2 text-sm text-slate-600">
         {linked
           ? 'A Google account is linked. You can sign in with Google or with your password.'

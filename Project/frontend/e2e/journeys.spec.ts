@@ -16,17 +16,24 @@ test('a guest browses without signing in, then verifies once to request a bed', 
   await expect(page.getByText('Northstar Student Living').first()).toBeVisible();
   await expect(page.getByText("Harbour Point Men's PG")).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Request a bed' }).first().click();
-  const form = page.locator('form', { has: page.getByRole('button', { name: 'Send request' }) });
-  await form.getByLabel('Available bed').selectOption({ index: 1 });
-  await form.getByLabel('Full name').fill('E2E Guest');
-  await form.getByLabel('Phone', { exact: true }).fill('9811122233');
-  await form.getByLabel('Move-in date').fill('2026-12-20');
-  await form.getByRole('button', { name: /send verification code/i }).click();
-  await form.getByLabel(/verification code/i).fill(await demoCode(page));
-  await form.getByRole('button', { name: 'Verify', exact: true }).click();
-  await expect(form.getByText('· verified')).toBeVisible();
-  await form.getByRole('button', { name: 'Send request' }).click();
+  // Card -> details -> three steps: bed, details, verify.
+  await page.getByRole('button', { name: /Northstar Student Living/ }).click();
+  const sheet = page.getByRole('dialog');
+  await expect(sheet.getByText('Deposit', { exact: true })).toBeVisible();
+  await sheet.getByRole('button', { name: 'Request a bed' }).click();
+  await expect(sheet.getByText('Step 1 of 3 · Choose a bed')).toBeVisible();
+  await sheet.getByLabel('Available bed').selectOption({ index: 1 });
+  await sheet.getByLabel('Move-in date').fill('2026-12-20');
+  await sheet.getByRole('button', { name: 'Next' }).click();
+  await sheet.getByLabel('Full name').fill('E2E Guest');
+  await sheet.getByLabel('Phone', { exact: true }).fill('9811122233');
+  await sheet.getByRole('button', { name: 'Next' }).click();
+  await expect(sheet.getByText('Step 3 of 3 · Verify your phone')).toBeVisible();
+  await sheet.getByRole('button', { name: /send code/i }).click();
+  await sheet.getByLabel(/verification code/i).fill(await demoCode(page));
+  await sheet.getByRole('button', { name: 'Verify', exact: true }).click();
+  await expect(sheet.getByText(/is verified/)).toBeVisible();
+  await sheet.getByRole('button', { name: 'Send request' }).click();
 
   // Verifying in the form signed the guest in: My requests opens without a second code.
   await expect(page).toHaveURL(/\/requests$/);

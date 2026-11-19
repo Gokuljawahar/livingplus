@@ -84,7 +84,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFB] flex flex-col justify-start pt-6 sm:pt-0 sm:justify-center items-center p-4">
+    <div className="min-h-screen bg-surface flex flex-col justify-start pt-6 sm:pt-0 sm:justify-center items-center p-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <img src={logo} alt="Living Plus" className="h-36 sm:h-24 w-auto mx-auto mb-4 object-contain" />
@@ -95,21 +95,21 @@ export default function LoginPage() {
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8">
           <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-6">
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Mobile Number</label>
+              <label className="block text-xs font-bold text-slate-400 mb-2">Mobile Number</label>
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   type="text"
                   aria-label="Mobile number"
                   {...register('email', { onChange: () => clearErrors('root.server') })}
-                  className="w-full bg-slate-50 border-slate-100 rounded-xl py-3 pl-11 pr-4 text-sm focus:ring-2 focus:ring-[#02224B] focus:bg-white transition-all"
+                  className="w-full bg-slate-50 border-slate-100 rounded-xl py-3 pl-11 pr-4 text-sm focus:ring-2 focus:ring-navy-900 focus:bg-white transition-all"
                   placeholder="Enter mobile number"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Password</label>
+              <label className="block text-xs font-bold text-slate-400 mb-2">Password</label>
               <Controller
                 name="password"
                 control={control}
@@ -122,7 +122,7 @@ export default function LoginPage() {
                       field.onChange(value);
                       clearErrors('root.server');
                     }}
-                    inputClassName={error ? 'focus:ring-red-500 border-red-200' : 'focus:ring-[#02224B]'}
+                    inputClassName={error ? 'focus:ring-red-500 border-red-200' : 'focus:ring-navy-900'}
                   />
                 )}
               />
@@ -133,13 +133,13 @@ export default function LoginPage() {
 
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" className="rounded border-slate-300 text-[#02224B] focus:ring-[#02224B]" />
+                <input type="checkbox" className="rounded border-slate-300 text-navy-900 focus:ring-navy-900" />
                 <span className="text-xs text-slate-500 font-medium">Remember me</span>
               </label>
               <button
                 type="button"
                 onClick={() => setShowSupportModal(true)}
-                className="text-xs font-bold text-[#02224B] hover:underline"
+                className="text-xs font-bold text-navy-900 hover:underline"
               >
                 Forgot password?
               </button>
@@ -165,7 +165,7 @@ export default function LoginPage() {
             <>
               <div className="flex items-center gap-3 my-6" aria-hidden="true">
                 <div className="h-px flex-1 bg-slate-100" />
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">or</span>
+                <span className="text-xs font-bold text-slate-400 ">or</span>
                 <div className="h-px flex-1 bg-slate-100" />
               </div>
               <button
@@ -193,14 +193,14 @@ export default function LoginPage() {
 
           <div className="mt-8 pt-6 border-t border-slate-100 text-center">
               <p className="mb-3 text-sm text-slate-600">
-                New to LivingPlus? <Link to={ROUTES.ownerRegister} className="text-[#02224B] font-bold hover:underline">Register your PG</Link>
+                New to LivingPlus? <Link to={ROUTES.ownerRegister} className="text-navy-900 font-bold hover:underline">Register your PG</Link>
               </p>
             <p className="text-xs text-slate-500 font-medium">
-              Need help? <button onClick={() => setShowSupportModal(true)} className="text-[#02224B] font-bold hover:underline">Contact Support</button>
+              Need help? <button onClick={() => setShowSupportModal(true)} className="text-navy-900 font-bold hover:underline">Contact Support</button>
             </p>
             <p className="mt-3 text-xs text-slate-500">
-              Looking for a PG? <a href={ROUTES.guestHome} className="font-bold text-[#02224B] hover:underline">Browse PGs</a>
-              {' · '}Resident? <a href={ROUTES.residentFinder} className="font-bold text-[#02224B] hover:underline">Sign in on your PG's site</a>
+              Looking for a PG? <a href={ROUTES.guestHome} className="font-bold text-navy-900 hover:underline">Browse PGs</a>
+              {' · '}Resident? <a href={ROUTES.residentFinder} className="font-bold text-navy-900 hover:underline">Sign in on your PG's site</a>
             </p>
           </div>
         </div>
@@ -220,7 +220,7 @@ export default function LoginPage() {
 
               <div className="text-center mb-6">
                 <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                  <MessageCircle className="w-8 h-8 text-[#02224B]" />
+                  <MessageCircle className="w-8 h-8 text-navy-900" />
                 </div>
                 <h3 className="text-xl font-bold text-slate-900">Contact Support</h3>
                 <p className="text-sm text-slate-500 mt-2 leading-relaxed">
@@ -236,7 +236,7 @@ export default function LoginPage() {
 
               <button
                 onClick={() => setShowSupportModal(false)}
-                className="w-full mt-6 py-3 bg-[#02224B] text-white rounded-xl font-bold hover:bg-[#011630] transition-all"
+                className="w-full mt-6 py-3 bg-navy-900 text-white rounded-xl font-bold hover:bg-navy-900 transition-all"
               >
                 Close
               </button>

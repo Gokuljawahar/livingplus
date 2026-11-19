@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const OWNER = { phone: '9555500001', password: 'Owner@e2e-pass1' };
 const OWNER_VIEWS = [
-  'Overview', 'Properties & Beds', 'Bookings', 'Room changes', 'Tenants & KYC', 'Activity', 'Maintenance',
+  'Today', 'Properties & Beds', 'Bookings', 'Room changes', 'Tenants & KYC', 'Activity', 'Maintenance',
   'Rent Ledger', 'Payment claims', 'Expenses', 'Utilities', 'Reports', 'Staff'
 ];
 const shotDir = process.env.E2E_SCREENSHOT_DIR;
@@ -81,7 +81,7 @@ test('a resident opens the portal sections after signing in', async ({ page }) =
   await shot(page, 'resident-portal');
 
   const nav = page.locator('aside');
-  for (const section of ['Money', 'Food', 'Services', 'Maintenance', 'Room change', 'Notifications', 'Profile', 'My stays']) {
+  for (const section of ['Money', 'Food', 'Services', 'Maintenance', 'Room change', 'Notifications', 'Profile', 'Home']) {
     await nav.getByRole('button', { name: section, exact: true }).click();
     await page.waitForLoadState('networkidle');
     await shot(page, `resident-${section.toLowerCase().replace(/[^a-z]+/g, '-')}`);
@@ -89,9 +89,9 @@ test('a resident opens the portal sections after signing in', async ({ page }) =
 
   await nav.getByRole('button', { name: 'Maintenance', exact: true }).click();
   await page.getByRole('button', { name: 'Report an issue' }).first().click();
-  await page.getByPlaceholder('What needs attention?').fill('E2E window latch');
-  await page.getByPlaceholder('Describe the issue and where it is.').fill('Bedroom window latch is broken.');
-  await page.getByRole('button', { name: 'Send request' }).click();
+  await page.getByLabel('What needs fixing?').fill('E2E window latch');
+  await page.getByLabel("Where is it, and what's wrong?").fill('Bedroom window latch is broken.');
+  await page.getByRole('button', { name: 'Send report' }).click();
   await expect(page.getByText('E2E window latch').first()).toBeVisible();
   await shot(page, 'resident-ticket-filed');
   assertClean();

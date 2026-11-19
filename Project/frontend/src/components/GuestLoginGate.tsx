@@ -78,10 +78,10 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
       mobileSubtitle="Verify your phone number to see your requests."
     >
       <div className="hidden lg:block">
-        <p className="flex items-center gap-1.5 text-xs font-bold uppercase text-amber-700">
+        <p className="flex items-center gap-1.5 text-xs font-bold text-amber-700">
           <Building2 className="h-4 w-4" /> Guests
         </p>
-        <h1 className="mt-1 text-2xl font-bold text-[#02224B]">My booking requests</h1>
+        <h1 className="mt-1 text-2xl font-bold text-navy-900">My booking requests</h1>
         <p className="mt-2 text-sm text-slate-500">
           Verify the phone number you used when requesting a bed.
         </p>
@@ -105,7 +105,7 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
             </label>
             <button
               disabled={loading || cooldown > 0}
-              className="flex w-full items-center justify-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+              className="flex w-full items-center justify-center gap-2 bg-navy-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
             >
               {loading && <Loader2 className="h-4 w-4 animate-spin" />} {cooldown > 0 ? `Resend in ${cooldown}s` : 'Send code'}
             </button>
@@ -127,7 +127,7 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
             />
             <button
               disabled={loading}
-              className="flex w-full items-center justify-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+              className="flex w-full items-center justify-center gap-2 bg-navy-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
             >
               {loading && <Loader2 className="h-4 w-4 animate-spin" />} Verify & see requests
             </button>
@@ -137,9 +137,9 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
           </form>
         )}
         <p className="mt-5 border-t border-slate-100 pt-4 text-center text-sm text-slate-500">
-          <Link to={ROUTES.guestHome} className="font-bold text-[#02224B] hover:underline">Back to PGs</Link>
+          <Link to={ROUTES.guestHome} className="font-bold text-navy-900 hover:underline">Back to PGs</Link>
           {' · '}Already living in a PG?{' '}
-          <a href={ROUTES.residentFinder} className="font-bold text-[#02224B] hover:underline">Resident sign in</a>
+          <a href={ROUTES.residentFinder} className="font-bold text-navy-900 hover:underline">Resident sign in</a>
         </p>
     </SplitAuthLayout>
   );

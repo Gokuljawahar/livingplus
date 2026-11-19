@@ -1,4 +1,4 @@
-import { ReceiptIndianRupee, Wallet } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock, IndianRupee, ReceiptIndianRupee, ShieldCheck } from 'lucide-react';
 
 export type MoneyStay = {
   id: string; name: string; status: string;
@@ -27,36 +27,72 @@ export default function MoneyOverview({ stays, claims }: { stays: MoneyStay[]; c
   const today = new Date().toISOString().slice(0, 10);
   const overdueCount = unpaid.filter(({ entry }) => entry.status === 'OVERDUE' || entry.dueDate < today).length;
 
-  if (!stays.length) return <p className="border border-slate-200 bg-white py-10 text-center text-sm text-slate-500">No stays found for this number.</p>;
+  if (!stays.length) return (
+    <div className="rounded-2xl border border-slate-200 bg-white py-12 text-center text-sm text-slate-500 shadow-sm">
+      No stays found for this number.
+    </div>
+  );
 
   return (
-    <div className="space-y-4">
-      <section className="border border-slate-200 bg-white p-5">
-        <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-700">Total outstanding</p>
-            <p className="mt-1 text-2xl font-bold text-[#02224B]">₹{totalDue.toLocaleString('en-IN')}</p>
+    <div className="space-y-6">
+      {/* Bento KPI Summary */}
+      <section className="grid gap-4 sm:grid-cols-3">
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm transition-shadow">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+            <span>Total Outstanding</span>
+            <div className="h-8 w-8 rounded-lg bg-blue-50 text-navy-900 flex items-center justify-center">
+              <IndianRupee className="h-4 w-4" />
+            </div>
           </div>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Unpaid invoices</p>
-            <p className="mt-1 text-2xl font-bold text-slate-700">{unpaid.length}</p>
-          </div>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Overdue</p>
-            <p className={`mt-1 text-2xl font-bold ${overdueCount ? 'text-red-700' : 'text-slate-700'}`}>{overdueCount}</p>
-          </div>
+          <p className="mt-2 text-2xl font-bold text-navy-900">₹{totalDue.toLocaleString('en-IN')}</p>
+          <p className="mt-1 text-xs text-slate-400">Total open rent & utility dues</p>
         </div>
-        <p className="mt-3 text-sm text-slate-500">Pay from the My stays tab with UPI, then tap “I paid” so the PG can verify it.</p>
+
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm transition-shadow">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+            <span>Pending Invoices</span>
+            <div className="h-8 w-8 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center">
+              <Clock className="h-4 w-4" />
+            </div>
+          </div>
+          <p className="mt-2 text-2xl font-bold text-slate-800">{unpaid.length}</p>
+          <p className="mt-1 text-xs text-slate-400">Bills awaiting payment</p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm transition-shadow">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+            <span>Overdue Invoices</span>
+            <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${overdueCount ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
+              <AlertCircle className="h-4 w-4" />
+            </div>
+          </div>
+          <p className={`mt-2 text-2xl font-bold ${overdueCount ? 'text-red-700' : 'text-slate-800'}`}>{overdueCount}</p>
+          <p className="mt-1 text-xs text-slate-400">{overdueCount ? 'Requires immediate attention' : 'All bills on track ✓'}</p>
+        </div>
       </section>
 
       {unpaid.length > 0 && (
-        <section className="border border-slate-200 bg-white p-5">
-          <h2 className="flex items-center gap-2 font-semibold text-[#02224B]"><ReceiptIndianRupee className="h-4 w-4 text-[#FEB109]" />Unpaid invoices</h2>
-          <div className="mt-2 divide-y divide-slate-100">
+        <section className="rounded-2xl border border-slate-200/90 bg-white p-5 sm:p-6 shadow-sm">
+          <h2 className="flex items-center gap-2 font-bold text-slate-900 text-sm sm:text-base">
+            <ReceiptIndianRupee className="h-4 w-4 text-amber-500" />
+            Unpaid Invoices
+          </h2>
+          <div className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-150 overflow-hidden">
             {unpaid.map(({ stay, entry }) => (
-              <div key={entry.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-                <div><p className="font-medium text-slate-800">{stay.property.name} · {entry.period} · {entry.entryType}</p><p className="text-slate-600">₹{(entry.amount - entry.paidAmount).toLocaleString('en-IN')} left of ₹{entry.amount.toLocaleString('en-IN')} · due {new Date(entry.dueDate).toLocaleDateString()}</p></div>
-                <span className={`text-xs font-semibold uppercase ${entry.status === 'OVERDUE' ? 'text-red-700' : 'text-amber-700'}`}>{entry.status}</span>
+              <div key={entry.id} className="flex flex-wrap items-center justify-between gap-3 p-4 bg-white hover:bg-slate-50/50 transition-colors text-sm">
+                <div>
+                  <p className="font-bold text-slate-800">{stay.property.name} · {entry.period} · {entry.entryType}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    ₹{(entry.amount - entry.paidAmount).toLocaleString('en-IN')} remaining of ₹{entry.amount.toLocaleString('en-IN')} · due {new Date(entry.dueDate).toLocaleDateString()}
+                  </p>
+                </div>
+                <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                  entry.status === 'OVERDUE'
+                    ? 'border-red-200 bg-red-50 text-red-800'
+                    : 'border-amber-200 bg-amber-50 text-amber-800'
+                }`}>
+                  {entry.status}
+                </span>
               </div>
             ))}
           </div>
@@ -64,26 +100,57 @@ export default function MoneyOverview({ stays, claims }: { stays: MoneyStay[]; c
       )}
 
       {claims.length > 0 && (
-        <section className="border border-slate-200 bg-white p-5">
-          <h2 className="font-semibold text-[#02224B]">Payment verifications</h2>
-          <div className="mt-2 divide-y divide-slate-100">
+        <section className="rounded-2xl border border-slate-200/90 bg-white p-5 sm:p-6 shadow-sm">
+          <h2 className="flex items-center gap-2 font-bold text-slate-900 text-sm sm:text-base">
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            Payment Verifications
+          </h2>
+          <div className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-150 overflow-hidden">
             {claims.map((claim) => (
-              <div key={claim.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-                <div><p className="font-medium text-slate-800">₹{claim.amount.toLocaleString('en-IN')} · {claim.rentEntry.entryType} {claim.rentEntry.period}</p><p className="text-xs text-slate-500">Ref {claim.reference} · {new Date(claim.createdAt).toLocaleDateString()}</p></div>
-                <span className={`text-xs font-semibold uppercase ${claim.status === 'PENDING' ? 'text-amber-700' : claim.status === 'APPROVED' ? 'text-emerald-700' : 'text-red-700'}`}>{claim.status}</span>
+              <div key={claim.id} className="flex flex-wrap items-center justify-between gap-3 p-4 bg-white hover:bg-slate-50/50 transition-colors text-sm">
+                <div>
+                  <p className="font-bold text-slate-800">₹{claim.amount.toLocaleString('en-IN')} · {claim.rentEntry.entryType} {claim.rentEntry.period}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">UPI Ref: {claim.reference} · Submitted on {new Date(claim.createdAt).toLocaleDateString()}</p>
+                  {claim.responseNote && <p className="mt-1 text-xs text-red-600 font-semibold">{claim.responseNote}</p>}
+                </div>
+                <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                  claim.status === 'PENDING'
+                    ? 'border-amber-200 bg-amber-50 text-amber-800'
+                    : claim.status === 'APPROVED'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                    : 'border-red-200 bg-red-50 text-red-800'
+                }`}>
+                  {claim.status}
+                </span>
               </div>
             ))}
           </div>
         </section>
       )}
 
-      <section className="border border-slate-200 bg-white p-5">
-        <h2 className="flex items-center gap-2 font-semibold text-[#02224B]"><Wallet className="h-4 w-4 text-[#FEB109]" />Deposits</h2>
-        <div className="mt-2 divide-y divide-slate-100">
+      <section className="rounded-2xl border border-slate-200/90 bg-white p-5 sm:p-6 shadow-sm">
+        <h2 className="flex items-center gap-2 font-bold text-slate-900 text-sm sm:text-base">
+          <ShieldCheck className="h-4 w-4 text-navy-900" />
+          Security Deposits & Refund Protection
+        </h2>
+        <div className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-150 overflow-hidden">
           {stays.map((stay) => (
-            <div key={stay.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-              <div><p className="font-medium text-slate-800">{stay.property.name}</p><p className="text-slate-600">₹{(stay.depositReceived || 0).toLocaleString('en-IN')} paid of ₹{(stay.depositAmount || 0).toLocaleString('en-IN')}{stay.depositRefundStatus && stay.depositRefundStatus !== 'NOT_APPLICABLE' ? ` · Refund ${stay.depositRefundStatus.replace('_', ' ')}${stay.depositRefundAmount ? ` ₹${stay.depositRefundAmount.toLocaleString('en-IN')}` : ''}` : ''}</p></div>
-              <span className="text-xs font-semibold uppercase text-slate-500">{stay.status.replace('_', ' ')}</span>
+            <div key={stay.id} className="flex flex-wrap items-center justify-between gap-3 p-4 bg-white hover:bg-slate-50/50 transition-colors text-sm">
+              <div>
+                <p className="font-bold text-slate-800">{stay.property.name}</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  ₹{(stay.depositReceived || 0).toLocaleString('en-IN')} recorded of ₹{(stay.depositAmount || 0).toLocaleString('en-IN')} agreed deposit
+                  {stay.depositRefundStatus && stay.depositRefundStatus !== 'NOT_APPLICABLE' ? (
+                    <span className="font-semibold text-navy-900">
+                      {' '}· Refund {stay.depositRefundStatus.replace('_', ' ')}
+                      {stay.depositRefundAmount ? ` ₹${stay.depositRefundAmount.toLocaleString('en-IN')}` : ''}
+                    </span>
+                  ) : ''}
+                </p>
+              </div>
+              <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
+                {stay.status.replace('_', ' ')}
+              </span>
             </div>
           ))}
         </div>
