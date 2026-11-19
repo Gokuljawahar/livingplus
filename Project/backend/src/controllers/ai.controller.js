@@ -1,25 +1,12 @@
 import { createChatModel, modelStatus, parseImageDataUrl } from '../services/ai-provider.js';
 import { runChat } from '../services/ai-orchestrator.js';
 import { transcribeAudio } from '../services/ai-voice.js';
-const RATE_WINDOW_MS = 60 * 1000;
-const RATE_MAX = 20;
-const hits = new Map();
-function rateLimited(key) {
-    const now = Date.now();
-    const recent = (hits.get(key) || []).filter((t) => now - t < RATE_WINDOW_MS);
-    recent.push(now);
-    hits.set(key, recent);
-    return recent.length > RATE_MAX;
-}
+import { logger } from '../utils/logger.js';
 export const getAiStatus = async (_req, res) => {
     const status = await modelStatus();
     res.json({ enabled: status.enabled, configured: status.configured, provider: status.provider, model: status.model });
 };
 export const postChat = async (req, res) => {
-    const user = req.user || {};
-    const key = user.userId ? String(user.userId) : `ip:${req.ip}`;
-    if (rateLimited(key))
-        return res.status(429).json({ message: 'Too many AI requests. Slow down and retry.' });
     const message = String(req.body.message || '').trim().slice(0, 2000);
     if (!message && !req.body.confirmationId && !req.body.cancelConfirmationId)
         return res.status(400).json({ message: 'A message is required' });
@@ -38,7 +25,7 @@ export const postChat = async (req, res) => {
     }
     catch (error) {
         if (String(error?.message || '').startsWith('AI_MODEL_INIT_FAILED'))
-            console.error('PG AI model init failed:', String(error?.message || error));
+            logger.error({ err: error }, 'PG AI model init failed');
         return res.status(503).json({
             message: 'The AI assistant is not connected. Set ENABLE_AI_ORCHESTRATOR=true and AI_MODEL (for example google:gemini-3.8-flash) with that provider\'s credentials to enable it.'
         });
@@ -55,18 +42,14 @@ export const postChat = async (req, res) => {
     }
     catch (error) {
         if (String(error?.message || '').startsWith('MODEL_API_FAILED')) {
-            console.error('PG AI model call failed:', String(error?.message || error));
+            logger.error({ err: error }, 'PG AI model call failed');
             return res.status(502).json({ message: 'The AI service failed. Your data was not changed. Please retry.' });
         }
-        console.error('PG AI chat error:', error);
+        logger.error({ err: error }, 'PG AI chat error');
         res.status(500).json({ message: 'The assistant could not answer right now' });
     }
 };
 export const postTranscribe = async (req, res) => {
-    const user = req.user || {};
-    const key = user.userId ? String(user.userId) : `ip:${req.ip}`;
-    if (rateLimited(`voice:${key}`))
-        return res.status(429).json({ message: 'Too many voice requests. Slow down and retry.' });
     const file = req.file;
     if (!file?.buffer?.length)
         return res.status(400).json({ message: 'An audio recording is required' });
@@ -85,7 +68,7 @@ export const postTranscribe = async (req, res) => {
         if (code.startsWith('MODEL_API_FAILED')) {
             return res.status(502).json({ message: 'The transcription service failed. Nothing was changed. Please retry.' });
         }
-        console.error('PG AI transcribe error:', error);
+        logger.error({ err: error }, 'PG AI transcribe error');
         res.status(500).json({ message: 'The recording could not be transcribed right now' });
     }
 };

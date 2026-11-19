@@ -14,6 +14,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { generateMonthlyRentEntries } from '../services/pg-rent-scheduler.js';
 import { sendDueRentReminders } from '../services/pg-rent-reminders.js';
 import { periodOf } from '../utils/app-time.js';
+import { logger } from '../utils/logger.js';
 const oidcClient = new OAuth2Client();
 function bearer(req) {
     const header = String(req.headers.authorization || '');
@@ -62,7 +63,7 @@ export function cronRoutes(prisma) {
             res.json({ job: 'monthly-rent', period: periodOf(now), tenants });
         }
         catch (error) {
-            console.error('[cron] monthly-rent failed:', error);
+            logger.error({ err: error }, '[cron] monthly-rent failed');
             res.status(500).json({ job: 'monthly-rent', message: 'failed' });
         }
     });
@@ -72,7 +73,7 @@ export function cronRoutes(prisma) {
             res.json({ job: 'rent-reminders', sent: summary.sent, skipped: summary.skipped });
         }
         catch (error) {
-            console.error('[cron] rent-reminders failed:', error);
+            logger.error({ err: error }, '[cron] rent-reminders failed');
             res.status(500).json({ job: 'rent-reminders', message: 'failed' });
         }
     });

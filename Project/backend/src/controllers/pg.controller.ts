@@ -12,6 +12,7 @@ import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { buildGuestBookingWhere, isPlaceholderResidentName } from '../utils/guest-bookings.js';
 import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
 import { periodOf, periodRange } from '../utils/app-time.js';
+import { logger } from '../utils/logger.js';
 
 function phoneVariants(phone: string): string[] {
   const digits = String(phone || '').replace(/\D/g, '');
@@ -185,7 +186,7 @@ export const listProperties = async (req: Request, res: Response): Promise<any> 
       };
     }));
   } catch (error) {
-    console.error('PG property search error:', error);
+    logger.error({ err: error }, 'PG property search error');
     res.status(500).json({ message: 'Failed to search properties' });
   }
 };
@@ -200,7 +201,7 @@ export const listOwnerProperties = async (req: Request, res: Response): Promise<
     });
     res.json(properties);
   } catch (error) {
-    console.error('PG owner property list error:', error);
+    logger.error({ err: error }, 'PG owner property list error');
     res.status(500).json({ message: 'Failed to fetch properties' });
   }
 };
@@ -244,7 +245,7 @@ export const createProperty = async (req: Request, res: Response): Promise<any> 
     logAudit(property.id, user.id, 'PROPERTY_CREATED', 'PGProperty', property.id, property.name);
     res.status(201).json(property);
   } catch (error) {
-    console.error('PG property creation error:', error);
+    logger.error({ err: error }, 'PG property creation error');
     res.status(500).json({ message: 'Failed to create property' });
   }
 };
@@ -297,7 +298,7 @@ export const updateProperty = async (req: Request, res: Response): Promise<any> 
     const updated = await db.pGProperty.update({ where: { id: propertyId }, data });
     res.json(updated);
   } catch (error) {
-    console.error('PG property update error:', error);
+    logger.error({ err: error }, 'PG property update error');
     res.status(500).json({ message: 'Failed to update property' });
   }
 };
@@ -319,7 +320,7 @@ export const deleteProperty = async (req: Request, res: Response): Promise<any> 
     await db.pGProperty.delete({ where: { id: propertyId } });
     res.json({ message: 'Property and archived records deleted' });
   } catch (error) {
-    console.error('PG property delete error:', error);
+    logger.error({ err: error }, 'PG property delete error');
     res.status(500).json({ message: 'Failed to delete property' });
   }
 };
@@ -358,7 +359,7 @@ export const createRoom = async (req: Request, res: Response): Promise<any> => {
     logAudit(String(propertyId), currentUser(req)?.id, 'ROOM_CREATED', 'PGRoom', room.id, `${room.roomNumber} · ${bedCount} beds`);
     res.status(201).json(room);
   } catch (error) {
-    console.error('PG room creation error:', error);
+    logger.error({ err: error }, 'PG room creation error');
     res.status(500).json({ message: 'Failed to create room' });
   }
 };
@@ -381,7 +382,7 @@ export const updateBedStatus = async (req: Request, res: Response): Promise<any>
     const updated = await db.pGBed.update({ where: { id: bed.id }, data: { status, maintenanceNote: status === 'MAINTENANCE' ? req.body.note?.trim() || null : null } });
     res.json(updated);
   } catch (error) {
-    console.error('PG bed status update error:', error);
+    logger.error({ err: error }, 'PG bed status update error');
     res.status(500).json({ message: 'Failed to update bed status' });
   }
 };
@@ -476,7 +477,7 @@ export const createBookingRequest = async (req: Request, res: Response): Promise
       const existing = await db.pGBooking.findUnique({ where: { idempotencyKey: idemKey } });
       if (existing) return res.status(200).json({ id: existing.id, bookingRef: existing.bookingRef, status: existing.status, deduped: true, message: 'Booking request already submitted' });
     }
-    console.error('PG booking request error:', error);
+    logger.error({ err: error }, 'PG booking request error');
     res.status(500).json({ message: 'Failed to submit booking request' });
   }
 };
@@ -500,7 +501,7 @@ export const cancelBookingRequest = async (req: Request, res: Response): Promise
     });
     res.json({ message: 'Booking request cancelled' });
   } catch (error) {
-    console.error('PG booking cancellation error:', error);
+    logger.error({ err: error }, 'PG booking cancellation error');
     res.status(500).json({ message: 'Failed to cancel booking request' });
   }
 };
@@ -532,7 +533,7 @@ export const getPublicBookingStatus = async (req: Request, res: Response): Promi
       bedLabel: booking.bed?.label || null
     });
   } catch (error) {
-    console.error('PG public booking status error:', error);
+    logger.error({ err: error }, 'PG public booking status error');
     res.status(500).json({ message: 'Failed to fetch booking status' });
   }
 };
@@ -563,7 +564,7 @@ export const listGuestBookings = async (req: Request, res: Response): Promise<an
       bedLabel: booking.bed?.label || null
     })));
   } catch (error) {
-    console.error('PG guest booking list error:', error);
+    logger.error({ err: error }, 'PG guest booking list error');
     res.status(500).json({ message: 'Failed to fetch your booking requests' });
   }
 };
@@ -579,7 +580,7 @@ export const listOwnerBookings = async (req: Request, res: Response): Promise<an
     });
     res.json(bookings);
   } catch (error) {
-    console.error('PG booking list error:', error);
+    logger.error({ err: error }, 'PG booking list error');
     res.status(500).json({ message: 'Failed to fetch booking requests' });
   }
 };
@@ -665,7 +666,7 @@ export const updateBookingStatus = async (req: Request, res: Response): Promise<
     if (error?.message === 'BED_UNAVAILABLE') {
       return res.status(409).json({ message: 'This bed is no longer available' });
     }
-    console.error('PG booking status update error:', error);
+    logger.error({ err: error }, 'PG booking status update error');
     res.status(500).json({ message: 'Failed to update booking request' });
   }
 };
@@ -744,7 +745,7 @@ export const checkInTenant = async (req: Request, res: Response): Promise<any> =
   } catch (error: any) {
     if (error?.message === 'BED_UNAVAILABLE') return res.status(409).json({ message: 'This bed is no longer reserved for the tenant' });
     if (error?.message === 'TENANT_STATE_CHANGED') return res.status(409).json({ message: 'Tenant status changed; refresh and try again' });
-    console.error('PG tenant check-in error:', error);
+    logger.error({ err: error }, 'PG tenant check-in error');
     res.status(500).json({ message: 'Failed to check in tenant' });
   }
 };
@@ -789,7 +790,7 @@ export const checkOutTenant = async (req: Request, res: Response): Promise<any> 
     res.json(checkedOut);
   } catch (error: any) {
     if (error?.message === 'BED_STATE_INVALID') return res.status(409).json({ message: 'Bed status changed; refresh and try again' });
-    console.error('PG tenant check-out error:', error);
+    logger.error({ err: error }, 'PG tenant check-out error');
     res.status(500).json({ message: 'Failed to check out tenant' });
   }
 };
@@ -818,7 +819,7 @@ export const listTenantStays = async (req: Request, res: Response): Promise<any>
     });
     res.json(tenants);
   } catch (error) {
-    console.error('PG tenant stay list error:', error);
+    logger.error({ err: error }, 'PG tenant stay list error');
     res.status(500).json({ message: 'Failed to fetch your stays' });
   }
 };
@@ -838,7 +839,7 @@ export const submitTenantNotice = async (req: Request, res: Response): Promise<a
     logAudit(tenant.propertyId, user.id, 'NOTICE_SUBMITTED', 'PGTenant', tenant.id, tenant.name);
     res.json(updated);
   } catch (error) {
-    console.error('PG tenant notice error:', error);
+    logger.error({ err: error }, 'PG tenant notice error');
     res.status(500).json({ message: 'Failed to submit notice' });
   }
 };
@@ -858,7 +859,7 @@ export const cancelTenantNotice = async (req: Request, res: Response): Promise<a
     logAudit(tenant.propertyId, user.id, 'NOTICE_CANCELLED', 'PGTenant', tenant.id, tenant.name);
     res.json(updated);
   } catch (error) {
-    console.error('PG tenant notice cancel error:', error);
+    logger.error({ err: error }, 'PG tenant notice cancel error');
     res.status(500).json({ message: 'Failed to cancel notice' });
   }
 };
@@ -876,7 +877,7 @@ export const listAuditLogs = async (req: Request, res: Response): Promise<any> =
     const names = new Map(actors.map((actor: { id: string; name: string }) => [actor.id, actor.name]));
     res.json(logs.map((log: any) => ({ ...log, actorName: log.actorId ? names.get(log.actorId) || 'Guest' : 'System' })));
   } catch (error) {
-    console.error('PG audit list error:', error);
+    logger.error({ err: error }, 'PG audit list error');
     res.status(500).json({ message: 'Failed to fetch activity' });
   }
 };
@@ -902,7 +903,7 @@ export const markDepositRefunded = async (req: Request, res: Response): Promise<
     logAudit(tenant.propertyId, currentUser(req)?.id, 'DEPOSIT_REFUNDED', 'PGTenant', tenant.id, String(req.body?.reference || '').trim() || null);
     res.json(updated);
   } catch (error) {
-    console.error('PG deposit refund error:', error);
+    logger.error({ err: error }, 'PG deposit refund error');
     res.status(500).json({ message: 'Failed to record deposit refund' });
   }
 };
@@ -924,7 +925,7 @@ export const listOwnerTenants = async (req: Request, res: Response): Promise<any
     });
     res.json(tenants);
   } catch (error) {
-    console.error('PG tenant list error:', error);
+    logger.error({ err: error }, 'PG tenant list error');
     res.status(500).json({ message: 'Failed to fetch tenants' });
   }
 };
@@ -961,7 +962,7 @@ export const updateTenantProfile = async (req: Request, res: Response): Promise<
     const updated = await db.pGTenant.update({ where: { id: tenant.id }, data });
     res.json(updated);
   } catch (error) {
-    console.error('PG tenant profile update error:', error);
+    logger.error({ err: error }, 'PG tenant profile update error');
     res.status(500).json({ message: 'Failed to update tenant profile' });
   }
 };
@@ -990,7 +991,7 @@ export const listPropertyStaff = async (req: Request, res: Response): Promise<an
       property: access.property
     })));
   } catch (error) {
-    console.error('PG staff list error:', error);
+    logger.error({ err: error }, 'PG staff list error');
     res.status(500).json({ message: 'Failed to fetch property staff' });
   }
 };
@@ -1025,7 +1026,7 @@ export const createPropertyStaff = async (req: Request, res: Response): Promise<
     res.status(201).json({ ...staff, propertyId: String(propertyId), role: 'WARDEN' });
   } catch (error: any) {
     if (error?.code === 'P2002') return res.status(409).json({ message: 'A user with this phone or email already exists' });
-    console.error('PG staff creation error:', error);
+    logger.error({ err: error }, 'PG staff creation error');
     res.status(500).json({ message: 'Failed to create property staff account' });
   }
 };
@@ -1047,7 +1048,7 @@ export const removePropertyStaff = async (req: Request, res: Response): Promise<
     if (!otherAccess) await db.user.delete({ where: { id: String(userId) } });
     res.json({ message: 'Staff access removed' });
   } catch (error) {
-    console.error('PG staff removal error:', error);
+    logger.error({ err: error }, 'PG staff removal error');
     res.status(500).json({ message: 'Failed to remove staff access' });
   }
 };
@@ -1076,7 +1077,7 @@ export const listOwnerRentEntries = async (req: Request, res: Response): Promise
     });
     res.json(entries);
   } catch (error) {
-    console.error('PG rent ledger list error:', error);
+    logger.error({ err: error }, 'PG rent ledger list error');
     res.status(500).json({ message: 'Failed to fetch rent ledger' });
   }
 };
@@ -1112,7 +1113,7 @@ export const createRentEntry = async (req: Request, res: Response): Promise<any>
     res.status(201).json(entry);
   } catch (error: any) {
     if (error?.code === 'P2002') return res.status(409).json({ message: 'A ledger entry already exists for this tenant and period' });
-    console.error('PG rent ledger create error:', error);
+    logger.error({ err: error }, 'PG rent ledger create error');
     res.status(500).json({ message: 'Failed to create ledger entry' });
   }
 };
@@ -1128,7 +1129,7 @@ export const sendRentReminders = async (req: Request, res: Response): Promise<an
     });
     res.json(summary);
   } catch (error) {
-    console.error('PG rent reminders error:', error);
+    logger.error({ err: error }, 'PG rent reminders error');
     res.status(500).json({ message: 'Failed to send rent reminders' });
   }
 };
@@ -1139,7 +1140,7 @@ export const listOwnerExpenses = async (req: Request, res: Response): Promise<an
     const period = req.query.period ? String(req.query.period) : undefined;
     res.json(await listExpenses(db, propertyIds, period));
   } catch (error) {
-    console.error('PG expense list error:', error);
+    logger.error({ err: error }, 'PG expense list error');
     res.status(500).json({ message: 'Failed to load expenses' });
   }
 };
@@ -1164,7 +1165,7 @@ export const createOwnerExpense = async (req: Request, res: Response): Promise<a
       return res.status(400).json({ message: 'Expense needs a valid amount, category and date' });
     }
     if (code === 'PROPERTY_NOT_FOUND') return res.status(404).json({ message: 'Property is not available' });
-    console.error('PG expense create error:', error);
+    logger.error({ err: error }, 'PG expense create error');
     res.status(500).json({ message: 'Failed to record expense' });
   }
 };
@@ -1178,7 +1179,7 @@ export const deleteOwnerExpense = async (req: Request, res: Response): Promise<a
     const code = String(error?.message || '');
     if (code === 'EXPENSE_NOT_FOUND') return res.status(404).json({ message: 'Expense not found' });
     if (code === 'FORBIDDEN') return res.status(403).json({ message: 'You do not have access to this expense' });
-    console.error('PG expense delete error:', error);
+    logger.error({ err: error }, 'PG expense delete error');
     res.status(500).json({ message: 'Failed to remove expense' });
   }
 };
@@ -1190,7 +1191,7 @@ export const listElectricityBills = async (req: Request, res: Response): Promise
     const { listElectricityBills: listBills } = await import('../services/pg-billing.js');
     res.json(await listBills(db, propertyIds, period));
   } catch (error) {
-    console.error('PG electricity bill list error:', error);
+    logger.error({ err: error }, 'PG electricity bill list error');
     res.status(500).json({ message: 'Failed to load electricity bills' });
   }
 };
@@ -1214,7 +1215,7 @@ export const proposeElectricityBill = async (req: Request, res: Response): Promi
     if (code === 'PROPERTY_NOT_FOUND') return res.status(404).json({ message: 'Property is not available' });
     if (code === 'ALREADY_BILLED') return res.status(409).json({ message: 'This period is already billed' });
     if (code === 'NO_OCCUPANTS') return res.status(409).json({ message: 'No active tenants to split across' });
-    console.error('PG electricity bill propose error:', error);
+    logger.error({ err: error }, 'PG electricity bill propose error');
     res.status(500).json({ message: 'Failed to propose electricity bill' });
   }
 };
@@ -1229,7 +1230,7 @@ export const approveElectricityBill = async (req: Request, res: Response): Promi
     const code = String(error?.message || '');
     if (code === 'BILL_NOT_FOUND') return res.status(404).json({ message: 'Bill not found' });
     if (code === 'FORBIDDEN') return res.status(403).json({ message: 'You do not have access to this bill' });
-    console.error('PG electricity bill approve error:', error);
+    logger.error({ err: error }, 'PG electricity bill approve error');
     res.status(500).json({ message: 'Failed to approve electricity bill' });
   }
 };
@@ -1284,7 +1285,7 @@ export const recordRentPayment = async (req: Request, res: Response): Promise<an
     if ((error as Error)?.message === 'PAYMENT_CONFLICT') {
       return res.status(409).json({ message: 'Payment changed concurrently; refresh the ledger and retry' });
     }
-    console.error('PG rent payment record error:', error);
+    logger.error({ err: error }, 'PG rent payment record error');
     res.status(500).json({ message: 'Failed to record payment' });
   }
 };
@@ -1339,7 +1340,7 @@ export const getOwnerReport = async (req: Request, res: Response): Promise<any> 
       entries
     });
   } catch (error) {
-    console.error('PG owner report error:', error);
+    logger.error({ err: error }, 'PG owner report error');
     res.status(500).json({ message: 'Failed to generate report' });
   }
 };
@@ -1379,7 +1380,7 @@ export const getOwnerSummary = async (req: Request, res: Response): Promise<any>
       canManageStaff
     });
   } catch (error) {
-    console.error('PG owner summary error:', error);
+    logger.error({ err: error }, 'PG owner summary error');
     res.status(500).json({ message: 'Failed to fetch owner summary' });
   }
 };
@@ -1397,7 +1398,7 @@ export const listOwnerTickets = async (req: Request, res: Response): Promise<any
     const assignedNames = new Map(assignedUsers.map((assigned: { id: string; name: string }) => [assigned.id, assigned.name]));
     res.json(tickets.map((ticket: any) => ({ ...ticket, assignedName: ticket.assignedTo ? assignedNames.get(ticket.assignedTo) || null : null })));
   } catch (error) {
-    console.error('PG maintenance list error:', error);
+    logger.error({ err: error }, 'PG maintenance list error');
     res.status(500).json({ message: 'Failed to fetch maintenance tickets' });
   }
 };
@@ -1423,7 +1424,7 @@ export const listTenantTickets = async (req: Request, res: Response): Promise<an
     });
     res.json(tickets);
   } catch (error) {
-    console.error('PG resident maintenance list error:', error);
+    logger.error({ err: error }, 'PG resident maintenance list error');
     res.status(500).json({ message: 'Failed to fetch maintenance requests' });
   }
 };
@@ -1473,7 +1474,7 @@ export const createTenantTicket = async (req: Request, res: Response): Promise<a
     });
     res.status(201).json(ticket);
   } catch (error) {
-    console.error('PG resident maintenance creation error:', error);
+    logger.error({ err: error }, 'PG resident maintenance creation error');
     res.status(500).json({ message: 'Failed to create maintenance request' });
   }
 };
@@ -1527,7 +1528,7 @@ export const updateResidentProfile = async (req: Request, res: Response): Promis
     const updated = await db.pGTenant.update({ where: { id: tenant.id }, data });
     res.json(updated);
   } catch (error) {
-    console.error('PG resident profile update error:', error);
+    logger.error({ err: error }, 'PG resident profile update error');
     res.status(500).json({ message: 'Failed to update resident profile' });
   }
 };
@@ -1543,7 +1544,7 @@ export const listResidentNotifications = async (req: Request, res: Response): Pr
     });
     res.json({ notifications, unreadCount: notifications.filter((notification: any) => !notification.readAt).length });
   } catch (error) {
-    console.error('PG resident notification list error:', error);
+    logger.error({ err: error }, 'PG resident notification list error');
     res.status(500).json({ message: 'Failed to fetch notifications' });
   }
 };
@@ -1583,7 +1584,7 @@ export const createResidentPaymentClaim = async (req: Request, res: Response): P
     res.status(201).json({ ...claim, upiId: property.upiId });
   } catch (error: any) {
     if (error?.code === 'P2002') return res.status(409).json({ message: 'This transaction reference has already been submitted' });
-    console.error('PG resident payment claim error:', error);
+    logger.error({ err: error }, 'PG resident payment claim error');
     res.status(500).json({ message: 'Failed to submit payment claim' });
   }
 };
@@ -1600,7 +1601,7 @@ export const listResidentPaymentClaims = async (req: Request, res: Response): Pr
     });
     res.json(claims);
   } catch (error) {
-    console.error('PG resident payment claim list error:', error);
+    logger.error({ err: error }, 'PG resident payment claim list error');
     res.status(500).json({ message: 'Failed to fetch payment claims' });
   }
 };
@@ -1621,7 +1622,7 @@ export const markResidentNotificationRead = async (req: Request, res: Response):
     if (!updated.count) return res.status(404).json({ message: 'Notification not found' });
     res.json({ message: 'Notification marked as read' });
   } catch (error) {
-    console.error('PG resident notification update error:', error);
+    logger.error({ err: error }, 'PG resident notification update error');
     res.status(500).json({ message: 'Failed to update notification' });
   }
 };
@@ -1657,7 +1658,7 @@ export const createMaintenanceTicket = async (req: Request, res: Response): Prom
     });
     res.status(201).json(ticket);
   } catch (error) {
-    console.error('PG maintenance creation error:', error);
+    logger.error({ err: error }, 'PG maintenance creation error');
     res.status(500).json({ message: 'Failed to create maintenance ticket' });
   }
 };
@@ -1695,7 +1696,7 @@ export const updateMaintenanceStatus = async (req: Request, res: Response): Prom
     res.json(updated);
   } catch (error) {
     if ((error as Error)?.message === 'TICKET_STATUS_CHANGED') return res.status(409).json({ message: 'Ticket status changed; refresh and try again' });
-    console.error('PG maintenance status update error:', error);
+    logger.error({ err: error }, 'PG maintenance status update error');
     res.status(500).json({ message: 'Failed to update maintenance ticket' });
   }
 };
@@ -1715,7 +1716,7 @@ export const listOwnerPaymentClaims = async (req: Request, res: Response): Promi
     });
     res.json(claims);
   } catch (error) {
-    console.error('PG payment claim list error:', error);
+    logger.error({ err: error }, 'PG payment claim list error');
     res.status(500).json({ message: 'Failed to fetch payment claims' });
   }
 };
@@ -1777,7 +1778,7 @@ export const reviewPaymentClaim = async (req: Request, res: Response): Promise<a
     const code = String((error as Error)?.message || '');
     if (code === 'PAYMENT_EXCEEDS_BALANCE') return res.status(409).json({ message: 'The outstanding balance changed; refresh the ledger before reviewing this claim' });
     if (code === 'PAYMENT_CONFLICT' || code === 'CLAIM_ALREADY_REVIEWED') return res.status(409).json({ message: 'Payment data changed; refresh and try again' });
-    console.error('PG payment claim review error:', error);
+    logger.error({ err: error }, 'PG payment claim review error');
     res.status(500).json({ message: 'Failed to review payment claim' });
   }
 };

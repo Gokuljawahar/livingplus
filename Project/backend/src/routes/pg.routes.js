@@ -3,6 +3,7 @@ import { createPgOperator, deletePgOperatorProperty, listPgOperators } from '../
 import { cancelBookingRequest, checkInTenant, checkOutTenant, createBookingRequest, createMaintenanceTicket, createProperty, createPropertyStaff, createRentEntry, createRoom, deleteProperty, getPublicConfig, listTenantStays, submitTenantNotice, cancelTenantNotice, listAuditLogs, getOwnerReport, getOwnerSummary, getPublicBookingStatus, listGuestBookings, listOwnerBookings, listOwnerProperties, listOwnerRentEntries, sendRentReminders, listOwnerExpenses, createOwnerExpense, deleteOwnerExpense, listElectricityBills, proposeElectricityBill, approveElectricityBill, listOwnerTenants, listOwnerTickets, listTenantTickets, createTenantTicket, updateResidentProfile, listResidentNotifications, markResidentNotificationRead, createResidentPaymentClaim, listResidentPaymentClaims, listOwnerPaymentClaims, reviewPaymentClaim, markDepositRefunded, listProperties, listPropertyStaff, recordRentPayment, removePropertyStaff, updateBedStatus, updateBookingStatus, updateMaintenanceStatus, updateProperty, updateTenantProfile } from '../controllers/pg.controller.js';
 import multer from 'multer';
 import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware.js';
+import { aiChatLimiter, aiVoiceLimiter } from '../middleware/ai-rate-limit.js';
 import { getAiStatus, postChat, postTranscribe } from '../controllers/ai.controller.js';
 import { createRoomChange, decideRoomChange, listMyRoomChanges, listRoomChangeMatches, listStaffRoomChanges, listVacantBeds, proposeRoomSwap, respondRoomSwap } from '../controllers/room-change.controller.js';
 const voiceUpload = multer({
@@ -18,8 +19,8 @@ router.post('/admin/operators', authenticate, createPgOperator);
 router.delete('/admin/operators/:propertyId', authenticate, deletePgOperatorProperty);
 router.get('/config', getPublicConfig);
 router.get('/ai/status', getAiStatus);
-router.post('/ai/chat', optionalAuthenticate, postChat);
-router.post('/ai/transcribe', voiceUpload.single('audio'), postTranscribe);
+router.post('/ai/chat', optionalAuthenticate, aiChatLimiter, postChat);
+router.post('/ai/transcribe', optionalAuthenticate, aiVoiceLimiter, voiceUpload.single('audio'), postTranscribe);
 router.get('/tenant/stays', authenticate, listTenantStays);
 router.get('/tenant/maintenance', authenticate, listTenantTickets);
 router.post('/tenant/maintenance', authenticate, createTenantTicket);

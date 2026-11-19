@@ -4,6 +4,7 @@ import { createHash, randomInt, randomUUID, timingSafeEqual } from 'crypto';
 import { prisma } from '../app.js';
 import { getJwtSecret } from '../utils/auth-config.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
+import { logger } from '../utils/logger.js';
 function normalizePhone(phone) {
     const digits = phone.replace(/\D/g, '');
     return digits.length === 10 ? `91${digits}` : digits;
@@ -90,7 +91,7 @@ export const login = async (req, res) => {
         res.json({ token: createToken(user, propertyId), user: toUserResponse(user) });
     }
     catch (error) {
-        console.error('PG login error:', error);
+        logger.error({ err: error }, 'PG login error');
         res.status(500).json({ message: 'Internal server error' });
     }
 };
@@ -150,7 +151,7 @@ export const register = async (req, res) => {
     catch (error) {
         if (error?.code === 'P2002')
             return res.status(400).json({ message: 'An account with this phone or email already exists' });
-        console.error('PG registration error:', error);
+        logger.error({ err: error }, 'PG registration error');
         res.status(500).json({ message: 'Failed to create PG account' });
     }
 };
@@ -201,7 +202,7 @@ export const requestOtp = async (req, res) => {
         res.json({ message: 'Verification code sent', ...(process.env.SMS_API_URL || process.env.NODE_ENV === 'production' ? {} : { devCode: code }) });
     }
     catch (error) {
-        console.error('PG OTP request error:', error);
+        logger.error({ err: error }, 'PG OTP request error');
         res.status(500).json({ message: 'Failed to send verification code' });
     }
 };
@@ -250,7 +251,7 @@ export const verifyOtp = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('PG OTP verify error:', error);
+        logger.error({ err: error }, 'PG OTP verify error');
         res.status(500).json({ message: 'Failed to verify code' });
     }
 };
@@ -291,7 +292,7 @@ export const changePassword = async (req, res) => {
         res.json({ message: 'Password updated successfully' });
     }
     catch (error) {
-        console.error('PG password change error:', error);
+        logger.error({ err: error }, 'PG password change error');
         res.status(500).json({ message: 'Failed to change password' });
     }
 };
@@ -308,7 +309,7 @@ export const adminResetPassword = async (req, res) => {
         res.json({ message: 'Password reset successfully' });
     }
     catch (error) {
-        console.error('PG admin password reset error:', error);
+        logger.error({ err: error }, 'PG admin password reset error');
         res.status(500).json({ message: 'Failed to reset password' });
     }
 };
@@ -327,7 +328,7 @@ export const updateProfile = async (req, res) => {
         res.json(toUserResponse(user));
     }
     catch (error) {
-        console.error('PG profile update error:', error);
+        logger.error({ err: error }, 'PG profile update error');
         res.status(500).json({ message: 'Failed to update profile' });
     }
 };

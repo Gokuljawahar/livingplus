@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import type { Request, Response, NextFunction } from 'express';
+import { logger } from '../utils/logger.js';
 
 function getEncryptionKey(): Buffer {
   const keyHex = process.env.ENCRYPTION_KEY;
@@ -48,7 +49,7 @@ export function decryptRequest(req: Request, res: Response, next: NextFunction):
         configurable: true
       });
     } catch (err: any) {
-      console.error('Failed to decrypt query:', err?.message, 'Raw query.data:', req.query.data);
+      logger.warn({ reason: err?.message, length: req.query.data.length }, 'Failed to decrypt query');
       res.status(400).json({ error: 'Invalid encrypted query', message: err?.message });
       return;
     }

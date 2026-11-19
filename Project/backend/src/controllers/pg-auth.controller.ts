@@ -5,6 +5,7 @@ import { createHash, randomInt, randomUUID, timingSafeEqual } from 'crypto';
 import { prisma } from '../app.js';
 import { getJwtSecret } from '../utils/auth-config.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
+import { logger } from '../utils/logger.js';
 
 function normalizePhone(phone: string): string {
   const digits = phone.replace(/\D/g, '');
@@ -94,7 +95,7 @@ export const login = async (req: Request, res: Response): Promise<any> => {
 
     res.json({ token: createToken(user, propertyId), user: toUserResponse(user) });
   } catch (error) {
-    console.error('PG login error:', error);
+    logger.error({ err: error }, 'PG login error');
     res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -155,7 +156,7 @@ export const register = async (req: Request, res: Response): Promise<any> => {
     });
   } catch (error: any) {
     if (error?.code === 'P2002') return res.status(400).json({ message: 'An account with this phone or email already exists' });
-    console.error('PG registration error:', error);
+    logger.error({ err: error }, 'PG registration error');
     res.status(500).json({ message: 'Failed to create PG account' });
   }
 };
@@ -206,7 +207,7 @@ export const requestOtp = async (req: Request, res: Response): Promise<any> => {
     });
     res.json({ message: 'Verification code sent', ...(process.env.SMS_API_URL || process.env.NODE_ENV === 'production' ? {} : { devCode: code }) });
   } catch (error) {
-    console.error('PG OTP request error:', error);
+    logger.error({ err: error }, 'PG OTP request error');
     res.status(500).json({ message: 'Failed to send verification code' });
   }
 };
@@ -254,7 +255,7 @@ export const verifyOtp = async (req: Request, res: Response): Promise<any> => {
       ...(!resident || 'forbidden' in resident ? {} : { resident })
     });
   } catch (error) {
-    console.error('PG OTP verify error:', error);
+    logger.error({ err: error }, 'PG OTP verify error');
     res.status(500).json({ message: 'Failed to verify code' });
   }
 };
@@ -293,7 +294,7 @@ export const changePassword = async (req: Request, res: Response): Promise<any> 
     await prisma.user.update({ where: { id: user.id }, data: { password } });
     res.json({ message: 'Password updated successfully' });
   } catch (error) {
-    console.error('PG password change error:', error);
+    logger.error({ err: error }, 'PG password change error');
     res.status(500).json({ message: 'Failed to change password' });
   }
 };
@@ -309,7 +310,7 @@ export const adminResetPassword = async (req: Request, res: Response): Promise<a
     await prisma.user.update({ where: { id: String(userId) }, data: { password } });
     res.json({ message: 'Password reset successfully' });
   } catch (error) {
-    console.error('PG admin password reset error:', error);
+    logger.error({ err: error }, 'PG admin password reset error');
     res.status(500).json({ message: 'Failed to reset password' });
   }
 };
@@ -327,7 +328,7 @@ export const updateProfile = async (req: Request, res: Response): Promise<any> =
     });
     res.json(toUserResponse(user));
   } catch (error) {
-    console.error('PG profile update error:', error);
+    logger.error({ err: error }, 'PG profile update error');
     res.status(500).json({ message: 'Failed to update profile' });
   }
 };

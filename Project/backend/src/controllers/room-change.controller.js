@@ -1,6 +1,7 @@
 import { prisma } from '../app.js';
 import { actorFromRequest, toolCatalogue } from '../services/ai-tools.js';
 import { currentUser } from './pg.controller.js';
+import { logger } from '../utils/logger.js';
 const RESIDENT_ROLES = ['PG_TENANT'];
 const STAFF_ROLES = ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'];
 const FRIENDLY_MESSAGES = {
@@ -39,7 +40,7 @@ async function runRoomChangeTool(req, res, toolName, args, roles, roleMessage) {
         res.json(result);
     }
     catch (error) {
-        console.error(`Room change ${toolName} error:`, error);
+        logger.error({ err: error }, `Room change ${toolName} error`);
         res.status(errorStatus(error)).json({ message: errorMessage(error) });
     }
 }
@@ -85,7 +86,7 @@ export const listVacantBeds = async (req, res) => {
         })));
     }
     catch (error) {
-        console.error('Room change vacant beds error:', error);
+        logger.error({ err: error }, 'Room change vacant beds error');
         res.status(500).json({ message: 'Could not load vacant beds.' });
     }
 };

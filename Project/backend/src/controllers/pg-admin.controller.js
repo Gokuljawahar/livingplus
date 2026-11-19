@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../app.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
+import { logger } from '../utils/logger.js';
 const db = new Proxy({}, {
     get: (_target, property) => prisma[property]
 });
@@ -32,7 +33,7 @@ export const listPgOperators = async (req, res) => {
         })));
     }
     catch (error) {
-        console.error('PG operator list error:', error);
+        logger.error({ err: error }, 'PG operator list error');
         res.status(500).json({ message: 'Failed to fetch PG operators' });
     }
 };
@@ -77,7 +78,7 @@ export const createPgOperator = async (req, res) => {
     catch (error) {
         if (error?.code === 'P2002')
             return res.status(409).json({ message: 'An account with this phone or email already exists' });
-        console.error('PG operator creation error:', error);
+        logger.error({ err: error }, 'PG operator creation error');
         res.status(500).json({ message: 'Failed to create PG operator' });
     }
 };
@@ -108,7 +109,7 @@ export const deletePgOperatorProperty = async (req, res) => {
         res.json({ message: 'PG property deleted' });
     }
     catch (error) {
-        console.error('PG operator deletion error:', error);
+        logger.error({ err: error }, 'PG operator deletion error');
         res.status(500).json({ message: 'Failed to delete PG property' });
     }
 };

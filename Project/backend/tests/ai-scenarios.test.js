@@ -25,6 +25,7 @@ async function freePort() {
         });
     });
 }
+process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent';
 process.env.ENABLE_AI_ORCHESTRATOR = 'true';
 process.env.AI_MODEL = 'google:gemini-3.8-flash';
 process.env.GOOGLE_API_KEY = 'test-key';
@@ -807,6 +808,104 @@ describe('file storage drivers', () => {
         assert.equal(storage.localUploadPath('../../etc/passwd'), null);
         assert.equal(await storage.viewUrl({ protocol: 'http', get: () => 'x' }, 'local/00000000-0000-4000-8000-000000000000.webp'), null);
         await assert.rejects(storage.directUploadUrl('uploads/x.pdf', 'application/pdf'), /DIRECT_UPLOAD_UNSUPPORTED/);
+    });
+});
+describe('HTTP hardening', () => {
+    let base = '';
+    let server;
+    before(async () => {
+        const { default: app } = await import('../src/app.js');
+        server = app.listen(0);
+        await new Promise((r) => server.once('listening', () => r()));
+        base = `http://127.0.0.1:${server.address().port}`;
+    });
+    after(() => { server?.close(); });
+    it('sends security headers and hides the framework', async () => {
+        const res = await fetch(`${base}/healthz`);
+        assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+        assert.equal(res.headers.get('x-frame-options'), 'SAMEORIGIN');
+        assert.ok(res.headers.get('strict-transport-security'));
+        assert.equal(res.headers.get('x-powered-by'), null);
+        assert.equal(res.headers.get('cross-origin-resource-policy'), 'cross-origin');
+    });
+    it('allows only listed browser origins', async () => {
+        const preflight = (origin) => fetch(`${base}/api/pg/ai/status`, {
+            method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization' }
+        });
+        assert.equal((await preflight('http://localhost:5173')).headers.get('access-control-allow-origin'), 'http://localhost:5173');
+        assert.equal((await preflight('https://sunrise.livingplus.com')).headers.get('access-control-allow-origin'), 'https://sunrise.livingplus.com');
+        assert.equal((await preflight('https://evil.example')).headers.get('access-control-allow-origin'), null);
+        assert.equal((await preflight('https://livingplus.com.evil.example')).headers.get('access-control-allow-origin'), null);
+    });
+    it('drops localhost origins in production and honours CORS_ORIGINS', async () => {
+        const hardening = await import('../src/middleware/http-hardening.js');
+        const keep = { env: process.env.NODE_ENV, extra: process.env.CORS_ORIGINS };
+        process.env.NODE_ENV = 'production';
+        process.env.CORS_ORIGINS = 'https://livingplus-web-abc123.a.run.app';
+        try {
+            assert.equal(hardening.isAllowedOrigin('http://localhost:5173'), false);
+            assert.equal(hardening.isAllowedOrigin('https://livingplus-web-abc123.a.run.app'), true);
+            assert.equal(hardening.isAllowedOrigin('https://admin.livingplus.com'), true);
+            assert.equal(hardening.isAllowedOrigin(undefined), true, 'non-browser callers are not subject to CORS');
+        }
+        finally {
+            if (keep.env === undefined)
+                delete process.env.NODE_ENV;
+            else
+                process.env.NODE_ENV = keep.env;
+            if (keep.extra === undefined)
+                delete process.env.CORS_ORIGINS;
+            else
+                process.env.CORS_ORIGINS = keep.extra;
+        }
+    });
+    it('trusts one proxy hop on Cloud Run and loopback locally', async () => {
+        const hardening = await import('../src/middleware/http-hardening.js');
+        const keep = { k: process.env.K_SERVICE, t: process.env.TRUST_PROXY };
+        try {
+            delete process.env.TRUST_PROXY;
+            delete process.env.K_SERVICE;
+            assert.equal(hardening.trustProxySetting(), 'loopback');
+            process.env.K_SERVICE = 'livingplus-api';
+            assert.equal(hardening.trustProxySetting(), 1);
+            process.env.TRUST_PROXY = '2';
+            assert.equal(hardening.trustProxySetting(), 2);
+        }
+        finally {
+            if (keep.k === undefined)
+                delete process.env.K_SERVICE;
+            else
+                process.env.K_SERVICE = keep.k;
+            if (keep.t === undefined)
+                delete process.env.TRUST_PROXY;
+            else
+                process.env.TRUST_PROXY = keep.t;
+        }
+    });
+    it('rate-limits AI chat per caller over HTTP', async () => {
+        const send = (ip) => fetch(`${base}/api/pg/ai/chat`, {
+            method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': ip }, body: '{}'
+        });
+        // The loopback test client is a trusted proxy, so X-Forwarded-For is the caller.
+        for (let i = 0; i < 20; i += 1)
+            assert.equal((await send('203.0.113.7')).status, 400, `request ${i + 1} reaches the handler`);
+        const limited = await send('203.0.113.7');
+        assert.equal(limited.status, 429);
+        assert.ok(limited.headers.get('ratelimit-policy'));
+        assert.equal((await send('198.51.100.9')).status, 400, 'other callers are unaffected');
+    });
+    it('redacts secrets from structured logs', async () => {
+        const { pino } = await import('pino');
+        const { loggerOptions } = await import('../src/utils/logger.js');
+        const lines = [];
+        const log = pino({ ...loggerOptions, level: 'info' }, { write: (line) => { lines.push(line); } });
+        log.info({ req: { headers: { authorization: 'Bearer abc' } }, body: { password: 'hunter2', otp: '123456' } }, 'login attempt');
+        const entry = JSON.parse(lines[0]);
+        assert.equal(entry.severity, 'INFO');
+        assert.equal(entry.message, 'login attempt');
+        assert.equal(entry.req.headers.authorization, '[redacted]');
+        assert.equal(entry.body.password, '[redacted]');
+        assert.equal(entry.body.otp, '[redacted]');
     });
 });
 describe('scheduled jobs over HTTP (Cloud Scheduler)', () => {

@@ -54,6 +54,7 @@ import {
 } from '../controllers/pg.controller.js';
 import multer from 'multer';
 import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware.js';
+import { aiChatLimiter, aiVoiceLimiter } from '../middleware/ai-rate-limit.js';
 import { getAiStatus, postChat, postTranscribe } from '../controllers/ai.controller.js';
 import {
   createRoomChange,
@@ -82,8 +83,8 @@ router.delete('/admin/operators/:propertyId', authenticate, deletePgOperatorProp
 
 router.get('/config', getPublicConfig);
 router.get('/ai/status', getAiStatus);
-router.post('/ai/chat', optionalAuthenticate, postChat);
-router.post('/ai/transcribe', voiceUpload.single('audio'), postTranscribe);
+router.post('/ai/chat', optionalAuthenticate, aiChatLimiter, postChat);
+router.post('/ai/transcribe', optionalAuthenticate, aiVoiceLimiter, voiceUpload.single('audio'), postTranscribe);
 router.get('/tenant/stays', authenticate, listTenantStays);
 router.get('/tenant/maintenance', authenticate, listTenantTickets);
 router.post('/tenant/maintenance', authenticate, createTenantTicket);

@@ -1,5 +1,6 @@
 import { calculateMonthlyRent, ensureFoodEntries } from './pg-billing.js';
 import { nextMonthStart, periodOf } from '../utils/app-time.js';
+import { logger } from '../utils/logger.js';
 export async function generateMonthlyRentEntries(prisma, at = new Date()) {
     const tenants = await prisma.pGTenant.findMany({
         where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
@@ -34,8 +35,8 @@ export function startMonthlyRentScheduler(prisma) {
     const maxTimerDelay = 2_147_000_000;
     const now = new Date();
     void generateMonthlyRentEntries(prisma, now)
-        .then((count) => console.log(`[PG billing] Ensured ${count} rent entries for ${periodOf(now)}`))
-        .catch((error) => console.error('[PG billing] Monthly rent generation failed:', error));
+        .then((count) => logger.info(`[PG billing] Ensured ${count} rent entries for ${periodOf(now)}`))
+        .catch((error) => logger.error({ err: error }, '[PG billing] Monthly rent generation failed'));
     const scheduleNextRun = () => {
         const current = new Date();
         // 00:05 on the 1st, in the business timezone (APP_TIMEZONE).
@@ -46,8 +47,8 @@ export function startMonthlyRentScheduler(prisma) {
                 return;
             }
             void generateMonthlyRentEntries(prisma, nextRun)
-                .then((count) => console.log(`[PG billing] Ensured ${count} rent entries for ${periodOf(nextRun)}`))
-                .catch((error) => console.error('[PG billing] Monthly rent generation failed:', error))
+                .then((count) => logger.info(`[PG billing] Ensured ${count} rent entries for ${periodOf(nextRun)}`))
+                .catch((error) => logger.error({ err: error }, '[PG billing] Monthly rent generation failed'))
                 .finally(scheduleNextRun);
         }, Math.min(maxTimerDelay, Math.max(0, nextRun.getTime() - current.getTime())));
         timer.unref();

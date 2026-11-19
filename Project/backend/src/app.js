@@ -1,5 +1,4 @@
 import express from 'express';
-import cors from 'cors';
 import multer from 'multer';
 import { access } from 'fs/promises';
 import jwt from 'jsonwebtoken';
@@ -11,9 +10,11 @@ import { getJwtSecret } from './utils/auth-config.js';
 import { resolvePgHost } from './middleware/pg-host.middleware.js';
 import { cronRoutes } from './routes/cron.routes.js';
 import { directUploadUrl, localUploadPath, newFileKey, putFile, storageKind, viewUrl } from './services/storage.js';
+import { applyHttpHardening } from './middleware/http-hardening.js';
+import { logger } from './utils/logger.js';
 const app = express();
 export const prisma = new PrismaClient();
-app.use(cors());
+applyHttpHardening(app);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ limit: '100kb', extended: true }));
 import path from 'path';
@@ -109,22 +110,12 @@ app.post('/api/upload-s3', authenticate, authorizePropertyStaffUpload, s3Upload.
         res.json({ fileKey });
     }
     catch (error) {
-        console.error(`Failed to upload to ${storageKind()} storage:`, error);
+        logger.error({ err: error }, `Failed to upload to ${storageKind()} storage`);
         res.status(500).json({ error: "Failed to upload image" });
     }
 });
 app.use(decryptRequest);
 app.use(encryptResponse);
-// Request Logger Middleware
-app.use((req, res, next) => {
-    const start = Date.now();
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-    res.on('finish', () => {
-        const duration = Date.now() - start;
-        console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} ${res.statusCode} - ${duration}ms`);
-    });
-    next();
-});
 app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
 });
@@ -163,7 +154,7 @@ app.post('/api/upload-url', authenticate, authorizePropertyStaffUpload, async (r
         res.json({ uploadUrl, fileKey });
     }
     catch (error) {
-        console.error("Failed to generate upload URL:", error);
+        logger.error({ err: error }, "Failed to generate upload URL");
         res.status(500).json({ error: "Internal server error" });
     }
 });
@@ -196,7 +187,7 @@ app.get(/^\/api\/view-image\/(.+)$/, authenticate, async (req, res) => {
         res.json({ viewUrl: url });
     }
     catch (error) {
-        console.error("Failed to generate view URL:", error);
+        logger.error({ err: error }, "Failed to generate view URL");
         res.status(500).json({ error: "Internal server error" });
     }
 });
@@ -220,13 +211,13 @@ app.post('/api/view-image/bulk', async (req, res) => {
                     urls[fileKey] = url;
             }
             catch (err) {
-                console.error(`Failed to generate url for ${fileKey}`, err);
+                logger.error({ err: err }, `Failed to generate url for ${fileKey}`);
             }
         }));
         res.json({ urls });
     }
     catch (error) {
-        console.error("Failed to process bulk view URLs:", error);
+        logger.error({ err: error }, "Failed to process bulk view URLs");
         res.status(500).json({ error: "Internal server error" });
     }
 });

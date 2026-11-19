@@ -186,6 +186,14 @@ alone does not create that DB user. The active demo resident uses phone
   URLs after access checks. Configure `PUBLIC_API_URL` when local signed media
   needs a public API origin. Back up the database and files together.
 
+- **Security and logs:** the API sends Helmet security headers, accepts
+  browser calls only from `LIVINGPLUS_ROOT_DOMAIN`, its subdomains,
+  `FRONTEND_URL` and `CORS_ORIGINS` (plus localhost outside production), and
+  rate-limits AI chat/voice per caller (`AI_RATE_LIMIT_PER_MINUTE`). Logs are
+  structured JSON (pino) that Cloud Logging parses with severity; set
+  `LOG_FORMAT=pretty` locally. Behind Cloud Run the client IP is taken from one
+  trusted proxy hop (`TRUST_PROXY` overrides).
+
 Restart the API after changing backend environment values. Vite embeds
 `VITE_*` values during production builds.
 
