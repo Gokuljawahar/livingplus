@@ -904,6 +904,35 @@ describe('request body validation (Zod)', () => {
         assert.equal(badNotes.statusCode, 400);
         assert.deepEqual(badNotes.body.issues.map((i) => i.path), ['notes']);
     });
+    it('rejects wrong-typed fields on every guarded endpoint with 400', async () => {
+        const auth = await import('../src/controllers/pg-auth.controller.js');
+        const ai = await import('../src/controllers/ai.controller.js');
+        const roomChange = await import('../src/controllers/room-change.controller.js');
+        const run = async (handler, body, extra = {}) => {
+            const res = respond();
+            await handler({ body, params: {}, headers: {}, query: {}, user: { userId: ids.owner.id, role: 'PG_OWNER' }, ...extra }, res);
+            return res;
+        };
+        const cases = [
+            ['login', auth.login, { phone: '9100000001', password: { $ne: null } }],
+            ['register', auth.register, { name: 'X', amenities: [{ evil: true }] }],
+            ['updateProperty', controllers.updateProperty, { amenities: { a: 1 } }, { params: { propertyId: ids.prop.id } }],
+            ['createRoom', controllers.createRoom, { roomNumber: ['101'] }, { params: { propertyId: ids.prop.id } }],
+            ['chat', ai.postChat, { message: { text: 'hi' } }],
+            ['room change', roomChange.createRoomChange, { request_type: 'TELEPORT' }, { user: { userId: ids.tenantUser.id, role: 'PG_TENANT' } }]
+        ];
+        for (const [name, handler, body, extra] of cases) {
+            const res = await run(handler, body, extra);
+            assert.equal(res.statusCode, 400, name);
+            assert.ok(Array.isArray(res.body.issues) || typeof res.body.issues === 'string', `${name} explains the problem`);
+        }
+    });
+    it('normalizes harmless input variations instead of rejecting them', async () => {
+        const res = await call('createRoom', { roomNumber: 'Z9', roomType: 'SHARED', monthlyRent: '6500', hasAc: 'true', foodIncluded: 'false', numberOfBeds: 1 }, { params: { propertyId: ids.prop.id } });
+        assert.equal(res.statusCode, 201);
+        assert.equal(res.body.hasAc, true);
+        assert.equal(res.body.foodIncluded, false, '"false" no longer becomes true');
+    });
     it('keeps 404s for unknown stays and validates claim references', async () => {
         const badRef = await call('createResidentPaymentClaim', { amount: 100, reference: 'x' });
         assert.equal(badRef.statusCode, 400);

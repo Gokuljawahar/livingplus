@@ -2,6 +2,8 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../app.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { logger } from '../utils/logger.js';
+import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
+import { createPgOperatorBody } from '../validation/request.schemas.js';
 const db = new Proxy({}, {
     get: (_target, property) => prisma[property]
 });
@@ -38,9 +40,13 @@ export const listPgOperators = async (req, res) => {
     }
 };
 export const createPgOperator = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(createPgOperatorBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     if (!isSuperAdmin(req))
         return res.status(403).json({ message: 'Super Admin access required' });
-    const { ownerName, propertyName, email, phone, password, address, locality, city, genderPolicy, amenities } = req.body;
+    const { ownerName, propertyName, email, phone, password, address, locality, city, genderPolicy, amenities } = input;
     const normalizedPhone = String(phone || '').replace(/\D/g, '');
     const finalPhone = normalizedPhone.length === 10 ? `91${normalizedPhone}` : normalizedPhone;
     if (!ownerName?.trim() || !propertyName?.trim() || !finalPhone || !password || !address?.trim() || !locality?.trim()) {

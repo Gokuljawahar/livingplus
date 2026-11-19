@@ -3,6 +3,8 @@ import { createChatModel, modelStatus, parseImageDataUrl } from '../services/ai-
 import { runChat } from '../services/ai-orchestrator.js';
 import { transcribeAudio } from '../services/ai-voice.js';
 import { logger } from '../utils/logger.js';
+import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
+import { aiChatBody } from '../validation/request.schemas.js';
 
 export const getAiStatus = async (_req: Request, res: Response): Promise<any> => {
   const status = await modelStatus();
@@ -10,13 +12,15 @@ export const getAiStatus = async (_req: Request, res: Response): Promise<any> =>
 };
 
 export const postChat = async (req: Request, res: Response): Promise<any> => {
-  const message = String(req.body.message || '').trim().slice(0, 2000);
-  if (!message && !req.body.confirmationId && !req.body.cancelConfirmationId) return res.status(400).json({ message: 'A message is required' });
+  const input: any = parseBody(aiChatBody, req, res, INVALID_REQUEST);
+  if (!input) return;
+  const message = String(input.message || '').trim().slice(0, 2000);
+  if (!message && !input.confirmationId && !input.cancelConfirmationId) return res.status(400).json({ message: 'A message is required' });
 
   let imageDataUrl: string | undefined;
-  if (req.body.imageDataUrl) {
+  if (input.imageDataUrl) {
     try {
-      imageDataUrl = parseImageDataUrl(req.body.imageDataUrl);
+      imageDataUrl = parseImageDataUrl(input.imageDataUrl);
     } catch {
       return res.status(400).json({ message: 'Attached image must be a JPEG, PNG or WebP under 4MB' });
     }
@@ -36,9 +40,9 @@ export const postChat = async (req: Request, res: Response): Promise<any> => {
     const result = await runChat(req, model, {
       message,
       imageDataUrl,
-      sessionId: req.body.sessionId ? String(req.body.sessionId) : undefined,
-      confirmationId: req.body.confirmationId ? String(req.body.confirmationId) : undefined,
-      cancelConfirmationId: req.body.cancelConfirmationId ? String(req.body.cancelConfirmationId) : undefined
+      sessionId: input.sessionId ? String(input.sessionId) : undefined,
+      confirmationId: input.confirmationId ? String(input.confirmationId) : undefined,
+      cancelConfirmationId: input.cancelConfirmationId ? String(input.cancelConfirmationId) : undefined
     });
     res.json(result);
   } catch (error: any) {

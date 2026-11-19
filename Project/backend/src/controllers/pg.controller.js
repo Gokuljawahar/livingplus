@@ -12,10 +12,11 @@ import { buildGuestBookingWhere, isPlaceholderResidentName } from '../utils/gues
 import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
 import { periodOf, periodRange } from '../utils/app-time.js';
 import { firebaseWebConfig, otpProvider } from '../services/phone-verification.js';
-import { parseBody } from '../utils/validate.js';
+import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
 import { minSemanticScore, scheduleSearchIndex, semanticScores, semanticSearchEnabled } from '../services/semantic-search.js';
 import { bookingRequestBody, paymentClaimBody, paymentClaimReviewBody, rentEntryBody, rentPaymentBody } from '../validation/pg.schemas.js';
 import { logger } from '../utils/logger.js';
+import { cancelBookingBody, checkOutTenantBody, createMaintenanceTicketBody, createOwnerExpenseBody, createPropertyBody, createPropertyStaffBody, createRoomBody, createTenantTicketBody, markDepositRefundedBody, proposeElectricityBillBody, sendRentRemindersBody, updateBedStatusBody, updateBookingStatusBody, updateMaintenanceStatusBody, updatePropertyBody, updateResidentProfileBody, updateTenantProfileBody } from '../validation/request.schemas.js';
 function phoneVariants(phone) {
     const digits = String(phone || '').replace(/\D/g, '');
     const normalized = digits.length === 10 ? `91${digits}` : digits;
@@ -241,8 +242,12 @@ export const listOwnerProperties = async (req, res) => {
     }
 };
 export const createProperty = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(createPropertyBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     const user = currentUser(req);
-    const { name, description, address, locality, contactPhone, upiId, landmark, city, pincode, latitude, longitude, genderPolicy, amenities, houseRules, photoUrls } = req.body;
+    const { name, description, address, locality, contactPhone, upiId, landmark, city, pincode, latitude, longitude, genderPolicy, amenities, houseRules, photoUrls } = input;
     if (!user)
         return res.status(401).json({ message: 'Unauthorized' });
     if (!['SUPER_ADMIN', 'PG_OWNER'].includes(user.role)) {
@@ -286,24 +291,29 @@ export const createProperty = async (req, res) => {
     }
 };
 export const updateProperty = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(updatePropertyBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const inputFields = input;
     const propertyId = String(req.params.propertyId);
     if (!await canManageProperty(req, propertyId, ['OWNER'])) {
         return res.status(403).json({ message: 'You do not have access to this property' });
     }
     const fields = ['name', 'description', 'address', 'locality', 'contactPhone', 'upiId', 'landmark', 'city', 'pincode', 'latitude', 'longitude', 'genderPolicy', 'amenities', 'houseRules', 'photoUrls', 'status', 'bookingLockMinutes', 'rentDay', 'rentDueDay'];
     for (const numeric of ['bookingLockMinutes', 'rentDay', 'rentDueDay']) {
-        if (req.body[numeric] !== undefined) {
-            const value = Number(req.body[numeric]);
+        if (inputFields[numeric] !== undefined) {
+            const value = Number(inputFields[numeric]);
             if (!Number.isInteger(value) || value < 1 || value > 1440) {
                 return res.status(400).json({ message: `${numeric} must be a whole number between 1 and 1440` });
             }
-            req.body[numeric] = value;
+            inputFields[numeric] = value;
         }
     }
     const data = {};
     for (const field of fields) {
-        if (req.body[field] !== undefined)
-            data[field] = req.body[field];
+        if (inputFields[field] !== undefined)
+            data[field] = inputFields[field];
     }
     if (typeof data.name === 'string')
         data.name = data.name.trim();
@@ -366,8 +376,12 @@ export const deleteProperty = async (req, res) => {
     }
 };
 export const createRoom = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(createRoomBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     const { propertyId } = req.params;
-    const { roomNumber, floor, block, roomType, monthlyRent, depositAmount, maintenanceFee, utilitiesSurcharge, hasAc, foodIncluded, foodCharge, numberOfBeds, bedLabels } = req.body;
+    const { roomNumber, floor, block, roomType, monthlyRent, depositAmount, maintenanceFee, utilitiesSurcharge, hasAc, foodIncluded, foodCharge, numberOfBeds, bedLabels } = input;
     if (!await canManageProperty(req, String(propertyId), ['OWNER'])) {
         return res.status(403).json({ message: 'You do not have access to this property' });
     }
@@ -405,7 +419,11 @@ export const createRoom = async (req, res) => {
     }
 };
 export const updateBedStatus = async (req, res) => {
-    const status = String(req.body.status || '').toUpperCase();
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(updateBedStatusBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const status = String(input.status || '').toUpperCase();
     if (!['AVAILABLE', 'MAINTENANCE'].includes(status)) {
         return res.status(400).json({ message: 'Beds can be marked available or under maintenance here' });
     }
@@ -419,7 +437,7 @@ export const updateBedStatus = async (req, res) => {
         if (!['AVAILABLE', 'MAINTENANCE'].includes(bed.status)) {
             return res.status(409).json({ message: 'Reserved or occupied beds must be released through their booking or tenant record' });
         }
-        const updated = await db.pGBed.update({ where: { id: bed.id }, data: { status, maintenanceNote: status === 'MAINTENANCE' ? req.body.note?.trim() || null : null } });
+        const updated = await db.pGBed.update({ where: { id: bed.id }, data: { status, maintenanceNote: status === 'MAINTENANCE' ? input.note?.trim() || null : null } });
         res.json(updated);
     }
     catch (error) {
@@ -523,7 +541,11 @@ export const createBookingRequest = async (req, res) => {
     }
 };
 export const cancelBookingRequest = async (req, res) => {
-    const phone = String(req.body.phone || '').replace(/\D/g, '');
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(cancelBookingBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const phone = String(input.phone || '').replace(/\D/g, '');
     if (!phone)
         return res.status(400).json({ message: 'Phone number is required' });
     try {
@@ -629,11 +651,15 @@ export const listOwnerBookings = async (req, res) => {
     }
 };
 export const updateBookingStatus = async (req, res) => {
-    const status = String(req.body.status || '').toUpperCase();
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(updateBookingStatusBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const status = String(input.status || '').toUpperCase();
     if (!['APPROVED', 'REJECTED', 'CANCELLED'].includes(status)) {
         return res.status(400).json({ message: 'Status must be APPROVED, REJECTED or CANCELLED' });
     }
-    const rejectionReason = String(req.body.rejectionReason || '').trim();
+    const rejectionReason = String(input.rejectionReason || '').trim();
     if (status === 'REJECTED' && !rejectionReason) {
         return res.status(400).json({ message: 'A reason is required when declining a booking' });
     }
@@ -649,7 +675,7 @@ export const updateBookingStatus = async (req, res) => {
         }
         if (booking.status !== 'PENDING')
             return res.status(409).json({ message: 'Only pending requests can be updated' });
-        const newBedId = req.body.newBedId ? String(req.body.newBedId) : null;
+        const newBedId = input.newBedId ? String(input.newBedId) : null;
         const updated = await db.$transaction(async (tx) => {
             let assignedBedId = booking.bedId;
             if (status === 'APPROVED') {
@@ -801,7 +827,11 @@ export const checkInTenant = async (req, res) => {
     }
 };
 export const checkOutTenant = async (req, res) => {
-    const depositDeductions = req.body?.depositDeductions === undefined ? 0 : Number(req.body.depositDeductions);
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(checkOutTenantBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const depositDeductions = input?.depositDeductions === undefined ? 0 : Number(input.depositDeductions);
     if (!Number.isFinite(depositDeductions) || depositDeductions < 0) {
         return res.status(400).json({ message: 'Deposit deductions must be a non-negative amount' });
     }
@@ -831,7 +861,7 @@ export const checkOutTenant = async (req, res) => {
             }
             const updatedTenant = await tx.pGTenant.update({
                 where: { id: tenant.id },
-                data: { status: 'CHECKED_OUT', moveOutDate: now, checkedOutAt: now, depositDeductions, depositRefundAmount, depositRefundStatus, checkoutNote: String(req.body?.checkoutNote || '').trim() || null }
+                data: { status: 'CHECKED_OUT', moveOutDate: now, checkedOutAt: now, depositDeductions, depositRefundAmount, depositRefundStatus, checkoutNote: String(input?.checkoutNote || '').trim() || null }
             });
             if (tenant.bookingId) {
                 await tx.pGBooking.update({ where: { id: tenant.bookingId }, data: { status: 'CHECKED_OUT', moveOutDate: now } });
@@ -941,6 +971,10 @@ export const listAuditLogs = async (req, res) => {
     }
 };
 export const markDepositRefunded = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(markDepositRefundedBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     try {
         const tenant = await db.pGTenant.findUnique({ where: { id: String(req.params.tenantId) } });
         if (!tenant)
@@ -955,11 +989,11 @@ export const markDepositRefunded = async (req, res) => {
             where: { id: tenant.id },
             data: {
                 depositRefundStatus: 'REFUNDED',
-                depositRefundReference: String(req.body?.reference || '').trim() || null,
+                depositRefundReference: String(input?.reference || '').trim() || null,
                 depositRefundedAt: new Date()
             }
         });
-        logAudit(tenant.propertyId, currentUser(req)?.id, 'DEPOSIT_REFUNDED', 'PGTenant', tenant.id, String(req.body?.reference || '').trim() || null);
+        logAudit(tenant.propertyId, currentUser(req)?.id, 'DEPOSIT_REFUNDED', 'PGTenant', tenant.id, String(input?.reference || '').trim() || null);
         res.json(updated);
     }
     catch (error) {
@@ -990,6 +1024,11 @@ export const listOwnerTenants = async (req, res) => {
     }
 };
 export const updateTenantProfile = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(updateTenantProfileBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const inputFields = input;
     const allowedFields = [
         'permanentAddress',
         'bloodGroup',
@@ -999,7 +1038,7 @@ export const updateTenantProfile = async (req, res) => {
         'kycType',
         'kycDocumentUrl'
     ];
-    const verifyKyc = req.body.kycVerified;
+    const verifyKyc = input.kycVerified;
     try {
         const tenant = await db.pGTenant.findUnique({ where: { id: String(req.params.tenantId) } });
         if (!tenant)
@@ -1009,15 +1048,15 @@ export const updateTenantProfile = async (req, res) => {
         }
         const data = {};
         for (const field of allowedFields) {
-            if (req.body[field] !== undefined)
-                data[field] = String(req.body[field]).trim() || null;
+            if (inputFields[field] !== undefined)
+                data[field] = String(inputFields[field]).trim() || null;
         }
         if (verifyKyc !== undefined) {
             data.kycVerified = Boolean(verifyKyc);
             data.kycVerifiedAt = verifyKyc ? new Date() : null;
         }
-        if (req.body.foodOptOut !== undefined) {
-            data.foodOptOut = Boolean(req.body.foodOptOut);
+        if (input.foodOptOut !== undefined) {
+            data.foodOptOut = Boolean(input.foodOptOut);
         }
         const updated = await db.pGTenant.update({ where: { id: tenant.id }, data });
         res.json(updated);
@@ -1057,8 +1096,12 @@ export const listPropertyStaff = async (req, res) => {
     }
 };
 export const createPropertyStaff = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(createPropertyStaffBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     const owner = currentUser(req);
-    const { propertyId, name, email, phone, password } = req.body;
+    const { propertyId, name, email, phone, password } = input;
     const normalizedPhone = String(phone || '').replace(/\D/g, '');
     if (!owner || !propertyId || !name?.trim() || normalizedPhone.length < 10 || !password) {
         return res.status(400).json({ message: 'Property, staff name, valid phone and password are required' });
@@ -1183,12 +1226,16 @@ export const createRentEntry = async (req, res) => {
     }
 };
 export const sendRentReminders = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(sendRentRemindersBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     try {
         const propertyIds = await accessiblePropertyIds(req, ['OWNER', 'WARDEN']);
         const summary = await sendDueRentReminders(db, {
             propertyIds,
-            period: req.body?.period ? String(req.body.period) : undefined,
-            force: req.body?.force === true || req.body?.force === 'true',
+            period: input?.period ? String(input.period) : undefined,
+            force: input?.force === true || input?.force === 'true',
             actorId: req.user?.userId ? String(req.user.userId) : null
         });
         res.json(summary);
@@ -1210,17 +1257,21 @@ export const listOwnerExpenses = async (req, res) => {
     }
 };
 export const createOwnerExpense = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(createOwnerExpenseBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     try {
-        const propertyId = String(req.body?.propertyId || '');
+        const propertyId = String(input?.propertyId || '');
         if (!propertyId || !await canManageProperty(req, propertyId, ['OWNER', 'WARDEN'])) {
             return res.status(403).json({ message: 'You do not have access to this property' });
         }
         const expense = await createExpense(db, req.user?.userId ? String(req.user.userId) : null, {
             propertyId,
-            category: req.body?.category,
-            amount: req.body?.amount,
-            spentOn: req.body?.spentOn,
-            note: req.body?.note
+            category: input?.category,
+            amount: input?.amount,
+            spentOn: input?.spentOn,
+            note: input?.note
         });
         res.status(201).json(expense);
     }
@@ -1264,14 +1315,18 @@ export const listElectricityBills = async (req, res) => {
     }
 };
 export const proposeElectricityBill = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(proposeElectricityBillBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     try {
-        const propertyId = String(req.body?.propertyId || '');
+        const propertyId = String(input?.propertyId || '');
         if (!propertyId || !await canManageProperty(req, propertyId, ['OWNER', 'WARDEN'])) {
             return res.status(403).json({ message: 'You do not have access to this property' });
         }
         const { proposeElectricityBill: propose } = await import('../services/pg-billing.js');
         const bill = await propose(db, req.user?.userId ? String(req.user.userId) : null, {
-            propertyId, period: req.body?.period, totalAmount: req.body?.totalAmount, imageUrl: req.body?.imageUrl
+            propertyId, period: input?.period, totalAmount: input?.totalAmount, imageUrl: input?.imageUrl
         });
         res.status(201).json(bill);
     }
@@ -1502,9 +1557,13 @@ export const listTenantTickets = async (req, res) => {
     }
 };
 export const createTenantTicket = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(createTenantTicketBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     const user = currentUser(req);
     const propertyId = requestPropertyId(req) || user?.propertyId;
-    const { tenantId, title, description, category } = req.body;
+    const { tenantId, title, description, category } = input;
     if (!user || user.role !== 'PG_TENANT')
         return res.status(403).json({ message: 'Resident access is required' });
     if (!propertyId || (user.propertyId && user.propertyId !== propertyId)) {
@@ -1553,6 +1612,11 @@ export const createTenantTicket = async (req, res) => {
     }
 };
 export const updateResidentProfile = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(updateResidentProfileBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const inputFields = input;
     try {
         const scope = await residentScope(req);
         if (!scope)
@@ -1569,29 +1633,29 @@ export const updateResidentProfile = async (req, res) => {
         const allowedFields = ['permanentAddress', 'institutionOrEmployer', 'emergencyName', 'emergencyPhone'];
         const data = {};
         for (const field of allowedFields) {
-            if (req.body[field] === undefined)
+            if (inputFields[field] === undefined)
                 continue;
-            const value = String(req.body[field]).trim();
+            const value = String(inputFields[field]).trim();
             if (value.length > 200)
                 return res.status(400).json({ message: `${field} must be 200 characters or less` });
             data[field] = value || null;
         }
-        if (req.body.bloodGroup !== undefined) {
-            const bloodGroup = String(req.body.bloodGroup).toUpperCase();
+        if (input.bloodGroup !== undefined) {
+            const bloodGroup = String(input.bloodGroup).toUpperCase();
             if (bloodGroup && !['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].includes(bloodGroup)) {
                 return res.status(400).json({ message: 'Invalid blood group' });
             }
             data.bloodGroup = bloodGroup || null;
         }
-        if (req.body.kycType !== undefined) {
-            const kycType = String(req.body.kycType).toUpperCase();
+        if (input.kycType !== undefined) {
+            const kycType = String(input.kycType).toUpperCase();
             if (kycType && !['AADHAAR', 'PAN', 'PASSPORT', 'DRIVING_LICENSE', 'STUDENT_ID', 'WORK_ID'].includes(kycType)) {
                 return res.status(400).json({ message: 'Invalid KYC document type' });
             }
             data.kycType = kycType || null;
         }
-        if (req.body.kycDocumentUrl !== undefined) {
-            const fileKey = String(req.body.kycDocumentUrl || '').trim();
+        if (input.kycDocumentUrl !== undefined) {
+            const fileKey = String(input.kycDocumentUrl || '').trim();
             if (fileKey && !/^(?:local\/[0-9a-f-]{36}\.(?:webp|pdf)|uploads\/[a-zA-Z0-9._-]+)$/i.test(fileKey)) {
                 return res.status(400).json({ message: 'Invalid KYC document reference' });
             }
@@ -1599,8 +1663,8 @@ export const updateResidentProfile = async (req, res) => {
             data.kycVerified = false;
             data.kycVerifiedAt = null;
         }
-        if (req.body.foodOptOut !== undefined)
-            data.foodOptOut = Boolean(req.body.foodOptOut);
+        if (input.foodOptOut !== undefined)
+            data.foodOptOut = Boolean(input.foodOptOut);
         const updated = await db.pGTenant.update({ where: { id: tenant.id }, data });
         res.json(updated);
     }
@@ -1711,7 +1775,11 @@ export const markResidentNotificationRead = async (req, res) => {
     }
 };
 export const createMaintenanceTicket = async (req, res) => {
-    const { propertyId, tenantId, title, description, category, priority, imageUrl, assignedTo } = req.body;
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(createMaintenanceTicketBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const { propertyId, tenantId, title, description, category, priority, imageUrl, assignedTo } = input;
     if (!propertyId || !title?.trim() || !description?.trim()) {
         return res.status(400).json({ message: 'Property, title and description are required' });
     }
@@ -1747,7 +1815,11 @@ export const createMaintenanceTicket = async (req, res) => {
     }
 };
 export const updateMaintenanceStatus = async (req, res) => {
-    const status = String(req.body.status || '').toUpperCase();
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(updateMaintenanceStatusBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const status = String(input.status || '').toUpperCase();
     if (!['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'].includes(status)) {
         return res.status(400).json({ message: 'Invalid maintenance status' });
     }

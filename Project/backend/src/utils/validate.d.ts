@@ -10,4 +10,16 @@ export declare const optionalText: (max?: number) => z.ZodPipe<z.ZodOptional<z.Z
 export declare const positiveAmount: () => z.ZodCoercedNumber<unknown>;
 /** Case-insensitive choice, normalized to upper case. */
 export declare const upperEnum: <const T extends readonly [string, ...string[]]>(values: T) => z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodEnum<{ [k_1 in T[number]]: k_1; } extends infer T_1 ? { [k in keyof T_1]: T_1[k]; } : never>>;
+/** Text or a number (some clients send phones as numbers); null/absent allowed. */
+export declare const textField: (max?: number) => z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
+/** A number or numeric-looking string, validated further by the handler. */
+export declare const numberLike: () => z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>>>;
+/** Boolean; "true"/"false" strings become real booleans. */
+export declare const booleanLike: () => z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodBoolean, z.ZodPipe<z.ZodEnum<{
+    true: "true";
+    false: "false";
+}>, z.ZodTransform<boolean, "true" | "false">>]>>>;
+/** A list of strings (or a single string, which handlers treat as no list). */
+export declare const textList: () => z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodArray<z.ZodString>, z.ZodString]>>>;
+export declare const INVALID_REQUEST = "Some fields have the wrong format";
 //# sourceMappingURL=validate.d.ts.map

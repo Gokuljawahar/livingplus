@@ -5,6 +5,8 @@ import { prisma } from '../app.js';
 import { getJwtSecret } from '../utils/auth-config.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { logger } from '../utils/logger.js';
+import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
+import { adminResetPasswordBody, changePasswordBody, loginBody, otpRequestBody, otpVerifyBody, registerBody, updateProfileBody } from '../validation/request.schemas.js';
 import { otpProvider, verifyFirebasePhoneToken } from '../services/phone-verification.js';
 function normalizePhone(phone) {
     const digits = phone.replace(/\D/g, '');
@@ -51,7 +53,11 @@ async function residentSessionForPhone(phone, propertyId) {
     return { token: createToken(user, propertyId || tenant.propertyId), user: toUserResponse(user) };
 }
 export const login = async (req, res) => {
-    const { email, phone, password } = req.body;
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(loginBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const { email, phone, password } = input;
     const loginId = String(phone || email || '').trim();
     const propertyId = req.pgPropertyId;
     if (!loginId || !password)
@@ -97,7 +103,11 @@ export const login = async (req, res) => {
     }
 };
 export const register = async (req, res) => {
-    const { name, email, phone, password, propertyName, propertyAddress, locality, contactPhone, city, genderPolicy, amenities, houseRules } = req.body;
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(registerBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const { name, email, phone, password, propertyName, propertyAddress, locality, contactPhone, city, genderPolicy, amenities, houseRules } = input;
     const normalizedPhone = normalizePhone(String(phone || ''));
     const pgSlug = req.pgSlug;
     if (!name?.trim() || !propertyName?.trim() || !propertyAddress?.trim() || !locality?.trim() || normalizedPhone.length < 10 || !password) {
@@ -178,8 +188,12 @@ async function sendSms(phone, message) {
     return null;
 }
 export const requestOtp = async (req, res) => {
-    const phone = normalizePhone(String(req.body.phone || ''));
-    const purpose = ['BOOKING', 'TENANT_LOGIN'].includes(String(req.body.purpose)) ? String(req.body.purpose) : 'BOOKING';
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(otpRequestBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const phone = normalizePhone(String(input.phone || ''));
+    const purpose = ['BOOKING', 'TENANT_LOGIN'].includes(String(input.purpose)) ? String(input.purpose) : 'BOOKING';
     const propertyId = req.pgPropertyId;
     if (phone.length < 10)
         return res.status(400).json({ message: 'A valid phone number is required' });
@@ -214,8 +228,12 @@ export const requestOtp = async (req, res) => {
     }
 };
 export const verifyOtp = async (req, res) => {
-    const phone = normalizePhone(String(req.body.phone || ''));
-    const purpose = ['BOOKING', 'TENANT_LOGIN'].includes(String(req.body.purpose)) ? String(req.body.purpose) : 'BOOKING';
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(otpVerifyBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const phone = normalizePhone(String(input.phone || ''));
+    const purpose = ['BOOKING', 'TENANT_LOGIN'].includes(String(input.purpose)) ? String(input.purpose) : 'BOOKING';
     const propertyId = req.pgPropertyId;
     if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production' && process.env.SINGLE_HOST_MODE !== 'true') {
         return res.status(400).json({ message: 'Open your PG-specific resident portal to sign in' });
@@ -223,7 +241,7 @@ export const verifyOtp = async (req, res) => {
     try {
         let recordId;
         if (otpProvider() === 'firebase') {
-            const idToken = typeof req.body.firebaseIdToken === 'string' ? req.body.firebaseIdToken.trim() : '';
+            const idToken = typeof input.firebaseIdToken === 'string' ? input.firebaseIdToken.trim() : '';
             if (!idToken)
                 return res.status(400).json({ message: 'Phone verification is required' });
             let verified;
@@ -250,7 +268,7 @@ export const verifyOtp = async (req, res) => {
             recordId = record.id;
         }
         else {
-            const code = String(req.body.code || '').trim();
+            const code = String(input.code || '').trim();
             if (!code)
                 return res.status(400).json({ message: 'Verification code is required' });
             const record = await prisma.otpCode.findFirst({
@@ -313,8 +331,12 @@ export const forgotPassword = async (_req, res) => {
     res.json({ message: 'Contact your PG administrator to reset your password.' });
 };
 export const changePassword = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(changePasswordBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     const { userId } = req.user || {};
-    const { currentPassword, newPassword } = req.body;
+    const { currentPassword, newPassword } = input;
     if (!userId)
         return res.status(401).json({ message: 'Unauthorized' });
     if (!currentPassword || !newPassword)
@@ -335,8 +357,12 @@ export const changePassword = async (req, res) => {
     }
 };
 export const adminResetPassword = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(adminResetPasswordBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     const { role } = req.user || {};
-    const { userId, newPassword } = req.body;
+    const { userId, newPassword } = input;
     if (role !== 'SUPER_ADMIN')
         return res.status(403).json({ message: 'Only Super Admins can reset passwords' });
     if (!userId || !newPassword)
@@ -352,8 +378,12 @@ export const adminResetPassword = async (req, res) => {
     }
 };
 export const updateProfile = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(updateProfileBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     const { userId } = req.user || {};
-    const { name, profileImage } = req.body;
+    const { name, profileImage } = input;
     if (!userId)
         return res.status(401).json({ message: 'Unauthorized' });
     if (userId === 'env-admin')

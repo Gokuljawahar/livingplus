@@ -1,5 +1,6 @@
 import { prisma } from '../app.js';
-import { actorFromRequest, toolCatalogue } from '../services/ai-tools.js';
+import { actorFromRequest, parseToolArgs, toolCatalogue } from '../services/ai-tools.js';
+import { INVALID_REQUEST } from '../utils/validate.js';
 import { currentUser } from './pg.controller.js';
 import { logger } from '../utils/logger.js';
 const RESIDENT_ROLES = ['PG_TENANT'];
@@ -34,9 +35,13 @@ async function runRoomChangeTool(req, res, toolName, args, roles, roleMessage) {
     const user = currentUser(req);
     if (!user || !roles.includes(user.role))
         return res.status(403).json({ message: roleMessage });
+    // Same Zod schema the assistant's tool uses, so both paths validate alike.
+    const parsed = parseToolArgs(toolName, args);
+    if (!parsed.ok)
+        return res.status(400).json({ message: INVALID_REQUEST, issues: parsed.error });
     try {
         const actor = await actorFromRequest(req);
-        const result = await toolCatalogue[toolName].execute(actor, args);
+        const result = await toolCatalogue[toolName].execute(actor, parsed.args);
         res.json(result);
     }
     catch (error) {

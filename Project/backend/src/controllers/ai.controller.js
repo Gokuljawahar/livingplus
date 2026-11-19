@@ -2,18 +2,23 @@ import { createChatModel, modelStatus, parseImageDataUrl } from '../services/ai-
 import { runChat } from '../services/ai-orchestrator.js';
 import { transcribeAudio } from '../services/ai-voice.js';
 import { logger } from '../utils/logger.js';
+import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
+import { aiChatBody } from '../validation/request.schemas.js';
 export const getAiStatus = async (_req, res) => {
     const status = await modelStatus();
     res.json({ enabled: status.enabled, configured: status.configured, provider: status.provider, model: status.model });
 };
 export const postChat = async (req, res) => {
-    const message = String(req.body.message || '').trim().slice(0, 2000);
-    if (!message && !req.body.confirmationId && !req.body.cancelConfirmationId)
+    const input = parseBody(aiChatBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const message = String(input.message || '').trim().slice(0, 2000);
+    if (!message && !input.confirmationId && !input.cancelConfirmationId)
         return res.status(400).json({ message: 'A message is required' });
     let imageDataUrl;
-    if (req.body.imageDataUrl) {
+    if (input.imageDataUrl) {
         try {
-            imageDataUrl = parseImageDataUrl(req.body.imageDataUrl);
+            imageDataUrl = parseImageDataUrl(input.imageDataUrl);
         }
         catch {
             return res.status(400).json({ message: 'Attached image must be a JPEG, PNG or WebP under 4MB' });
@@ -34,9 +39,9 @@ export const postChat = async (req, res) => {
         const result = await runChat(req, model, {
             message,
             imageDataUrl,
-            sessionId: req.body.sessionId ? String(req.body.sessionId) : undefined,
-            confirmationId: req.body.confirmationId ? String(req.body.confirmationId) : undefined,
-            cancelConfirmationId: req.body.cancelConfirmationId ? String(req.body.cancelConfirmationId) : undefined
+            sessionId: input.sessionId ? String(input.sessionId) : undefined,
+            confirmationId: input.confirmationId ? String(input.confirmationId) : undefined,
+            cancelConfirmationId: input.cancelConfirmationId ? String(input.cancelConfirmationId) : undefined
         });
         res.json(result);
     }
