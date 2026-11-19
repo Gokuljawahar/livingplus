@@ -1409,6 +1409,46 @@ describe('model configuration', () => {
         });
     });
 });
+describe('LangSmith tracing', () => {
+    it('uploads named, tagged agent runs when tracing is on', async () => {
+        const bodies = [];
+        const server = http.createServer((req, res) => {
+            const chunks = [];
+            req.on('data', (c) => chunks.push(c));
+            req.on('end', () => {
+                bodies.push(Buffer.concat(chunks).toString('utf8'));
+                res.setHeader('content-type', 'application/json');
+                res.end('{}');
+            });
+        });
+        await new Promise((r) => server.listen(0, '127.0.0.1', () => r()));
+        const vars = {
+            LANGSMITH_TRACING: 'true',
+            LANGSMITH_API_KEY: 'ls-test-key',
+            LANGSMITH_ENDPOINT: `http://127.0.0.1:${server.address().port}`,
+            LANGSMITH_PROJECT: 'livingplus-tests',
+            LANGCHAIN_CALLBACKS_BACKGROUND: 'false'
+        };
+        try {
+            await withEnv(vars, async () => {
+                const result = await orchestrator.runChat(guestReq(), stubProvider([{ text: 'Traced hello.' }]), { message: 'hi' });
+                assert.equal(result.reply, 'Traced hello.');
+                const { awaitAllCallbacks } = await import('@langchain/core/callbacks/promises');
+                await awaitAllCallbacks();
+                const { Client } = await import('langsmith');
+                await new Client().awaitPendingTraceBatches?.();
+                for (let i = 0; i < 50 && !bodies.some((b) => b.includes('livingplus-agent:turn')); i += 1)
+                    await new Promise((r) => setTimeout(r, 100));
+            });
+            const uploaded = bodies.join('\n');
+            assert.match(uploaded, /livingplus-agent:turn/);
+            assert.match(uploaded, /role:guest/);
+        }
+        finally {
+            server.close();
+        }
+    });
+});
 describe('LangGraph agent with the Google provider', () => {
     it('runs a tool round trip and echoes the Gemini thought signature', async () => {
         const api = fakeGemini([

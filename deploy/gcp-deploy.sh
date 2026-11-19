@@ -20,6 +20,7 @@
 #   VITE_GOOGLE_MAPS_API_KEY  map picker in the owner workspace
 #   SQL_TIER             default: db-f1-micro (smallest; fine for a demo)
 #   SEED_DEMO_DATA=1     load the fictional demo PGs, rooms and residents once
+#   LANGSMITH_API_KEY    trace the agent in LangSmith (project: livingplus)
 set -euo pipefail
 # Never wait for interactive answers (e.g. "enable this API?"): fail clearly instead.
 export CLOUDSDK_CORE_DISABLE_PROMPTS=1
@@ -102,6 +103,7 @@ ensure_secret livingplus-jwt-secret "$(random_hex)"
 ensure_secret livingplus-admin-password "$(random_secret 20)"
 ensure_secret livingplus-db-password "$(random_secret 32)"
 if [ -n "${GOOGLE_API_KEY:-}" ]; then ensure_secret livingplus-google-api-key "$GOOGLE_API_KEY"; fi
+if [ -n "${LANGSMITH_API_KEY:-}" ]; then ensure_secret livingplus-langsmith-api-key "$LANGSMITH_API_KEY"; fi
 
 step "Cloud SQL for PostgreSQL ${SQL_INSTANCE} (${SQL_TIER}; first creation takes several minutes)"
 exists gcloud sql instances describe "$SQL_INSTANCE" --project "$PROJECT_ID" \
@@ -130,6 +132,10 @@ SECRETS+=",ADMIN_PASSWORD=livingplus-admin-password:latest"
 if [ -n "${GOOGLE_API_KEY:-}" ]; then
   ENV_VARS+=",ENABLE_SEMANTIC_SEARCH=true,AI_EMBEDDING_MODEL=google-genai:gemini-embedding-001"
   SECRETS+=",GOOGLE_API_KEY=livingplus-google-api-key:latest"
+fi
+if [ -n "${LANGSMITH_API_KEY:-}" ]; then
+  ENV_VARS+=",LANGSMITH_TRACING=true,LANGSMITH_PROJECT=livingplus,LANGCHAIN_CALLBACKS_BACKGROUND=false"
+  SECRETS+=",LANGSMITH_API_KEY=livingplus-langsmith-api-key:latest"
 fi
 if [ -n "${FIREBASE_PROJECT_ID:-}" ] && [ -n "${FIREBASE_WEB_API_KEY:-}" ]; then
   ENV_VARS+=",OTP_PROVIDER=firebase,FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID},FIREBASE_WEB_API_KEY=${FIREBASE_WEB_API_KEY},FIREBASE_APP_ID=${FIREBASE_APP_ID:-}"

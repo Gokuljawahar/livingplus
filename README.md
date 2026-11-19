@@ -187,6 +187,13 @@ alone does not create that DB user. The active demo resident uses phone
   for Vertex AI. To spend Google Cloud credits, use Vertex AI or create the AI
   Studio key in a project with billing linked. `GET /api/pg/ai/status` reports
   the active provider and model. Voice also needs browser microphone permission.
+- **Agent tracing (LangSmith):** set `LANGSMITH_TRACING=true` and
+  `LANGSMITH_API_KEY` (and optionally `LANGSMITH_PROJECT`). Every assistant turn
+  appears as a `livingplus-agent:<turn|confirm|cancel|abandon>` run tagged with
+  the caller's role and conversation id, with each model and tool call inside.
+  Traces contain user messages; set `LANGSMITH_HIDE_INPUTS=true` /
+  `LANGSMITH_HIDE_OUTPUTS=true` to redact them. On Cloud Run also set
+  `LANGCHAIN_CALLBACKS_BACKGROUND=false` (the deploy script does this).
 - **Semantic PG search:** set `ENABLE_SEMANTIC_SEARCH=true` and
   `AI_EMBEDDING_MODEL` (default `google-genai:gemini-embedding-001`, using
   `GOOGLE_API_KEY`). Published listings are embedded from stable facts

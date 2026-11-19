@@ -316,8 +316,20 @@ async function pausedAction(graph: AgentGraph, threadId: string): Promise<Pendin
   return snapshot.next.includes('confirm') ? (snapshot.values as AgentStateType).pending : null;
 }
 
-async function resume(graph: AgentGraph, threadId: string, action: ResumeDecision['action']): Promise<AgentStateType> {
-  return graph.invoke(new Command({ resume: { action } }), { configurable: { thread_id: threadId } }) as Promise<AgentStateType>;
+/**
+ * Run name, tags and metadata for tracing. With LANGSMITH_TRACING=true every
+ * agent run (model calls, tool calls, pauses) appears in LangSmith under these.
+ */
+function traceOptions(threadId: string, role: string, kind: 'turn' | ResumeDecision['action']) {
+  return {
+    runName: `livingplus-agent:${kind}`,
+    tags: ['livingplus', `role:${role.toLowerCase()}`],
+    metadata: { thread_id: threadId, role, kind }
+  };
+}
+
+async function resume(graph: AgentGraph, threadId: string, action: ResumeDecision['action'], role: string): Promise<AgentStateType> {
+  return graph.invoke(new Command({ resume: { action } }), { configurable: { thread_id: threadId }, ...traceOptions(threadId, role, action) }) as Promise<AgentStateType>;
 }
 
 async function findSession(id: string | undefined, actor: Actor): Promise<{ id: string } | null> {
@@ -353,10 +365,10 @@ export async function runChat(
       return { reply: inactive, sessionId: fallbackSession };
     }
     if (pending.expiresAt < Date.now()) {
-      await resume(graph, session.id, 'abandon');
+      await resume(graph, session.id, 'abandon', role);
       return { reply: inactive, sessionId: session.id };
     }
-    const final = await resume(graph, session.id, canceling ? 'cancel' : 'confirm');
+    const final = await resume(graph, session.id, canceling ? 'cancel' : 'confirm', role);
     const ran = !canceling && executedThisTurn(final.messages).includes(pending.tool);
     return { reply: final.outcome || 'Done.', sessionId: session.id, ...(ran ? { toolCalls: [pending.tool] } : {}) };
   }
@@ -370,10 +382,10 @@ export async function runChat(
     });
   }
   const threadId = session!.id;
-  const config = { configurable: { thread_id: threadId }, recursionLimit: MAX_ITERATIONS * 2 + 1 };
+  const config = { configurable: { thread_id: threadId }, recursionLimit: MAX_ITERATIONS * 2 + 1, ...traceOptions(threadId, role, 'turn') };
 
   // The user moved on instead of answering a pending confirmation: close it out.
-  if (await pausedAction(graph, threadId)) await resume(graph, threadId, 'abandon');
+  if (await pausedAction(graph, threadId)) await resume(graph, threadId, 'abandon', role);
 
   const userMessage = input.imageDataUrl
     ? new HumanMessage({ content: [{ type: 'text', text: input.message }, { type: 'image_url', image_url: { url: input.imageDataUrl } }] })

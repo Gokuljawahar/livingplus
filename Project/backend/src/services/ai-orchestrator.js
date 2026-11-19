@@ -270,8 +270,19 @@ async function pausedAction(graph, threadId) {
     const snapshot = await graph.getState({ configurable: { thread_id: threadId } });
     return snapshot.next.includes('confirm') ? snapshot.values.pending : null;
 }
-async function resume(graph, threadId, action) {
-    return graph.invoke(new Command({ resume: { action } }), { configurable: { thread_id: threadId } });
+/**
+ * Run name, tags and metadata for tracing. With LANGSMITH_TRACING=true every
+ * agent run (model calls, tool calls, pauses) appears in LangSmith under these.
+ */
+function traceOptions(threadId, role, kind) {
+    return {
+        runName: `livingplus-agent:${kind}`,
+        tags: ['livingplus', `role:${role.toLowerCase()}`],
+        metadata: { thread_id: threadId, role, kind }
+    };
+}
+async function resume(graph, threadId, action, role) {
+    return graph.invoke(new Command({ resume: { action } }), { configurable: { thread_id: threadId }, ...traceOptions(threadId, role, action) });
 }
 async function findSession(id, actor) {
     if (!id)
@@ -302,10 +313,10 @@ export async function runChat(req, model, input) {
             return { reply: inactive, sessionId: fallbackSession };
         }
         if (pending.expiresAt < Date.now()) {
-            await resume(graph, session.id, 'abandon');
+            await resume(graph, session.id, 'abandon', role);
             return { reply: inactive, sessionId: session.id };
         }
-        const final = await resume(graph, session.id, canceling ? 'cancel' : 'confirm');
+        const final = await resume(graph, session.id, canceling ? 'cancel' : 'confirm', role);
         const ran = !canceling && executedThisTurn(final.messages).includes(pending.tool);
         return { reply: final.outcome || 'Done.', sessionId: session.id, ...(ran ? { toolCalls: [pending.tool] } : {}) };
     }
@@ -318,10 +329,10 @@ export async function runChat(req, model, input) {
         });
     }
     const threadId = session.id;
-    const config = { configurable: { thread_id: threadId }, recursionLimit: MAX_ITERATIONS * 2 + 1 };
+    const config = { configurable: { thread_id: threadId }, recursionLimit: MAX_ITERATIONS * 2 + 1, ...traceOptions(threadId, role, 'turn') };
     // The user moved on instead of answering a pending confirmation: close it out.
     if (await pausedAction(graph, threadId))
-        await resume(graph, threadId, 'abandon');
+        await resume(graph, threadId, 'abandon', role);
     const userMessage = input.imageDataUrl
         ? new HumanMessage({ content: [{ type: 'text', text: input.message }, { type: 'image_url', image_url: { url: input.imageDataUrl } }] })
         : new HumanMessage(input.message);
