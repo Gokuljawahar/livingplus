@@ -15,6 +15,23 @@ jobs:
     defaults:
       run:
         working-directory: Project/backend
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: livingplus
+          POSTGRES_PASSWORD: livingplus
+          POSTGRES_DB: livingplus_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U livingplus -d livingplus_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Tests use this database instead of starting an embedded PostgreSQL.
+      TEST_DATABASE_URL: postgresql://livingplus:livingplus@localhost:5432/livingplus_test
     steps:
       - uses: actions/checkout@v4
 

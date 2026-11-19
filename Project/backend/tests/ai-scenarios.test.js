@@ -10,7 +10,6 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import net from 'node:net';
 import { AIMessage } from '@langchain/core/messages';
-import { startLocalPostgres } from '../scripts/local-postgres.js';
 import { inAppZone, periodOf } from '../src/utils/app-time.js';
 const UPLOAD_TEST_DIR = path.resolve('./tests/tmp-local-uploads');
 const PG_TEST_DIR = path.resolve(`./tests/.tmp-postgres-${process.pid}`);
@@ -26,6 +25,11 @@ async function freePort() {
     });
 }
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent';
+// If this file ever exits non-zero with every test passing, say why in the log.
+process.on('exit', (code) => {
+    if (code !== 0)
+        process.stderr.write(`[ai-scenarios] exit code ${code}; process.exitCode=${String(process.exitCode)}; active: ${process.getActiveResourcesInfo().join(',')}\n`);
+});
 process.env.LIVINGPLUS_ROOT_DOMAIN = 'livingplus.com';
 process.env.ENABLE_AI_ORCHESTRATOR = 'true';
 process.env.AI_MODEL = 'google:gemini-3.8-flash';
@@ -82,6 +86,8 @@ before(async () => {
         process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
     }
     else {
+        // Loaded only when needed: embedded-postgres installs process exit hooks.
+        const { startLocalPostgres } = await import('../scripts/local-postgres.js');
         testPostgres = await startLocalPostgres({ dir: PG_TEST_DIR, port: await freePort(), database: 'livingplus_test', persistent: false });
         process.env.DATABASE_URL = testPostgres.url;
     }
