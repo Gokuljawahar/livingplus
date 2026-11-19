@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowUpDown,
@@ -34,6 +34,7 @@ import GuestLoginGate from '../components/GuestLoginGate';
 import MyRequests from '../components/MyRequests';
 import { useOtpCooldown } from '../hooks/useOtpCooldown';
 import { apiErrorMessage, apiErrorStatus } from '../utils/api-error';
+import { phoneOtpErrorMessage, startPhoneVerification, type PhoneChallenge } from '../utils/phone-otp';
 
 interface PGProperty {
   id: string;
@@ -128,6 +129,7 @@ export default function PGDiscovery() {
   const [submitting, setSubmitting] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
+  const otpChallenge = useRef<PhoneChallenge<'BOOKING'> | null>(null);
   const [phoneToken, setPhoneToken] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const [request, setRequest] = useState({ residentName: '', phone: '', email: '', moveInDate: '', notes: '' });
@@ -293,27 +295,31 @@ export default function PGDiscovery() {
     }
     setOtpLoading(true);
     try {
-      const response = await api.post('/auth/otp-request', { phone: request.phone, purpose: 'BOOKING' });
-      if (response.data.devCode) toast.success(`Demo code: ${response.data.devCode}`);
+      otpChallenge.current = await startPhoneVerification(request.phone, 'BOOKING');
+      if (otpChallenge.current.devCode) toast.success(`Demo code: ${otpChallenge.current.devCode}`);
       else toast.success('Verification code sent');
       setOtpSent(true);
       startOtpCooldown();
     } catch (error: unknown) {
-      toast.error(apiErrorMessage(error, 'Could not send code'));
+      toast.error(phoneOtpErrorMessage(error, 'Could not send code'));
     } finally {
       setOtpLoading(false);
     }
   };
 
   const verifyOtp = async () => {
+    if (!otpChallenge.current) {
+      toast.error('Request a new code first');
+      return;
+    }
     setOtpLoading(true);
     try {
-      const response = await api.post('/auth/otp-verify', { phone: request.phone, code: otpCode, purpose: 'BOOKING' });
-      setPhoneToken(response.data.phoneToken);
-      if (guest && request.phone.replace(/\D/g, '') === guest.phone) updateGuestToken(response.data.phoneToken);
+      const data = await otpChallenge.current.verify(otpCode);
+      setPhoneToken(data.phoneToken);
+      if (guest && request.phone.replace(/\D/g, '') === guest.phone) updateGuestToken(data.phoneToken);
       toast.success('Phone verified');
     } catch (error: unknown) {
-      toast.error(apiErrorMessage(error, 'Invalid code'));
+      toast.error(phoneOtpErrorMessage(error, 'Invalid code'));
     } finally {
       setOtpLoading(false);
     }

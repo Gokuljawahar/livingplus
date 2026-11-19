@@ -148,9 +148,19 @@ alone does not create that DB user. The active demo resident uses phone
 
 ## Optional Services
 
-- **SMS:** `SMS_API_URL`, optional `SMS_API_KEY`. Without a provider in
-  development, OTP responses include `devCode`, shown as a UI toast. Production
-  requires working SMS and does not return demo codes.
+- **Phone OTP:** `OTP_PROVIDER` picks who sends the codes.
+  - `sms` (default): the API sends codes via `SMS_API_URL` (optional
+    `SMS_API_KEY`). Without a provider in development, responses include
+    `devCode`, shown as a UI toast. Production requires working SMS.
+  - `firebase`: Firebase Phone Auth sends and checks codes in the browser (with
+    invisible reCAPTCHA); the API verifies the Firebase ID token and issues its
+    usual phone token or resident session. No SMS provider is needed. Setup:
+    create a Firebase project (it can be your Google Cloud project), enable
+    **Authentication > Sign-in method > Phone**, register a Web app, and set
+    `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY` and `FIREBASE_APP_ID`. Add
+    every domain users verify on under **Authentication > Settings > Authorized
+    domains** (`localhost` is included). For demos, add test phone numbers with
+    fixed codes there: no SMS is sent and nothing is billed.
 - **Resident UPI:** the owner configures the property's UPI ID. Residents open
   their UPI app and submit a transaction reference. Claims remain pending until
   the owner verifies receipt; only approval credits the ledger. This is not

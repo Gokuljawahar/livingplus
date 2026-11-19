@@ -12,6 +12,7 @@ import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { buildGuestBookingWhere, isPlaceholderResidentName } from '../utils/guest-bookings.js';
 import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
 import { periodOf, periodRange } from '../utils/app-time.js';
+import { firebaseWebConfig, otpProvider } from '../services/phone-verification.js';
 import { logger } from '../utils/logger.js';
 
 function phoneVariants(phone: string): string[] {
@@ -138,9 +139,11 @@ async function releaseExpiredBookingHolds(): Promise<void> {
 }
 
 export const getPublicConfig = async (_req: Request, res: Response): Promise<any> => {
+  const provider = otpProvider();
   res.json({
     whatsappCloudApiEnabled: featureFlags.whatsappCloudApi,
-    upiPaymentEnabled: featureFlags.upiPayment
+    upiPaymentEnabled: featureFlags.upiPayment,
+    phoneVerification: { provider, ...(provider === 'firebase' ? { firebase: firebaseWebConfig() } : {}) }
   });
 };
 

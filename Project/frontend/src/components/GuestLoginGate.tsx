@@ -1,14 +1,13 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, ClipboardList, Loader2, Phone, Search, ShieldCheck } from 'lucide-react';
 import SplitAuthLayout from './SplitAuthLayout';
 import toast from 'react-hot-toast';
-import api from '../api/axios';
 import { useAuth } from '../context/auth';
 import { normalizePhoneDigits, saveGuestSession, type GuestSession } from '../utils/guest-session';
 import { useOtpCooldown } from '../hooks/useOtpCooldown';
 import { resolveAppHost } from '../utils/pg-host';
-import { apiErrorMessage } from '../utils/api-error';
+import { phoneOtpErrorMessage, startPhoneVerification, type PhoneChallenge } from '../utils/phone-otp';
 
 interface GuestLoginGateProps {
   onVerified: (session: GuestSession) => void;
@@ -26,6 +25,7 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
   const { cooldown, startCooldown } = useOtpCooldown();
   const { login } = useAuth();
   const navigate = useNavigate();
+  const challenge = useRef<PhoneChallenge<'BOOKING'> | null>(null);
 
   const requestCode = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -36,13 +36,13 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
     }
     setLoading(true);
     try {
-      const response = await api.post('/auth/otp-request', { phone: digits, purpose: 'BOOKING' });
-      if (response.data.devCode) toast.success(`Demo code: ${response.data.devCode}`);
+      challenge.current = await startPhoneVerification(digits, 'BOOKING');
+      if (challenge.current.devCode) toast.success(`Demo code: ${challenge.current.devCode}`);
       else toast.success('Verification code sent');
       setStep('code');
       startCooldown();
     } catch (error) {
-      toast.error(apiErrorMessage(error, 'Could not send code'));
+      toast.error(phoneOtpErrorMessage(error, 'Could not send code'));
     } finally {
       setLoading(false);
     }
@@ -51,12 +51,16 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
   const verifyCode = async (event: React.FormEvent) => {
     event.preventDefault();
     const digits = normalizePhoneDigits(phone);
+    if (!challenge.current) {
+      toast.error('Request a new code first');
+      return;
+    }
     setLoading(true);
     try {
-      const response = await api.post('/auth/otp-verify', { phone: digits, code, purpose: 'BOOKING' });
-      const session = saveGuestSession(digits, response.data.phoneToken);
+      const data = await challenge.current.verify(code);
+      const session = saveGuestSession(digits, data.phoneToken);
       onVerified(session);
-      const resident = response.data.resident;
+      const resident = data.resident;
       if (resident?.token && resident?.user) {
         login(resident.token, resident.user);
         const canReachResident = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname) || resolveAppHost().kind === 'property';
@@ -70,7 +74,7 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
       }
       toast.success('Signed in — happy house hunting');
     } catch (error) {
-      toast.error(apiErrorMessage(error, 'Invalid code'));
+      toast.error(phoneOtpErrorMessage(error, 'Invalid code'));
     } finally {
       setLoading(false);
     }

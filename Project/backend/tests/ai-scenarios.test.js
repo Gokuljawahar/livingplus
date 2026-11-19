@@ -811,6 +811,108 @@ describe('file storage drivers', () => {
         await assert.rejects(storage.directUploadUrl('uploads/x.pdf', 'application/pdf'), /DIRECT_UPLOAD_UNSUPPORTED/);
     });
 });
+describe('Firebase phone verification (OTP_PROVIDER=firebase)', () => {
+    let auth;
+    let phoneVerification;
+    const respond = () => ({
+        statusCode: 200,
+        body: undefined,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    });
+    const nowSeconds = () => Math.floor(Date.now() / 1000);
+    // Fake Firebase Admin verifier: "tok:<phone>:<uid>[:<age seconds>][:<provider>]".
+    const fakeVerifier = async (idToken) => {
+        const [kind, phone, uid, age = '5', provider = 'phone'] = idToken.split(':');
+        if (kind !== 'tok')
+            throw new Error('Firebase ID token has invalid signature');
+        return { phone_number: `+${phone}`, uid: uid, auth_time: nowSeconds() - Number(age), firebase: { sign_in_provider: provider } };
+    };
+    before(async () => {
+        auth = await import('../src/controllers/pg-auth.controller.js');
+        phoneVerification = await import('../src/services/phone-verification.js');
+        process.env.OTP_PROVIDER = 'firebase';
+        phoneVerification.setFirebaseVerifierForTests(fakeVerifier);
+    });
+    after(() => {
+        delete process.env.OTP_PROVIDER;
+        phoneVerification.setFirebaseVerifierForTests(null);
+    });
+    const verify = async (body, propertyId) => {
+        const res = respond();
+        await auth.verifyOtp({ body, ...(propertyId ? { pgPropertyId: propertyId } : {}) }, res);
+        return res;
+    };
+    it('tells clients to use Firebase instead of server-sent codes', async () => {
+        const res = respond();
+        await auth.requestOtp({ body: { phone: '9811100001', purpose: 'BOOKING' } }, res);
+        assert.equal(res.statusCode, 409);
+        assert.equal(res.body.provider, 'firebase');
+    });
+    it('issues a single-use phone token for a verified Firebase sign-in', async () => {
+        const res = await verify({ phone: '9811100001', purpose: 'BOOKING', firebaseIdToken: 'tok:919811100001:uid-a' });
+        assert.equal(res.statusCode, 200);
+        assert.match(res.body.phoneToken, /^vrf_[0-9a-f]{32}$/);
+        assert.equal(await auth.consumePhoneToken('919811100001', res.body.phoneToken), true);
+        assert.equal(await auth.consumePhoneToken('919811100001', res.body.phoneToken), false, 'phone tokens stay single-use');
+    });
+    it('refuses replayed, mismatched, stale, non-phone and forged tokens', async () => {
+        assert.equal((await verify({ phone: '9811100002', purpose: 'BOOKING', firebaseIdToken: 'tok:919811100002:uid-b' })).statusCode, 200);
+        const replay = await verify({ phone: '9811100002', purpose: 'BOOKING', firebaseIdToken: 'tok:919811100002:uid-b' });
+        assert.equal(replay.statusCode, 400);
+        assert.match(replay.body.message, /already used/);
+        const mismatch = await verify({ phone: '9811100003', purpose: 'BOOKING', firebaseIdToken: 'tok:919811109999:uid-c' });
+        assert.equal(mismatch.statusCode, 400);
+        assert.match(mismatch.body.message, /does not match/);
+        assert.equal((await verify({ phone: '9811100004', purpose: 'BOOKING', firebaseIdToken: 'tok:919811100004:uid-d:900' })).statusCode, 400, 'older than 10 minutes');
+        assert.equal((await verify({ phone: '9811100005', purpose: 'BOOKING', firebaseIdToken: 'tok:919811100005:uid-e:5:password' })).statusCode, 400, 'not a phone sign-in');
+        assert.equal((await verify({ phone: '9811100006', purpose: 'BOOKING', firebaseIdToken: 'forged' })).statusCode, 400);
+        assert.equal((await verify({ phone: '9811100007', purpose: 'BOOKING', code: '123456' })).statusCode, 400, 'server codes are not accepted');
+    });
+    it('signs an active resident in on their PG host', async () => {
+        const res = await verify({ phone: '9200000002', purpose: 'TENANT_LOGIN', firebaseIdToken: 'tok:919200000002:uid-resident' }, ids.prop.id);
+        assert.equal(res.statusCode, 200);
+        assert.ok(res.body.token);
+        assert.equal(res.body.user.role, 'PG_TENANT');
+    });
+    it('reports a missing Firebase project as unavailable, not as a bad code', async () => {
+        phoneVerification.setFirebaseVerifierForTests(null);
+        const keep = process.env.FIREBASE_PROJECT_ID;
+        delete process.env.FIREBASE_PROJECT_ID;
+        try {
+            assert.equal((await verify({ phone: '9811100008', purpose: 'BOOKING', firebaseIdToken: 'tok:919811100008:uid-f' })).statusCode, 503);
+        }
+        finally {
+            if (keep !== undefined)
+                process.env.FIREBASE_PROJECT_ID = keep;
+            phoneVerification.setFirebaseVerifierForTests(fakeVerifier);
+        }
+    });
+    it('publishes the provider and Firebase web config to the frontend', async () => {
+        const { getPublicConfig } = await import('../src/controllers/pg.controller.js');
+        const keep = { p: process.env.FIREBASE_PROJECT_ID, k: process.env.FIREBASE_WEB_API_KEY };
+        process.env.FIREBASE_PROJECT_ID = 'livingplus-demo';
+        process.env.FIREBASE_WEB_API_KEY = 'AIza-test-web-key';
+        try {
+            const res = respond();
+            await getPublicConfig({}, res);
+            assert.deepEqual(res.body.phoneVerification, {
+                provider: 'firebase',
+                firebase: { apiKey: 'AIza-test-web-key', authDomain: 'livingplus-demo.firebaseapp.com', projectId: 'livingplus-demo', appId: '' }
+            });
+        }
+        finally {
+            if (keep.p === undefined)
+                delete process.env.FIREBASE_PROJECT_ID;
+            else
+                process.env.FIREBASE_PROJECT_ID = keep.p;
+            if (keep.k === undefined)
+                delete process.env.FIREBASE_WEB_API_KEY;
+            else
+                process.env.FIREBASE_WEB_API_KEY = keep.k;
+        }
+    });
+});
 describe('HTTP hardening', () => {
     let base = '';
     let server;

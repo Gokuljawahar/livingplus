@@ -6,6 +6,7 @@ import { prisma } from '../app.js';
 import { getJwtSecret } from '../utils/auth-config.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { logger } from '../utils/logger.js';
+import { otpProvider, verifyFirebasePhoneToken } from '../services/phone-verification.js';
 
 function normalizePhone(phone: string): string {
   const digits = phone.replace(/\D/g, '');
@@ -188,6 +189,9 @@ export const requestOtp = async (req: Request, res: Response): Promise<any> => {
   if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production') {
     return res.status(400).json({ message: 'Open your PG-specific resident portal to sign in' });
   }
+  if (otpProvider() === 'firebase') {
+    return res.status(409).json({ message: 'This server verifies phones with Firebase; send the code from the app.', provider: 'firebase' });
+  }
 
   try {
     const recent = await prisma.otpCode.count({
@@ -215,31 +219,58 @@ export const requestOtp = async (req: Request, res: Response): Promise<any> => {
 export const verifyOtp = async (req: Request, res: Response): Promise<any> => {
   const phone = normalizePhone(String(req.body.phone || ''));
   const purpose = ['BOOKING', 'TENANT_LOGIN'].includes(String(req.body.purpose)) ? String(req.body.purpose) : 'BOOKING';
-  const code = String(req.body.code || '').trim();
   const propertyId = (req as any).pgPropertyId as string | undefined;
-  if (!code) return res.status(400).json({ message: 'Verification code is required' });
   if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production') {
     return res.status(400).json({ message: 'Open your PG-specific resident portal to sign in' });
   }
 
   try {
-    const record = await prisma.otpCode.findFirst({
-      where: { phone, purpose, propertyId: propertyId || null, consumedAt: null },
-      orderBy: { createdAt: 'desc' }
-    });
-    if (!record || record.expiresAt < new Date()) return res.status(400).json({ message: 'Code expired. Request a new one.' });
-    if (record.attempts >= 5) return res.status(429).json({ message: 'Too many attempts. Request a new code.' });
+    let recordId: string;
+    if (otpProvider() === 'firebase') {
+      const idToken = typeof req.body.firebaseIdToken === 'string' ? req.body.firebaseIdToken.trim() : '';
+      if (!idToken) return res.status(400).json({ message: 'Phone verification is required' });
+      let verified;
+      try {
+        verified = await verifyFirebasePhoneToken(idToken);
+      } catch (error: any) {
+        if (error?.message === 'FIREBASE_NOT_CONFIGURED') {
+          logger.error('OTP_PROVIDER=firebase but FIREBASE_PROJECT_ID is not set');
+          return res.status(503).json({ message: 'Phone verification is not available right now' });
+        }
+        return res.status(400).json({ message: 'Phone verification failed. Request a new code.' });
+      }
+      if (verified.phone !== phone) return res.status(400).json({ message: 'The verified number does not match the phone you entered' });
+      // One phone token per Firebase sign-in: a replayed ID token is refused.
+      const proofHash = hashOtp(`firebase:${verified.uid}:${verified.authTime}`);
+      if (await prisma.otpCode.findFirst({ where: { codeHash: proofHash }, select: { id: true } })) {
+        return res.status(400).json({ message: 'This verification was already used. Request a new code.' });
+      }
+      const record = await prisma.otpCode.create({
+        data: { phone, propertyId: propertyId || null, purpose, codeHash: proofHash, expiresAt: new Date(Date.now() + 5 * 60 * 1000) }
+      });
+      recordId = record.id;
+    } else {
+      const code = String(req.body.code || '').trim();
+      if (!code) return res.status(400).json({ message: 'Verification code is required' });
+      const record = await prisma.otpCode.findFirst({
+        where: { phone, purpose, propertyId: propertyId || null, consumedAt: null },
+        orderBy: { createdAt: 'desc' }
+      });
+      if (!record || record.expiresAt < new Date()) return res.status(400).json({ message: 'Code expired. Request a new one.' });
+      if (record.attempts >= 5) return res.status(429).json({ message: 'Too many attempts. Request a new code.' });
 
-    const expected = Buffer.from(record.codeHash, 'hex');
-    const actual = Buffer.from(hashOtp(code), 'hex');
-    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
-      await prisma.otpCode.update({ where: { id: record.id }, data: { attempts: { increment: 1 } } });
-      return res.status(400).json({ message: 'Invalid verification code' });
+      const expected = Buffer.from(record.codeHash, 'hex');
+      const actual = Buffer.from(hashOtp(code), 'hex');
+      if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+        await prisma.otpCode.update({ where: { id: record.id }, data: { attempts: { increment: 1 } } });
+        return res.status(400).json({ message: 'Invalid verification code' });
+      }
+      recordId = record.id;
     }
 
     const verifiedToken = `vrf_${randomUUID().replace(/-/g, '')}`;
     await prisma.otpCode.update({
-      where: { id: record.id },
+      where: { id: recordId },
       data: { verifiedToken, tokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000) }
     });
 

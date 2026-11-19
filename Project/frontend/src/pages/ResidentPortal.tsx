@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeftRight, Bell, Building2, Check, Download, History, Loader2, LogOut, Menu, Plus, ReceiptIndianRupee, Send, UserRound, UtensilsCrossed, Wallet, Wrench } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
@@ -16,6 +16,7 @@ import MoneyOverview from '../components/MoneyOverview';
 import StayServices from '../components/StayServices';
 import SplitAuthLayout from '../components/SplitAuthLayout';
 import { apiErrorMessage } from '../utils/api-error';
+import { phoneOtpErrorMessage, startPhoneVerification, type PhoneChallenge } from '../utils/phone-otp';
 
 type Stay = {
   id: string; name: string; status: string; monthlyRent: number; depositAmount: number;
@@ -53,6 +54,7 @@ function ResidentPortalView() {
   const [step, setStep] = useState<'phone' | 'code' | 'portal'>(() => (localStorage.getItem(RESIDENT_TOKEN_KEY) ? 'portal' : 'phone'));
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
+  const challenge = useRef<PhoneChallenge<'TENANT_LOGIN'> | null>(null);
   const [loading, setLoading] = useState(false);
   const { cooldown, startCooldown } = useOtpCooldown();
   const [activeTab, setActiveTab] = useState<'stays' | 'money' | 'food' | 'services' | 'maintenance' | 'roomchange' | 'notifications' | 'profile'>('stays');
@@ -118,13 +120,13 @@ function ResidentPortalView() {
     event.preventDefault();
     setLoading(true);
     try {
-      const response = await api.post('/auth/otp-request', { phone, purpose: 'TENANT_LOGIN' });
-      if (response.data.devCode) toast.success(`Demo code: ${response.data.devCode}`);
+      challenge.current = await startPhoneVerification(phone, 'TENANT_LOGIN');
+      if (challenge.current.devCode) toast.success(`Demo code: ${challenge.current.devCode}`);
       else toast.success('Code sent');
       setStep('code');
       startCooldown();
     } catch (error) {
-      toast.error(apiErrorMessage(error, 'Could not send code'));
+      toast.error(phoneOtpErrorMessage(error, 'Could not send code'));
     } finally {
       setLoading(false);
     }
@@ -132,14 +134,18 @@ function ResidentPortalView() {
 
   const verifyCode = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!challenge.current) {
+      toast.error('Request a new code first');
+      return;
+    }
     setLoading(true);
     try {
-      const response = await api.post('/auth/otp-verify', { phone, code, purpose: 'TENANT_LOGIN' });
-      login(response.data.token, response.data.user);
+      const data = await challenge.current.verify(code);
+      login(data.token, data.user);
       setStep('portal');
       toast.success('Welcome back');
     } catch (error) {
-      toast.error(apiErrorMessage(error, 'Invalid code'));
+      toast.error(phoneOtpErrorMessage(error, 'Invalid code'));
     } finally {
       setLoading(false);
     }
