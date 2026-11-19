@@ -17,7 +17,7 @@ import { randomBytes } from 'crypto';
 import { Annotation, Command, END, GraphRecursionError, MessagesAnnotation, START, StateGraph, interrupt } from '@langchain/langgraph';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, trimMessages } from '@langchain/core/messages';
 import { prisma } from '../app.js';
-import { actorFromRequest, toolCatalogue, toolDefinitionsFor } from './ai-tools.js';
+import { actorFromRequest, parseToolArgs, toolCatalogue, toolDefinitionsFor } from './ai-tools.js';
 import { modelFailure, modelTimeoutMs } from './ai-provider.js';
 import { getCheckpointer } from './ai-checkpointer.js';
 const db = new Proxy({}, {
@@ -182,7 +182,14 @@ async function buildAgentGraph(model, actor, role, userKey) {
                 results.push(new ToolMessage({ tool_call_id: callId, name: call.name, status: 'error', content: `ERROR: tool ${call.name} is not available to role ${role}.` }));
                 continue;
             }
-            const args = call.args ?? {};
+            // Validate before anything runs or is offered for confirmation; the
+            // model gets the exact problem back and can retry.
+            const parsed = parseToolArgs(call.name, call.args);
+            if (!parsed.ok) {
+                results.push(new ToolMessage({ tool_call_id: callId, name: call.name, status: 'error', content: `ERROR: invalid arguments for ${call.name}:\n${parsed.error}` }));
+                continue;
+            }
+            const args = parsed.args;
             if (tool.requiresConfirmation) {
                 const pending = {
                     nonce: randomBytes(16).toString('hex'),

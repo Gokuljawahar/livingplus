@@ -12,6 +12,7 @@ import { createExpense, listExpenses } from './pg-expenses.js';
 import { notifyWhatsAppTemplate } from './pg-notifications.js';
 import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
 import { periodOf } from '../utils/app-time.js';
+import { z } from 'zod';
 const db = new Proxy({}, {
     get: (_target, property) => prisma[property]
 });
@@ -54,6 +55,45 @@ export async function actorFromRequest(req) {
     return { userId: user.userId ? String(user.userId) : null, role, phones, propertyIds, isSuperAdmin, ...(effectivePropertyId ? { propertyId: effectivePropertyId } : {}) };
 }
 const str = (v) => String(v || '').trim();
+// Tool argument schemas (Zod). Each tool's schema is the single source for
+// both the JSON schema shown to the model and validation of what it sends.
+// Models sometimes send numbers/booleans as strings and null for "not
+// given"; those are normalized. Unknown keys are dropped.
+const num = () => z.preprocess((v) => (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : v), z.number());
+const bool = () => z.preprocess((v) => (v === 'true' ? true : v === 'false' ? false : v), z.boolean());
+const withoutNulls = (value) => (value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null))
+    : value ?? {});
+function toolArgs(shape) {
+    return z.preprocess(withoutNulls, z.object(shape));
+}
+/** JSON schema for a tool, in the plain subset every model provider accepts. */
+export function toolParameters(schema) {
+    const clean = (node) => {
+        if (Array.isArray(node))
+            return node.map(clean);
+        if (!node || typeof node !== 'object')
+            return node;
+        const out = {};
+        for (const [key, value] of Object.entries(node)) {
+            if (key === '$schema' || key === 'additionalProperties' || key === 'propertyNames')
+                continue;
+            out[key] = clean(value);
+        }
+        return out;
+    };
+    return clean(z.toJSONSchema(schema, { io: 'output', unrepresentable: 'any' }));
+}
+/** Validates and normalizes model-supplied arguments for a tool. */
+export function parseToolArgs(name, args) {
+    const tool = toolCatalogue[name];
+    if (!tool)
+        return { ok: false, error: `unknown tool ${name}` };
+    const result = tool.schema.safeParse(args ?? {});
+    return result.success
+        ? { ok: true, args: result.data }
+        : { ok: false, error: z.prettifyError(result.error) };
+}
 // Room-swap handshake helpers: resolve the caller's own active stay and
 // render beds the way swap candidates see them (room context, no people).
 async function residentRoomTenant(actor) {
@@ -124,7 +164,7 @@ function compactProperty(property) {
 export const toolCatalogue = {
     search_properties: {
         description: 'Find published PG properties matching location, budget, gender policy, room type, AC, food and amenities. A resident never sees their current PG here; room moves inside it go through the room change tools, never a new booking.',
-        parameters: { type: 'object', properties: { location: { type: 'string' }, budget_max: { type: 'number' }, gender: { type: 'string', enum: ['MEN', 'WOMEN', 'ANY'] }, room_type: { type: 'string' }, ac: { type: 'boolean' }, food_included: { type: 'boolean' }, amenities: { type: 'array', items: { type: 'string' } } } },
+        schema: toolArgs({ location: z.string().optional(), budget_max: num().optional(), gender: z.enum(['MEN', 'WOMEN', 'ANY']).optional(), room_type: z.string().optional(), ac: bool().optional(), food_included: bool().optional(), amenities: z.array(z.string()).optional() }),
         requiresConfirmation: false,
         roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
         execute: async (actor, args = {}) => {
@@ -145,7 +185,7 @@ export const toolCatalogue = {
     },
     get_property_details: {
         description: 'Verified details, rules and current availability for one published property.',
-        parameters: { type: 'object', properties: { property_id: { type: 'string' } } },
+        schema: toolArgs({ property_id: z.string().optional() }),
         requiresConfirmation: false,
         roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
         execute: async (actor, args) => {
@@ -165,7 +205,7 @@ export const toolCatalogue = {
     },
     check_bed_availability: {
         description: 'Fresh bed-level availability for a property, optionally one room.',
-        parameters: { type: 'object', properties: { property_id: { type: 'string' }, room_id: { type: 'string' } }, required: ['property_id'] },
+        schema: toolArgs({ property_id: z.string(), room_id: z.string().optional() }),
         requiresConfirmation: false,
         roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
         execute: async (actor, args) => {
@@ -186,14 +226,7 @@ export const toolCatalogue = {
     },
     create_booking_request: {
         description: 'Create a PENDING booking request. Only call after the resident explicitly confirmed bed, date, rent and deposit.',
-        parameters: {
-            type: 'object',
-            properties: {
-                bed_id: { type: 'string' }, move_in_date: { type: 'string' }, resident_name: { type: 'string' },
-                phone: { type: 'string' }, phone_token: { type: 'string' }, idempotency_key: { type: 'string' }
-            },
-            required: ['bed_id', 'move_in_date', 'resident_name', 'phone', 'phone_token']
-        },
+        schema: toolArgs({ bed_id: z.string(), move_in_date: z.string(), resident_name: z.string(), phone: z.string(), phone_token: z.string(), idempotency_key: z.string().optional() }),
         requiresConfirmation: true,
         roles: ['GUEST', 'PG_TENANT'],
         execute: async (actor, args) => {
@@ -253,7 +286,7 @@ export const toolCatalogue = {
     },
     get_booking_status: {
         description: 'Status of the caller’s own booking. Never reveal whether other records exist.',
-        parameters: { type: 'object', properties: { booking_ref: { type: 'string' }, phone: { type: 'string' } }, required: ['booking_ref', 'phone'] },
+        schema: toolArgs({ booking_ref: z.string(), phone: z.string() }),
         requiresConfirmation: false,
         roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
         execute: async (actor, args) => {
@@ -276,7 +309,7 @@ export const toolCatalogue = {
     },
     get_my_stay: {
         description: 'Show the signed-in resident’s stay, room and rent balance on the current PG host. Residents only.',
-        parameters: { type: 'object', properties: {} },
+        schema: toolArgs({}),
         requiresConfirmation: false,
         roles: ['PG_TENANT'],
         execute: async (actor) => {
@@ -307,7 +340,7 @@ export const toolCatalogue = {
     },
     get_my_maintenance_requests: {
         description: 'List the signed-in resident’s maintenance requests and statuses on the current PG host.',
-        parameters: { type: 'object', properties: {} },
+        schema: toolArgs({}),
         requiresConfirmation: false,
         roles: ['PG_TENANT'],
         execute: async (actor) => {
@@ -329,14 +362,7 @@ export const toolCatalogue = {
     },
     create_maintenance_ticket: {
         description: 'File a maintenance ticket for the resident’s own active stay on this PG host.',
-        parameters: {
-            type: 'object',
-            properties: {
-                property_id: { type: 'string', description: 'Optional; the current resident PG host is used automatically.' }, title: { type: 'string' }, description: { type: 'string' },
-                category: { type: 'string' }, image_key: { type: 'string' }
-            },
-            required: ['title', 'description']
-        },
+        schema: toolArgs({ property_id: z.string().describe('Optional; the current resident PG host is used automatically.').optional(), title: z.string(), description: z.string(), category: z.string().optional(), image_key: z.string().optional() }),
         requiresConfirmation: true,
         roles: ['PG_TENANT'],
         execute: async (actor, args) => {
@@ -362,16 +388,7 @@ export const toolCatalogue = {
     },
     request_room_change: {
         description: 'Open a room swap or room move request for the signed-in resident’s own active stay. Swaps match with another resident; moves target a vacant bed.',
-        parameters: {
-            type: 'object',
-            properties: {
-                request_type: { type: 'string', enum: ['SWAP', 'MOVE'] },
-                to_bed_id: { type: 'string', description: 'Required for MOVE: a vacant bed id from find_room_change_matches. Never set for SWAP.' },
-                preferences: { type: 'object', description: 'Swap preferences such as floor or room type; unstated means flexible.' },
-                reason: { type: 'string' }
-            },
-            required: ['request_type']
-        },
+        schema: toolArgs({ request_type: z.enum(['SWAP', 'MOVE']), to_bed_id: z.string().describe('Required for MOVE: a vacant bed id from find_room_change_matches. Never set for SWAP.').optional(), preferences: z.record(z.string(), z.unknown()).describe('Swap preferences such as floor or room type; unstated means flexible.').optional(), reason: z.string().optional() }),
         requiresConfirmation: true,
         roles: ['PG_TENANT'],
         execute: async (actor, args) => {
@@ -416,7 +433,7 @@ export const toolCatalogue = {
     },
     get_my_room_change_requests: {
         description: 'List the signed-in resident’s room swap / move requests, including proposals awaiting their answer.',
-        parameters: { type: 'object', properties: {} },
+        schema: toolArgs({}),
         requiresConfirmation: false,
         roles: ['PG_TENANT'],
         execute: async (actor) => {
@@ -446,7 +463,7 @@ export const toolCatalogue = {
     },
     find_room_change_matches: {
         description: 'Find candidates for the resident’s open request: compatible swap partners (identity masked) or vacant beds for a move.',
-        parameters: { type: 'object', properties: {} },
+        schema: toolArgs({}),
         requiresConfirmation: false,
         roles: ['PG_TENANT'],
         execute: async (actor) => {
@@ -495,11 +512,7 @@ export const toolCatalogue = {
     },
     propose_room_swap: {
         description: 'Propose a swap to another resident’s pending request. The partner accepts or declines; nothing moves until staff confirm.',
-        parameters: {
-            type: 'object',
-            properties: { my_request_id: { type: 'string' }, their_request_id: { type: 'string' } },
-            required: ['my_request_id', 'their_request_id']
-        },
+        schema: toolArgs({ my_request_id: z.string(), their_request_id: z.string() }),
         requiresConfirmation: true,
         roles: ['PG_TENANT'],
         execute: async (actor, args) => {
@@ -537,11 +550,7 @@ export const toolCatalogue = {
     },
     respond_room_swap: {
         description: 'Answer a swap proposal addressed to the signed-in resident. Accepting sends it to staff for the final move.',
-        parameters: {
-            type: 'object',
-            properties: { request_id: { type: 'string' }, decision: { type: 'string', enum: ['ACCEPT', 'DECLINE'] } },
-            required: ['request_id', 'decision']
-        },
+        schema: toolArgs({ request_id: z.string(), decision: z.enum(['ACCEPT', 'DECLINE']) }),
         requiresConfirmation: true,
         roles: ['PG_TENANT'],
         execute: async (actor, args) => {
@@ -566,7 +575,7 @@ export const toolCatalogue = {
     },
     list_room_change_requests: {
         description: 'List room swap and move requests across the caller’s properties, newest first. Staff only; resident phone numbers are never returned.',
-        parameters: { type: 'object', properties: { status: { type: 'string', description: 'Optional status filter such as ACCEPTED or PENDING_MATCH.' } } },
+        schema: toolArgs({ status: z.string().describe('Optional status filter such as ACCEPTED or PENDING_MATCH.').optional() }),
         requiresConfirmation: false,
         roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
         execute: async (actor, args = {}) => {
@@ -599,11 +608,7 @@ export const toolCatalogue = {
     },
     decide_room_change: {
         description: 'Staff decision on a room swap or move. Approving moves the residents to their new beds atomically. Staff only, audited.',
-        parameters: {
-            type: 'object',
-            properties: { request_id: { type: 'string' }, decision: { type: 'string', enum: ['APPROVE_AND_MOVE', 'DECLINE'] }, note: { type: 'string' } },
-            required: ['request_id', 'decision']
-        },
+        schema: toolArgs({ request_id: z.string(), decision: z.enum(['APPROVE_AND_MOVE', 'DECLINE']), note: z.string().optional() }),
         requiresConfirmation: true,
         roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
         execute: async (actor, args) => {
@@ -686,7 +691,7 @@ export const toolCatalogue = {
     },
     get_occupancy_report: {
         description: 'Occupancy aggregates for properties the caller may access.',
-        parameters: { type: 'object', properties: { property_id: { type: 'string' }, period: { type: 'string' } } },
+        schema: toolArgs({ property_id: z.string().optional(), period: z.string().optional() }),
         requiresConfirmation: false,
         roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
         execute: async (actor, args) => {
@@ -711,7 +716,7 @@ export const toolCatalogue = {
     },
     get_pending_rent: {
         description: 'Outstanding rent for the caller’s properties. Owners only.',
-        parameters: { type: 'object', properties: { property_id: { type: 'string' }, period: { type: 'string' } } },
+        schema: toolArgs({ property_id: z.string().optional(), period: z.string().optional() }),
         requiresConfirmation: false,
         roles: ['PG_OWNER', 'SUPER_ADMIN'],
         execute: async (actor, args) => {
@@ -732,7 +737,7 @@ export const toolCatalogue = {
     },
     update_maintenance_status: {
         description: 'Move a maintenance ticket through its lifecycle. Staff only, audited.',
-        parameters: { type: 'object', properties: { ticket_id: { type: 'string' }, status: { type: 'string', enum: ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] } }, required: ['ticket_id', 'status'] },
+        schema: toolArgs({ ticket_id: z.string(), status: z.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED']) }),
         requiresConfirmation: false,
         roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
         execute: async (actor, args) => {
@@ -746,7 +751,7 @@ export const toolCatalogue = {
     },
     send_rent_reminders: {
         description: 'Send rent-due reminders for outstanding entries in the caller’s properties. Returns counts only; resident phone numbers stay server-side.',
-        parameters: { type: 'object', properties: { property_id: { type: 'string' }, period: { type: 'string' }, force: { type: 'boolean' } } },
+        schema: toolArgs({ property_id: z.string().optional(), period: z.string().optional(), force: bool().optional() }),
         requiresConfirmation: true,
         roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
         execute: async (actor, args = {}) => {
@@ -765,14 +770,7 @@ export const toolCatalogue = {
     },
     log_expense: {
         description: 'Record a property expense (food, staff, maintenance, utilities). Only call after the owner explicitly confirmed amount, category and date.',
-        parameters: {
-            type: 'object',
-            properties: {
-                property_id: { type: 'string' }, category: { type: 'string' },
-                amount: { type: 'number' }, spent_on: { type: 'string' }, note: { type: 'string' }
-            },
-            required: ['property_id', 'amount']
-        },
+        schema: toolArgs({ property_id: z.string(), category: z.string().optional(), amount: num(), spent_on: z.string().optional(), note: z.string().optional() }),
         requiresConfirmation: true,
         roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
         execute: async (actor, args = {}) => {
@@ -790,7 +788,7 @@ export const toolCatalogue = {
     },
     get_expense_summary: {
         description: 'Totaled expenses by category for the caller’s properties, optionally one month (YYYY-MM).',
-        parameters: { type: 'object', properties: { property_id: { type: 'string' }, period: { type: 'string' } } },
+        schema: toolArgs({ property_id: z.string().optional(), period: z.string().optional() }),
         requiresConfirmation: false,
         roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
         execute: async (actor, args = {}) => {
@@ -803,13 +801,7 @@ export const toolCatalogue = {
     },
     propose_electricity_split: {
         description: 'Compute a per-tenant electricity split for a property and period and save it as a reviewable DRAFT. Nothing is billed until approve_electricity_bill runs.',
-        parameters: {
-            type: 'object',
-            properties: {
-                property_id: { type: 'string' }, period: { type: 'string' }, total_amount: { type: 'number' }
-            },
-            required: ['property_id', 'period', 'total_amount']
-        },
+        schema: toolArgs({ property_id: z.string(), period: z.string(), total_amount: num() }),
         requiresConfirmation: false,
         roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
         execute: async (actor, args = {}) => {
@@ -829,7 +821,7 @@ export const toolCatalogue = {
     },
     approve_electricity_bill: {
         description: 'Approve a DRAFT electricity bill, creating one ELECTRICITY ledger entry per tenant for the period. Only call after the owner explicitly confirmed the split.',
-        parameters: { type: 'object', properties: { bill_id: { type: 'string' } }, required: ['bill_id'] },
+        schema: toolArgs({ bill_id: z.string() }),
         requiresConfirmation: true,
         roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
         execute: async (actor, args = {}) => {
@@ -840,7 +832,7 @@ export const toolCatalogue = {
     },
     set_meal_preference: {
         description: 'Opt the caller’s own resident record in or out of the monthly food charge. Only call after explicit confirmation.',
-        parameters: { type: 'object', properties: { opt_out: { type: 'boolean' } }, required: ['opt_out'] },
+        schema: toolArgs({ opt_out: bool() }),
         requiresConfirmation: true,
         roles: ['PG_TENANT'],
         execute: async (actor, args = {}) => {
@@ -850,7 +842,7 @@ export const toolCatalogue = {
     },
     send_notification: {
         description: 'Queue an approved transactional template message. Allowlisted templates only.',
-        parameters: { type: 'object', properties: { recipient_phone: { type: 'string' }, template: { type: 'string', enum: ['booking_received', 'booking_approved', 'booking_rejected', 'rent_due', 'check_in_reminder'] } }, required: ['recipient_phone', 'template'] },
+        schema: toolArgs({ recipient_phone: z.string(), template: z.enum(['booking_received', 'booking_approved', 'booking_rejected', 'rent_due', 'check_in_reminder']) }),
         requiresConfirmation: true,
         roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
         execute: async (actor, args) => {
@@ -883,6 +875,6 @@ export const toolCatalogue = {
 export function toolDefinitionsFor(role) {
     return Object.entries(toolCatalogue)
         .filter(([name, tool]) => tool.roles.includes(role) && (name !== 'send_notification' || (process.env.ENABLE_WHATSAPP_CLOUD_API === 'true' && Boolean(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID))))
-        .map(([name, tool]) => ({ name, description: tool.description, parameters: tool.parameters }));
+        .map(([name, tool]) => ({ name, description: tool.description, parameters: toolParameters(tool.schema) }));
 }
 //# sourceMappingURL=ai-tools.js.map

@@ -781,6 +781,57 @@ function recordingProvider(script: Array<{ text?: string; calls?: Array<{ name: 
   };
 }
 
+describe('tool argument validation (Zod)', () => {
+  const ALLOWED_KEYS = new Set(['type', 'properties', 'required', 'enum', 'items', 'description']);
+
+  it('generates provider-friendly JSON schemas from the Zod definitions', () => {
+    const walk = (node: any, where: string) => {
+      for (const [key, value] of Object.entries(node)) {
+        assert.ok(ALLOWED_KEYS.has(key), `${where}: unexpected schema key ${key}`);
+        if (key === 'properties') for (const [prop, sub] of Object.entries(value as object)) walk(sub, `${where}.${prop}`);
+        if (key === 'items') walk(value, `${where}[]`);
+      }
+    };
+    for (const [name, tool] of Object.entries(tools.toolCatalogue) as [string, any][]) walk(tools.toolParameters(tool.schema), name);
+    assert.deepEqual(tools.toolParameters(tools.toolCatalogue.get_booking_status.schema), {
+      type: 'object',
+      properties: { booking_ref: { type: 'string' }, phone: { type: 'string' } },
+      required: ['booking_ref', 'phone']
+    });
+  });
+
+  it('normalizes harmless model quirks', () => {
+    const parsed = tools.parseToolArgs('search_properties', { location: 'OMR', budget_max: '12000', ac: 'true', room_type: null, invented_flag: 1 });
+    assert.equal(parsed.ok, true);
+    assert.deepEqual(parsed.args, { location: 'OMR', budget_max: 12000, ac: true });
+  });
+
+  it('rejects missing required fields, wrong types and unknown enum values', () => {
+    const missing = tools.parseToolArgs('get_booking_status', { booking_ref: 'BK-1' });
+    assert.equal(missing.ok, false);
+    assert.match(missing.error, /phone/);
+    assert.equal(tools.parseToolArgs('search_properties', { budget_max: 'cheap' }).ok, false);
+    assert.equal(tools.parseToolArgs('search_properties', { gender: 'OTHER' }).ok, false);
+    assert.equal(tools.parseToolArgs('set_meal_preference', {}).ok, false);
+    assert.equal(tools.parseToolArgs('no_such_tool', {}).ok, false);
+  });
+
+  it('returns invalid arguments to the model instead of preparing the action', async () => {
+    const model = recordingProvider([
+      { calls: [{ name: 'create_booking_request', args: { bed_id: ids.bedFree1.id, move_in_date: '2026-12-01', resident_name: 'Zod Guest' } }] },
+      { text: 'I need your phone number and verification to book.' }
+    ]);
+    const before = await prisma.pGBooking.count();
+    const result = await orchestrator.runChat(guestReq(), model, { message: 'book bed 1' });
+    assert.equal(result.needsConfirmation, undefined, 'nothing is offered for confirmation');
+    assert.equal(result.reply, 'I need your phone number and verification to book.');
+    const toolReply = model.seen[1]!.find((m: any) => m.getType() === 'tool');
+    assert.match(String(toolReply.content), /invalid arguments for create_booking_request/);
+    assert.match(String(toolReply.content), /phone_token/);
+    assert.equal(await prisma.pGBooking.count(), before);
+  });
+});
+
 describe('durable agent threads (LangGraph checkpointer)', () => {
   const expenseCall = (note: string) => ({ calls: [{ name: 'log_expense', args: { property_id: ids.prop.id, category: 'OTHER', amount: 321, spent_on: '2025-01-03', note } }] });
   after(async () => {
@@ -913,6 +964,58 @@ describe('file storage drivers', () => {
     assert.equal(storage.localUploadPath('../../etc/passwd'), null);
     assert.equal(await storage.viewUrl({ protocol: 'http', get: () => 'x' } as any, 'local/00000000-0000-4000-8000-000000000000.webp'), null);
     await assert.rejects(storage.directUploadUrl('uploads/x.pdf', 'application/pdf'), /DIRECT_UPLOAD_UNSUPPORTED/);
+  });
+});
+
+describe('request body validation (Zod)', () => {
+  let controllers: any;
+  const respond = () => ({
+    statusCode: 200,
+    body: undefined as any,
+    status(code: number) { this.statusCode = code; return this; },
+    json(body: unknown) { this.body = body; return this; }
+  });
+  const call = async (handler: string, body: any, extra: any = {}) => {
+    const res = respond();
+    await controllers[handler]({ body, params: {}, headers: {}, query: {}, user: { userId: ids.owner.id, role: 'PG_OWNER' }, ...extra } as any, res as any);
+    return res;
+  };
+  before(async () => { controllers = await import('../src/controllers/pg.controller.js'); });
+
+  it('rejects wrong-typed booking fields with 400 instead of crashing', async () => {
+    const res = await call('createBookingRequest', { propertyId: ids.prop.id, residentName: 123, phone: '9876543210', moveInDate: '2026-12-01' });
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.body.message, 'Property, name, phone and move-in date are required');
+    assert.deepEqual(res.body.issues.map((i: any) => i.path), ['residentName']);
+  });
+
+  it('accepts null optional fields and extra form fields on bookings', async () => {
+    const res = await call('createBookingRequest', {
+      propertyId: ids.prop.id, residentName: 'Valid Person', phone: '9876543210', moveInDate: '2026-12-01',
+      email: null, notes: null, bedId: null, someFormOnlyField: 'ignored'
+    });
+    assert.notEqual(res.statusCode, 400, 'passes validation (then fails phone verification)');
+    assert.equal(res.statusCode, 403);
+  });
+
+  it('validates ledger amounts and methods, accepting numeric strings', async () => {
+    assert.equal((await call('recordRentPayment', { amount: 'abc', method: 'CASH' }, { params: { entryId: 'x' } })).statusCode, 400);
+    assert.equal((await call('recordRentPayment', { amount: -5, method: 'CASH' }, { params: { entryId: 'x' } })).statusCode, 400);
+    assert.equal((await call('recordRentPayment', { amount: 500, method: 'BITCOIN' }, { params: { entryId: 'x' } })).statusCode, 400);
+    const ok = await call('recordRentPayment', { amount: '500', method: 'cash' }, { params: { entryId: 'missing-entry' } });
+    assert.equal(ok.statusCode, 404, 'valid input reaches the ledger lookup');
+    const badNotes = await call('createRentEntry', { tenantId: 't', period: '2026-12', amount: 5, dueDate: '2026-12-05', notes: { x: 1 } });
+    assert.equal(badNotes.statusCode, 400);
+    assert.deepEqual(badNotes.body.issues.map((i: any) => i.path), ['notes']);
+  });
+
+  it('keeps 404s for unknown stays and validates claim references', async () => {
+    const badRef = await call('createResidentPaymentClaim', { amount: 100, reference: 'x' });
+    assert.equal(badRef.statusCode, 400);
+    assert.equal(badRef.body.message, 'Enter a positive amount and a valid UPI transaction reference');
+    const review = await call('reviewPaymentClaim', { status: 'maybe' }, { params: { claimId: 'x' } });
+    assert.equal(review.statusCode, 400);
+    assert.equal(review.body.message, 'Choose approve or reject');
   });
 });
 

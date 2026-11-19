@@ -13,6 +13,8 @@ import { buildGuestBookingWhere, isPlaceholderResidentName } from '../utils/gues
 import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
 import { periodOf, periodRange } from '../utils/app-time.js';
 import { firebaseWebConfig, otpProvider } from '../services/phone-verification.js';
+import { parseBody } from '../utils/validate.js';
+import { bookingRequestBody, paymentClaimBody, paymentClaimReviewBody, rentEntryBody, rentPaymentBody } from '../validation/pg.schemas.js';
 import { logger } from '../utils/logger.js';
 
 function phoneVariants(phone: string): string[] {
@@ -391,11 +393,10 @@ export const updateBedStatus = async (req: Request, res: Response): Promise<any>
 };
 
 export const createBookingRequest = async (req: Request, res: Response): Promise<any> => {
-  const { propertyId, bedId, residentName, phone, email, moveInDate, notes, phoneToken } = req.body;
-  const idemKey = String(req.body.idempotencyKey || req.headers['x-idempotency-key'] || '').trim().slice(0, 80) || null;
-  if (!propertyId || !residentName?.trim() || !phone?.trim() || !moveInDate) {
-    return res.status(400).json({ message: 'Property, name, phone and move-in date are required' });
-  }
+  const body = parseBody(bookingRequestBody, req, res, 'Property, name, phone and move-in date are required');
+  if (!body) return;
+  const { propertyId, bedId, residentName, phone, email, moveInDate, notes, phoneToken } = body;
+  const idemKey = String(body.idempotencyKey || req.headers['x-idempotency-key'] || '').trim().slice(0, 80) || null;
   if (isPlaceholderResidentName(residentName)) {
     return res.status(400).json({ message: 'Please enter the resident\u2019s real name as on their ID' });
   }
@@ -1086,10 +1087,11 @@ export const listOwnerRentEntries = async (req: Request, res: Response): Promise
 };
 
 export const createRentEntry = async (req: Request, res: Response): Promise<any> => {
-  const { tenantId, period, amount, dueDate, entryType, notes } = req.body;
-  const value = Number(amount);
+  const body = parseBody(rentEntryBody, req, res, 'Tenant, period, positive amount and due date are required');
+  if (!body) return;
+  const { tenantId, period, amount: value, dueDate, entryType, notes } = body;
   const due = new Date(dueDate);
-  if (!tenantId || !period || !Number.isFinite(value) || value <= 0 || Number.isNaN(due.getTime())) {
+  if (Number.isNaN(due.getTime())) {
     return res.status(400).json({ message: 'Tenant, period, positive amount and due date are required' });
   }
 
@@ -1099,7 +1101,7 @@ export const createRentEntry = async (req: Request, res: Response): Promise<any>
     if (!await canManageProperty(req, tenant.propertyId, ['OWNER'])) {
       return res.status(403).json({ message: 'You do not have access to this property' });
     }
-    const type = ['RENT', 'DEPOSIT', 'UTILITY'].includes(String(entryType).toUpperCase())
+    const type = ['RENT', 'DEPOSIT', 'UTILITY'].includes(String(entryType || '').toUpperCase())
       ? String(entryType).toUpperCase()
       : 'RENT';
     const entry = await db.pGRentEntry.create({
@@ -1110,7 +1112,7 @@ export const createRentEntry = async (req: Request, res: Response): Promise<any>
         amount: value,
         dueDate: due,
         invoiceCode: `PG-${Date.now()}`,
-        notes: notes?.trim() || null
+        notes: notes || null
       }
     });
     res.status(201).json(entry);
@@ -1239,11 +1241,9 @@ export const approveElectricityBill = async (req: Request, res: Response): Promi
 };
 
 export const recordRentPayment = async (req: Request, res: Response): Promise<any> => {
-  const amount = Number(req.body.amount);
-  const method = String(req.body.method || '').toUpperCase();
-  if (!Number.isFinite(amount) || amount <= 0 || !['CASH', 'NEFT', 'UPI', 'OTHER'].includes(method)) {
-    return res.status(400).json({ message: 'A positive payment amount and valid payment method are required' });
-  }
+  const body = parseBody(rentPaymentBody, req, res, 'A positive payment amount and valid payment method are required');
+  if (!body) return;
+  const { amount, method } = body;
 
   try {
     const entry = await db.pGRentEntry.findUnique({
@@ -1269,7 +1269,7 @@ export const recordRentPayment = async (req: Request, res: Response): Promise<an
           paidAmount,
           status,
           method,
-          reference: req.body.reference?.trim() || current.reference,
+          reference: body.reference || current.reference,
           paidAt: status === 'PAID' ? new Date() : current.paidAt
         }
       });
@@ -1553,20 +1553,18 @@ export const listResidentNotifications = async (req: Request, res: Response): Pr
 };
 
 export const createResidentPaymentClaim = async (req: Request, res: Response): Promise<any> => {
-  const amount = Number(req.body.amount);
-  const reference = String(req.body.reference || '').trim();
-  if (!Number.isFinite(amount) || amount <= 0 || !/^[a-zA-Z0-9._/-]{6,80}$/.test(reference)) {
-    return res.status(400).json({ message: 'Enter a positive amount and a valid UPI transaction reference' });
-  }
+  const body = parseBody(paymentClaimBody, req, res, 'Enter a positive amount and a valid UPI transaction reference');
+  if (!body) return;
+  const { amount, reference } = body;
 
   try {
     const scope = await residentScope(req);
     if (!scope) return res.status(403).json({ message: 'Resident access is required on this PG host' });
-    const tenant = scope.tenants.find((item: any) => item.id === String(req.body.tenantId) && ['ACTIVE', 'NOTICE_PERIOD'].includes(item.status));
+    const tenant = scope.tenants.find((item: any) => item.id === String(body.tenantId) && ['ACTIVE', 'NOTICE_PERIOD'].includes(item.status));
     if (!tenant) return res.status(404).json({ message: 'Active stay not found' });
     const entry = await db.pGRentEntry.findFirst({
       where: {
-        id: String(req.body.rentEntryId || ''),
+        id: String(body.rentEntryId || ''),
         tenantId: tenant.id,
         entryType: { in: ['RENT', 'DEPOSIT', 'UTILITY', 'ELECTRICITY', 'FOOD'] },
         status: { in: ['DUE', 'PARTIAL', 'OVERDUE'] }
@@ -1725,9 +1723,9 @@ export const listOwnerPaymentClaims = async (req: Request, res: Response): Promi
 };
 
 export const reviewPaymentClaim = async (req: Request, res: Response): Promise<any> => {
-  const status = String(req.body.status || '').toUpperCase();
-  const responseNote = String(req.body.responseNote || '').trim().slice(0, 300);
-  if (!['APPROVED', 'REJECTED'].includes(status)) return res.status(400).json({ message: 'Choose approve or reject' });
+  const body = parseBody(paymentClaimReviewBody, req, res, 'Choose approve or reject');
+  if (!body) return;
+  const { status, responseNote } = body;
   if (status === 'REJECTED' && !responseNote) return res.status(400).json({ message: 'A reason is required when rejecting a payment claim' });
 
   try {

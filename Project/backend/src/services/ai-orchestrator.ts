@@ -18,7 +18,7 @@ import { randomBytes } from 'crypto';
 import { Annotation, Command, END, GraphRecursionError, MessagesAnnotation, START, StateGraph, interrupt } from '@langchain/langgraph';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, trimMessages, type BaseMessage } from '@langchain/core/messages';
 import { prisma } from '../app.js';
-import { actorFromRequest, toolCatalogue, toolDefinitionsFor, type Actor } from './ai-tools.js';
+import { actorFromRequest, parseToolArgs, toolCatalogue, toolDefinitionsFor, type Actor } from './ai-tools.js';
 import { modelFailure, modelTimeoutMs, type ToolDefinition } from './ai-provider.js';
 import { getCheckpointer } from './ai-checkpointer.js';
 
@@ -223,7 +223,14 @@ async function buildAgentGraph(model: AgentModel, actor: Actor, role: string, us
         results.push(new ToolMessage({ tool_call_id: callId, name: call.name, status: 'error', content: `ERROR: tool ${call.name} is not available to role ${role}.` }));
         continue;
       }
-      const args = call.args ?? {};
+      // Validate before anything runs or is offered for confirmation; the
+      // model gets the exact problem back and can retry.
+      const parsed = parseToolArgs(call.name, call.args);
+      if (!parsed.ok) {
+        results.push(new ToolMessage({ tool_call_id: callId, name: call.name, status: 'error', content: `ERROR: invalid arguments for ${call.name}:\n${parsed.error}` }));
+        continue;
+      }
+      const args = parsed.args;
       if (tool.requiresConfirmation) {
         const pending: PendingAction = {
           nonce: randomBytes(16).toString('hex'),
