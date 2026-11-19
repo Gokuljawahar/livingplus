@@ -34,6 +34,11 @@ const server = app.listen(PORT, async () => {
   } else {
     startMonthlyRentScheduler(prisma);
     startRentReminderScheduler(prisma);
+    // Embed any listings that are new or changed since the last run.
+    void import('./services/semantic-search.js')
+      .then(({ indexProperties }) => indexProperties())
+      .then((result) => { if (result.indexed) logger.info(`[search] Indexed ${result.indexed} listings`); })
+      .catch((error) => logger.warn({ err: error }, '[search] Startup indexing failed'));
   }
 });
 

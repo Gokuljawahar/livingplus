@@ -93,6 +93,10 @@ const SORTS = [
 
 const GENDER_LABELS: Record<string, string> = { MEN: 'Men', WOMEN: 'Women', ANY: 'Co-living' };
 
+function keywordMatch(property: PGProperty, text: string): boolean {
+  return `${property.name} ${property.locality} ${property.city} ${property.address}`.toLowerCase().includes(text);
+}
+
 export default function PGDiscovery() {
   const { user, logout: authLogout } = useAuth();
   const [guest, setGuest] = useState<GuestSession | null>(() => getGuestSession());
@@ -121,6 +125,8 @@ export default function PGDiscovery() {
   const [foodOnly, setFoodOnly] = useState(false);
   const [amenities, setAmenities] = useState<string[]>([]);
   const [sort, setSort] = useState('featured');
+  // Meaning-based matches from /pg/search (null: keyword search only).
+  const [semanticScores, setSemanticScores] = useState<Map<string, number> | null>(null);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   // Booking-request modal state.
@@ -199,15 +205,38 @@ export default function PGDiscovery() {
     [properties, ownPropertyIds]
   );
 
+  // Ask the API for meaning-based matches once typing pauses. Any failure
+  // (or semantic search being off) leaves plain keyword search in place.
+  useEffect(() => {
+    const text = query.trim();
+    let live = true;
+    const timer = window.setTimeout(() => {
+      if (text.length < 3) {
+        setSemanticScores(null);
+        return;
+      }
+      api.get('/pg/search', { params: { q: text } })
+        .then((response) => {
+          if (!live) return;
+          const data = response.data as { semantic?: boolean; results?: { propertyId: string; score: number }[] };
+          setSemanticScores(data.semantic ? new Map((data.results || []).map((r) => [r.propertyId, r.score])) : null);
+        })
+        .catch(() => { if (live) setSemanticScores(null); });
+    }, 350);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [query]);
+
   const queryFiltered = useMemo(() => {
     const text = query.trim().toLowerCase();
     return visibleProperties.filter((property) => {
-      const haystack = `${property.name} ${property.locality} ${property.city} ${property.address}`.toLowerCase();
-      const matchesText = !text || haystack.includes(text);
+      const matchesText = !text || keywordMatch(property, text) || Boolean(semanticScores?.has(property.id));
       const matchesScope = !queryScope || queryScope === property.locality;
       return matchesText && matchesScope;
     });
-  }, [visibleProperties, query, queryScope]);
+  }, [visibleProperties, query, queryScope, semanticScores]);
 
   const amenityCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -234,12 +263,18 @@ export default function PGDiscovery() {
       return rent >= min && rent <= max;
     });
     const rentOf = (property: PGProperty) => startingRent(property);
+    const text = query.trim().toLowerCase();
+    if (sort === 'featured' && text && semanticScores) {
+      // Exact text hits first, then the closest matches by meaning.
+      const rank = (property: PGProperty) => (keywordMatch(property, text) ? 1 : 0) + (semanticScores.get(property.id) ?? 0);
+      list.sort((a, b) => rank(b) - rank(a));
+    }
     if (sort === 'price-asc') list.sort((a, b) => rentOf(a) - rentOf(b));
     if (sort === 'price-desc') list.sort((a, b) => rentOf(b) - rentOf(a));
     if (sort === 'beds-desc') list.sort((a, b) => b.availableBeds - a.availableBeds);
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queryFiltered, gender, roomTypes, minRent, maxRent, acOnly, foodOnly, amenities, sort]);
+  }, [queryFiltered, gender, roomTypes, minRent, maxRent, acOnly, foodOnly, amenities, sort, query, semanticScores]);
 
   const activeFilterCount =
     (gender ? 1 : 0) +
@@ -657,6 +692,11 @@ export default function PGDiscovery() {
                   </>
                 ) : (
                   ' across Chennai'
+                )}
+                {query.trim() && semanticScores && semanticScores.size > 0 && (
+                  <span className="ml-2 border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800" title="Includes PGs that match what you described, not just the exact words">
+                    Smart search
+                  </span>
                 )}
               </p>
               <label className="flex items-center gap-1.5 text-xs font-medium text-slate-500">

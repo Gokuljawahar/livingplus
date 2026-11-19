@@ -20,4 +20,13 @@ export const aiVoiceLimiter = rateLimit({
     legacyHeaders: false,
     message: { message: 'Too many voice requests. Slow down and retry.' }
 });
+// Each search embeds the query; typed searches are debounced client-side.
+export const semanticSearchLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: () => Math.max(1, Number(process.env.SEARCH_RATE_LIMIT_PER_MINUTE) || 60),
+    keyGenerator: callerKey('search'),
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    message: { message: 'Too many searches. Slow down and retry.' }
+});
 //# sourceMappingURL=ai-rate-limit.js.map

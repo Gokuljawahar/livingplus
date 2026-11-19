@@ -14,7 +14,8 @@ import { applyHttpHardening } from './middleware/http-hardening.js';
 import { logger } from './utils/logger.js';
 
 const app = express();
-export const prisma = new PrismaClient();
+// Search vectors are large and internal: never returned unless selected explicitly.
+export const prisma = new PrismaClient({ omit: { pGProperty: { searchEmbedding: true } } }) as unknown as PrismaClient;
 
 applyHttpHardening(app);
 app.use(express.json({ limit: '1mb' }));

@@ -43,6 +43,7 @@ import {
   reviewPaymentClaim,
   markDepositRefunded,
   listProperties,
+  searchPropertiesSemantic,
   listPropertyStaff,
   recordRentPayment,
   removePropertyStaff,
@@ -54,7 +55,7 @@ import {
 } from '../controllers/pg.controller.js';
 import multer from 'multer';
 import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware.js';
-import { aiChatLimiter, aiVoiceLimiter } from '../middleware/ai-rate-limit.js';
+import { aiChatLimiter, aiVoiceLimiter, semanticSearchLimiter } from '../middleware/ai-rate-limit.js';
 import { getAiStatus, postChat, postTranscribe } from '../controllers/ai.controller.js';
 import {
   createRoomChange,
@@ -103,6 +104,7 @@ router.post('/tenant/room-changes/:requestId/proposals', authenticate, proposeRo
 router.post('/tenant/room-changes/:requestId/response', authenticate, respondRoomSwap);
 router.get('/owner/activity', authenticate, listAuditLogs);
 router.get('/properties', optionalAuthenticate, listProperties);
+router.get('/search', optionalAuthenticate, semanticSearchLimiter, searchPropertiesSemantic);
 router.get('/bookings/mine', listGuestBookings);
 router.post('/bookings', optionalAuthenticate, createBookingRequest);
 router.post('/bookings/:bookingRef/cancel', cancelBookingRequest);

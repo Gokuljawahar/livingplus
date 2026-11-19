@@ -1016,6 +1016,138 @@ describe('Firebase phone verification (OTP_PROVIDER=firebase)', () => {
         }
     });
 });
+describe('semantic PG search', () => {
+    let search;
+    let embeddingsMod;
+    let quietPg;
+    const embedCalls = [];
+    // Deterministic stand-in for an embedding model: words hashed into 64 buckets.
+    const fakeVector = (text) => {
+        const v = new Array(64).fill(0);
+        for (const word of text.toLowerCase().match(/[a-z]+/g) || []) {
+            let h = 0;
+            for (const ch of word)
+                h = (h * 31 + ch.charCodeAt(0)) % 64;
+            v[h] += 1;
+        }
+        return v;
+    };
+    const fakeEmbeddings = (purpose) => ({
+        async embedQuery(text) { embedCalls.push(`${purpose}:query`); return fakeVector(text); },
+        async embedDocuments(texts) { embedCalls.push(`${purpose}:docs:${texts.length}`); return texts.map(fakeVector); }
+    });
+    before(async () => {
+        search = await import('../src/services/semantic-search.js');
+        embeddingsMod = await import('../src/services/ai-embeddings.js');
+        process.env.ENABLE_SEMANTIC_SEARCH = 'true';
+        process.env.AI_EMBEDDING_MODEL = 'fake:bag-of-words';
+        process.env.SEMANTIC_SEARCH_MIN_SCORE = '0.3';
+        embeddingsMod.setEmbeddingsForTests(fakeEmbeddings);
+        quietPg = await prisma.pGProperty.create({
+            data: {
+                name: 'Lotus Nest', address: '9, Rajiv Gandhi Salai', locality: 'Thoraipakkam', city: 'Chennai', genderPolicy: 'ANY',
+                description: 'Quiet calm PG near the OMR tech park, pure veg food, study friendly.',
+                amenities: ['Wi-Fi', 'Veg meals'], houseRules: ['No loud music'], status: 'ACTIVE'
+            }
+        });
+        const room = await prisma.pGRoom.create({ data: { propertyId: quietPg.id, roomNumber: 'L1', roomType: 'SHARED', monthlyRent: 9000, foodIncluded: true, status: 'ACTIVE' } });
+        await prisma.pGBed.create({ data: { roomId: room.id, label: 'Bed A', status: 'AVAILABLE' } });
+    });
+    after(async () => {
+        await prisma.pGProperty.update({ where: { id: quietPg.id }, data: { status: 'INACTIVE' } });
+        embeddingsMod.setEmbeddingsForTests(null);
+        search.clearSemanticQueryCache();
+        for (const key of ['ENABLE_SEMANTIC_SEARCH', 'AI_EMBEDDING_MODEL', 'SEMANTIC_SEARCH_MIN_SCORE'])
+            delete process.env[key];
+    });
+    it('describes listings from stable facts only', async () => {
+        const property = await prisma.pGProperty.findUnique({ where: { id: quietPg.id }, include: { rooms: true } });
+        const text = search.propertySearchText(property);
+        assert.match(text, /Lotus Nest: a paying-guest \(PG\) accommodation in Thoraipakkam, Chennai\./);
+        assert.match(text, /OMR tech park/);
+        assert.match(text, /Food included\./);
+        assert.match(text, /Monthly rent from 9000 to 9000 rupees\./);
+        assert.doesNotMatch(text, /bed/i, 'live bed availability is not embedded');
+    });
+    it('indexes listings once and re-embeds only what changed', async () => {
+        const first = await search.indexProperties();
+        assert.ok(first.indexed >= 3);
+        assert.deepEqual(await search.indexProperties(), { indexed: 0, skipped: first.indexed + first.skipped });
+        await prisma.pGProperty.update({ where: { id: quietPg.id }, data: { description: 'Quiet calm PG near the OMR tech park, pure veg food, study friendly, rooftop garden.' } });
+        const again = await search.indexProperties();
+        assert.equal(again.indexed, 1);
+    });
+    it('keeps vectors out of normal property queries', async () => {
+        const plain = await prisma.pGProperty.findUnique({ where: { id: quietPg.id } });
+        assert.equal('searchEmbedding' in plain, false);
+        const explicit = await prisma.pGProperty.findUnique({ where: { id: quietPg.id }, select: { searchEmbedding: true } });
+        assert.equal(explicit.searchEmbedding.length, 64);
+    });
+    it('ranks listings by meaning through the search endpoint', async () => {
+        const { searchPropertiesSemantic } = await import('../src/controllers/pg.controller.js');
+        const res = { status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; } };
+        await searchPropertiesSemantic({ query: { q: 'quiet place near OMR tech park with veg food' }, headers: {}, user: {} }, res);
+        assert.equal(res.body.semantic, true);
+        assert.equal(res.body.results[0].propertyId, quietPg.id);
+        for (let i = 1; i < res.body.results.length; i += 1)
+            assert.ok(res.body.results[i - 1].score >= res.body.results[i].score);
+    });
+    it('caches query vectors', async () => {
+        search.clearSemanticQueryCache();
+        embedCalls.length = 0;
+        await search.semanticScores('veg food near OMR');
+        await search.semanticScores('veg food near OMR');
+        assert.deepEqual(embedCalls, ['query:query']);
+    });
+    it('lets the assistant rank structured results by a free-text wish', async () => {
+        const results = await tools.toolCatalogue.search_properties.execute(guestActor, { query: 'calm study friendly PG near OMR tech park, veg food' });
+        assert.equal(results[0].property_id, quietPg.id);
+        assert.ok(results.every((r) => typeof r.match_score === 'number'));
+    });
+    it('falls back cleanly when semantic search is off', async () => {
+        process.env.ENABLE_SEMANTIC_SEARCH = 'false';
+        try {
+            const { searchPropertiesSemantic } = await import('../src/controllers/pg.controller.js');
+            const res = { status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; } };
+            await searchPropertiesSemantic({ query: { q: 'veg food' }, headers: {}, user: {} }, res);
+            assert.deepEqual(res.body, { semantic: false, results: [] });
+            const results = await tools.toolCatalogue.search_properties.execute(guestActor, { query: 'veg food' });
+            assert.ok(results.length > 0);
+            assert.ok(results.every((r) => r.match_score === undefined));
+        }
+        finally {
+            process.env.ENABLE_SEMANTIC_SEARCH = 'true';
+        }
+    });
+    it('configures Gemini embeddings per purpose and reports missing providers', async () => {
+        embeddingsMod.setEmbeddingsForTests(null);
+        const keep = process.env.AI_EMBEDDING_MODEL;
+        try {
+            process.env.AI_EMBEDDING_MODEL = 'google-genai:gemini-embedding-001';
+            const api = fakeGemini([{ embedding: { values: [0.1, 0.2, 0.3] } }]);
+            try {
+                const query = await embeddingsMod.createEmbeddings('query');
+                assert.deepEqual(await query.embedQuery('veg food near OMR'), [0.1, 0.2, 0.3]);
+                const sent = api.seen[0];
+                assert.match(sent.url, /models\/gemini-embedding-001:embedContent/);
+                assert.equal(sent.body.taskType, 'RETRIEVAL_QUERY');
+                assert.equal(sent.body.outputDimensionality, 768);
+                assert.equal((await embeddingsMod.createEmbeddings('document')).taskType, 'RETRIEVAL_DOCUMENT');
+            }
+            finally {
+                api.restore();
+            }
+            process.env.AI_EMBEDDING_MODEL = 'cohere:embed-v4';
+            await assert.rejects(embeddingsMod.createEmbeddings('query'), /EMBEDDINGS_INIT_FAILED: install @langchain\/cohere/);
+            process.env.AI_EMBEDDING_MODEL = 'acme:x';
+            await assert.rejects(embeddingsMod.createEmbeddings('query'), /unsupported provider "acme"/);
+        }
+        finally {
+            process.env.AI_EMBEDDING_MODEL = keep;
+            embeddingsMod.setEmbeddingsForTests(fakeEmbeddings);
+        }
+    });
+});
 describe('HTTP hardening', () => {
     let base = '';
     let server;

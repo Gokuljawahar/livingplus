@@ -189,6 +189,18 @@ alone does not create that DB user. The active demo resident uses phone
   for Vertex AI. To spend Google Cloud credits, use Vertex AI or create the AI
   Studio key in a project with billing linked. `GET /api/pg/ai/status` reports
   the active provider and model. Voice also needs browser microphone permission.
+- **Semantic PG search:** set `ENABLE_SEMANTIC_SEARCH=true` and
+  `AI_EMBEDDING_MODEL` (default `google-genai:gemini-embedding-001`, using
+  `GOOGLE_API_KEY`). Published listings are embedded from stable facts
+  (location, description, amenities, rules, room types, rent range) and
+  re-embedded only when those change. The listing search box adds matches by
+  meaning ("quiet PG near the OMR tech park with veg food") to its keyword
+  matches, and the assistant's `search_properties` tool ranks by a free-text
+  `query`. Vectors live on `PGProperty` and are ranked in process, which suits
+  PG-listing scale; pgvector on Cloud SQL is the path for much larger
+  catalogues. Indexing runs at startup (internal scheduler), after listing
+  edits, and via `POST /internal/cron/search-index` (Cloud Scheduler). Tune
+  `SEMANTIC_SEARCH_MIN_SCORE` against real queries.
 - **Maps:** optional frontend `VITE_GOOGLE_MAPS_API_KEY`.
 - **Uploads:** private files are stored by `UPLOAD_STORAGE`: `local`
   (default, `backend/private-uploads`), `gcs` (Google Cloud Storage bucket
@@ -240,7 +252,7 @@ leaves scheduled jobs to Cloud Scheduler.
 |---|---|---|
 | Database | Cloud SQL for PostgreSQL | `DATABASE_URL=postgresql://USER:PASS@/livingplus?host=/cloudsql/PROJECT:REGION:INSTANCE`, plus `--add-cloudsql-instances` on the service |
 | Files | Cloud Storage | `UPLOAD_STORAGE=gcs`, `GCS_BUCKET`; grant the service account Storage Object Admin on the bucket and Service Account Token Creator on itself (for signed URLs) |
-| Scheduled jobs | Cloud Scheduler | `SCHEDULER_MODE=external`; HTTP POST jobs to `/internal/cron/monthly-rent` (`5 0 1 * *`, time zone Asia/Kolkata) and `/internal/cron/rent-reminders` (daily), with an OIDC token whose audience matches `CRON_OIDC_AUDIENCE` and service account `CRON_SERVICE_ACCOUNT` |
+| Scheduled jobs | Cloud Scheduler | `SCHEDULER_MODE=external`; HTTP POST jobs to `/internal/cron/monthly-rent` (`5 0 1 * *`, time zone Asia/Kolkata) and `/internal/cron/rent-reminders` (daily) and `/internal/cron/search-index` (hourly, when semantic search is on), with an OIDC token whose audience matches `CRON_OIDC_AUDIENCE` and service account `CRON_SERVICE_ACCOUNT` |
 | AI assistant | Vertex AI (Gemini) | `AI_MODEL=google:<model>` with no `GOOGLE_API_KEY`: the service account authenticates (grant Vertex AI User) |
 | Agent state | Cloud SQL (same database) | LangGraph checkpoints live in the `langgraph` schema, created automatically |
 

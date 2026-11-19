@@ -15,6 +15,7 @@ import type { PrismaClient } from '@prisma/client';
 import { generateMonthlyRentEntries } from '../services/pg-rent-scheduler.js';
 import { sendDueRentReminders } from '../services/pg-rent-reminders.js';
 import { periodOf } from '../utils/app-time.js';
+import { indexProperties } from '../services/semantic-search.js';
 import { logger } from '../utils/logger.js';
 
 const oidcClient = new OAuth2Client();
@@ -78,6 +79,17 @@ export function cronRoutes(prisma: PrismaClient): Router {
     } catch (error) {
       logger.error({ err: error }, '[cron] rent-reminders failed');
       res.status(500).json({ job: 'rent-reminders', message: 'failed' });
+    }
+  });
+
+  // Embeds new or changed listings for semantic search (safe to run often).
+  router.post('/search-index', async (_req, res) => {
+    try {
+      const result = await indexProperties();
+      res.json({ job: 'search-index', ...result });
+    } catch (error) {
+      logger.error({ err: error }, '[cron] search-index failed');
+      res.status(500).json({ job: 'search-index', message: 'failed' });
     }
   });
 

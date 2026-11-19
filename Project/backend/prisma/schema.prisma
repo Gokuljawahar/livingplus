@@ -42,6 +42,11 @@ model PGProperty {
   bookingLockMinutes Int @default(120)
   rentDay      Int      @default(1)
   rentDueDay   Int      @default(5)
+  // Semantic search index (see services/semantic-search.ts).
+  searchEmbedding      Float[]   @default([])
+  searchEmbeddingModel String?
+  searchTextHash       String?
+  searchIndexedAt      DateTime?
   upiId        String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

@@ -14,6 +14,7 @@ import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExcl
 import { periodOf, periodRange } from '../utils/app-time.js';
 import { firebaseWebConfig, otpProvider } from '../services/phone-verification.js';
 import { parseBody } from '../utils/validate.js';
+import { minSemanticScore, scheduleSearchIndex, semanticScores, semanticSearchEnabled } from '../services/semantic-search.js';
 import { bookingRequestBody, paymentClaimBody, paymentClaimReviewBody, rentEntryBody, rentPaymentBody } from '../validation/pg.schemas.js';
 import { logger } from '../utils/logger.js';
 
@@ -149,6 +150,35 @@ export const getPublicConfig = async (_req: Request, res: Response): Promise<any
   });
 };
 
+/**
+ * Meaning-based search over published PGs. Returns ranked property ids; the
+ * client combines them with its own keyword match and filters. Responds with
+ * semantic: false (and no results) when semantic search is off or failing,
+ * so the client simply keeps its keyword search.
+ */
+export const searchPropertiesSemantic = async (req: Request, res: Response): Promise<any> => {
+  const query = String(req.query.q || '').trim().slice(0, 200);
+  if (query.length < 2 || !semanticSearchEnabled()) return res.json({ semantic: false, results: [] });
+  try {
+    const hiddenPropertyIds = await ownStayPropertyIds(req);
+    const where = {
+      ...ownPropertyExclusionWhere(hiddenPropertyIds),
+      ...(requestPropertyId(req) ? { id: requestPropertyId(req) } : {})
+    };
+    const scores = await semanticScores(query, where);
+    const minimum = minSemanticScore();
+    const results = [...scores.entries()]
+      .filter(([, score]) => score >= minimum)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 50)
+      .map(([propertyId, score]) => ({ propertyId, score: Math.round(score * 1000) / 1000 }));
+    res.json({ semantic: true, results });
+  } catch (error) {
+    logger.warn({ err: error }, 'Semantic search failed; client falls back to keyword search');
+    res.json({ semantic: false, results: [] });
+  }
+};
+
 export const listProperties = async (req: Request, res: Response): Promise<any> => {
   const search = String(req.query.search || '').trim();
   const locality = String(req.query.locality || '').trim();
@@ -248,6 +278,7 @@ export const createProperty = async (req: Request, res: Response): Promise<any> 
       }
     });
     logAudit(property.id, user.id, 'PROPERTY_CREATED', 'PGProperty', property.id, property.name);
+    scheduleSearchIndex(property.id);
     res.status(201).json(property);
   } catch (error) {
     logger.error({ err: error }, 'PG property creation error');
@@ -301,6 +332,7 @@ export const updateProperty = async (req: Request, res: Response): Promise<any> 
 
   try {
     const updated = await db.pGProperty.update({ where: { id: propertyId }, data });
+    scheduleSearchIndex(propertyId);
     res.json(updated);
   } catch (error) {
     logger.error({ err: error }, 'PG property update error');
@@ -362,6 +394,7 @@ export const createRoom = async (req: Request, res: Response): Promise<any> => {
       include: { beds: true }
     });
     logAudit(String(propertyId), currentUser(req)?.id, 'ROOM_CREATED', 'PGRoom', room.id, `${room.roomNumber} · ${bedCount} beds`);
+    scheduleSearchIndex(String(propertyId));
     res.status(201).json(room);
   } catch (error) {
     logger.error({ err: error }, 'PG room creation error');

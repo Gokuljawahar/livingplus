@@ -6,6 +6,13 @@ export declare function currentUser(req: Request): {
 } | null;
 export declare function canManageProperty(req: Request, propertyId: string, roles?: string[]): Promise<boolean>;
 export declare const getPublicConfig: (_req: Request, res: Response) => Promise<any>;
+/**
+ * Meaning-based search over published PGs. Returns ranked property ids; the
+ * client combines them with its own keyword match and filters. Responds with
+ * semantic: false (and no results) when semantic search is off or failing,
+ * so the client simply keeps its keyword search.
+ */
+export declare const searchPropertiesSemantic: (req: Request, res: Response) => Promise<any>;
 export declare const listProperties: (req: Request, res: Response) => Promise<any>;
 export declare const listOwnerProperties: (req: Request, res: Response) => Promise<any>;
 export declare const createProperty: (req: Request, res: Response) => Promise<any>;

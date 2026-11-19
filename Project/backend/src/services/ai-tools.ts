@@ -20,6 +20,7 @@ import { notifyWhatsAppTemplate } from './pg-notifications.js';
 import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
 import { periodOf } from '../utils/app-time.js';
 import { z } from 'zod';
+import { semanticScores, semanticSearchEnabled } from './semantic-search.js';
 
 const db = new Proxy({} as Record<string, any>, {
   get: (_target, property) => (prisma as any)[property]
@@ -188,16 +189,15 @@ function compactProperty(property: any) {
 
 export const toolCatalogue: Record<string, ToolExecutor> = {
   search_properties: {
-    description: 'Find published PG properties matching location, budget, gender policy, room type, AC, food and amenities. A resident never sees their current PG here; room moves inside it go through the room change tools, never a new booking.',
-    schema: toolArgs({ location: z.string().optional(), budget_max: num().optional(), gender: z.enum(['MEN', 'WOMEN', 'ANY']).optional(), room_type: z.string().optional(), ac: bool().optional(), food_included: bool().optional(), amenities: z.array(z.string()).optional() }),
+    description: 'Find published PG properties matching location, budget, gender policy, room type, AC, food and amenities. A resident never sees their current PG here; room moves inside it go through the room change tools, never a new booking. For free-text wishes (vibe, nearby offices or landmarks, food habits) pass query: results are then ranked by meaning and include match_score.',
+    schema: toolArgs({ query: z.string().optional().describe('Free-text description of what the guest wants, e.g. quiet, near the OMR tech park, veg food.'), location: z.string().optional(), budget_max: num().optional(), gender: z.enum(['MEN', 'WOMEN', 'ANY']).optional(), room_type: z.string().optional(), ac: bool().optional(), food_included: bool().optional(), amenities: z.array(z.string()).optional() }),
     requiresConfirmation: false,
     roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
     execute: async (actor, args = {}) => {
       const q = str(args.location).toLowerCase();
-      const properties = await publicProperties(
-        actor.role === 'PG_TENANT' && actor.propertyId ? ownPropertyExclusionWhere([actor.propertyId]) : {}
-      );
-      return properties
+      const exclusion = actor.role === 'PG_TENANT' && actor.propertyId ? ownPropertyExclusionWhere([actor.propertyId]) : {};
+      const properties = await publicProperties(exclusion);
+      const matches = properties
         .filter((p: any) => !q || `${p.name} ${p.locality} ${p.city} ${p.address}`.toLowerCase().includes(q))
         .filter((p: any) => !args.gender || p.genderPolicy === 'ANY' || p.genderPolicy === args.gender)
         .filter((p: any) => !Array.isArray(args.amenities) || args.amenities.every((a: string) => (p.amenities || []).includes(a)))
@@ -207,8 +207,20 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
           (!args.room_type || r.room_type === args.room_type) &&
           (args.ac === undefined || r.has_ac === args.ac) &&
           (args.food_included === undefined || r.food_included === args.food_included) &&
-          (!args.budget_max || r.monthly_rent <= Number(args.budget_max))))
-        .slice(0, 10);
+          (!args.budget_max || r.monthly_rent <= Number(args.budget_max))));
+      const wish = str(args.query);
+      if (wish && semanticSearchEnabled()) {
+        try {
+          const scores = await semanticScores(wish, exclusion);
+          return matches
+            .map((p: any) => ({ ...p, match_score: Math.round((scores.get(p.property_id) ?? 0) * 1000) / 1000 }))
+            .sort((a: any, b: any) => b.match_score - a.match_score)
+            .slice(0, 10);
+        } catch {
+          // Fall back to the unranked structured search below.
+        }
+      }
+      return matches.slice(0, 10);
     }
   },
 
