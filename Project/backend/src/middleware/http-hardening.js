@@ -53,7 +53,7 @@ export function applyHttpHardening(app) {
     app.disable('x-powered-by');
     app.use(pinoHttp({
         logger,
-        autoLogging: { ignore: (req) => req.url === '/healthz' },
+        autoLogging: { ignore: (req) => req.url === '/health' || req.url === '/healthz' },
         customLogLevel: (_req, res, error) => (error || res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info'),
         serializers: {
             // Signed media URLs carry their token in the path: keep it out of logs.

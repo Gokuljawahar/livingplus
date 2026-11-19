@@ -312,7 +312,8 @@ leaves scheduled jobs to Cloud Scheduler.
 | AI assistant | Vertex AI (Gemini) | `AI_MODEL=google:<model>` with no `GOOGLE_API_KEY`: the service account authenticates (grant Vertex AI User) |
 | Agent state | Cloud SQL (same database) | LangGraph checkpoints live in the `langgraph` schema, created automatically |
 
-`/healthz` is a plain liveness endpoint for the service.
+`/health` is the liveness endpoint (Cloud Run reserves paths ending in `z`,
+so `/healthz` only works locally).
 
 ## Latest Local UI Verification
 

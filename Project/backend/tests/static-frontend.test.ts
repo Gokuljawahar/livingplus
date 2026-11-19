@@ -46,8 +46,10 @@ describe('serving the built frontend', () => {
   });
 
   it('never answers API, cron or health routes with the app shell', async () => {
-    const health = await fetch(`${base}/healthz`);
-    assert.deepEqual(await health.json(), { ok: true });
+    for (const path of ['/health', '/healthz']) {
+      const health = await fetch(`${base}${path}`);
+      assert.deepEqual(await health.json(), { ok: true }, path);
+    }
     const api = await fetch(`${base}/api/does-not-exist`);
     assert.doesNotMatch(await api.text(), /<title>LivingPlus/);
     const cron = await fetch(`${base}/internal/cron/monthly-rent`, { method: 'POST' });

@@ -23,7 +23,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Liveness probe and scheduled jobs: outside /api PG host routing.
-app.get('/healthz', (_req, res) => { res.json({ ok: true }); });
+// Liveness: Cloud Run reserves paths ending in "z" (/healthz never reaches the
+// app there), so /health is the public one; /healthz stays for local tooling.
+app.get(['/health', '/healthz'], (_req, res) => { res.json({ ok: true }); });
 app.use('/internal/cron', cronRoutes(prisma));
 app.use('/api', resolvePgHost(prisma));
 app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
@@ -118,12 +120,6 @@ app.post('/api/upload-s3', authenticate, authorizePropertyStaffUpload, s3Upload.
     logger.error({ err: error }, `Failed to upload to ${storageKind()} storage`);
     res.status(500).json({ error: "Failed to upload image" });
   }
-});
-
-
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
 });
 
 app.get('/api/local-media/:token', async (req, res) => {
@@ -241,7 +237,7 @@ if (process.env.FRONTEND_DIST_DIR) {
     }
   }));
   // Single-page app: every other GET renders index.html.
-  app.get(/^\/(?!(api|internal|uploads)(\/|$)|healthz$).*/, (_req, res) => {
+  app.get(/^\/(?!(api|internal|uploads)(\/|$)|healthz?$).*/, (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(path.join(frontendDir, 'index.html'));
   });
