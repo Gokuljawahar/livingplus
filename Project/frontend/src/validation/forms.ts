@@ -77,3 +77,86 @@ export const residentProfileSchema = z.object({
   foodOptOut: z.boolean()
 });
 export type ResidentProfileForm = z.infer<typeof residentProfileSchema>;
+
+// Owner workspace (rules match the API). Inputs are strings; the API converts.
+const positive = (message: string) => z.string().refine((value) => Number(value) > 0, message);
+const wholeInRange = (min: number, max: number, message: string) =>
+  z.string().refine((value) => Number.isInteger(Number(value)) && Number(value) >= min && Number(value) <= max, message);
+const optionalCoordinate = (limit: number, message: string) =>
+  z.string().refine((value) => value.trim() === '' || (Number.isFinite(Number(value)) && Math.abs(Number(value)) <= limit), message);
+
+export const ownerPropertySchema = z.object({
+  name: z.string().trim().min(1, 'Property name is required'),
+  description: z.string(),
+  address: z.string().trim().min(1, 'Address is required'),
+  locality: z.string().trim().min(1, 'Locality is required'),
+  contactPhone: z.string(),
+  upiId: z.string().refine((value) => value.trim() === '' || /^[a-zA-Z0-9._-]{2,100}@[a-zA-Z0-9.-]{2,60}$/.test(value.trim()), 'Enter a valid UPI ID'),
+  city: z.string(),
+  latitude: optionalCoordinate(90, 'Latitude must be between -90 and 90'),
+  longitude: optionalCoordinate(180, 'Longitude must be between -180 and 180'),
+  genderPolicy: z.string(),
+  amenities: z.string(),
+  houseRules: z.string(),
+  status: z.string(),
+  bookingLockMinutes: wholeInRange(1, 1440, 'Booking hold must be 1 to 1440 minutes'),
+  rentDay: wholeInRange(1, 1440, 'Rent day must be a whole number'),
+  rentDueDay: wholeInRange(1, 1440, 'Rent due day must be a whole number')
+});
+export type OwnerPropertyForm = z.infer<typeof ownerPropertySchema>;
+
+export const ownerRoomSchema = z.object({
+  roomNumber: z.string().trim().min(1, 'Room number is required'),
+  block: z.string(),
+  floor: z.string(),
+  roomType: z.string(),
+  monthlyRent: positive('Enter the monthly rent'),
+  depositAmount: z.string(),
+  maintenanceFee: z.string(),
+  utilitiesSurcharge: z.string(),
+  foodCharge: z.string(),
+  numberOfBeds: wholeInRange(1, 50, 'Beds must be a whole number from 1 to 50'),
+  hasAc: z.boolean(),
+  foodIncluded: z.boolean()
+});
+export type OwnerRoomForm = z.infer<typeof ownerRoomSchema>;
+
+export const rentEntrySchema = z.object({
+  tenantId: z.string().min(1, 'Choose a tenant'),
+  period: z.string().regex(/^\d{4}-\d{2}$/, 'Choose the billing month'),
+  amount: positive('Enter a positive amount'),
+  dueDate: z.string().min(1, 'Choose a due date')
+});
+export type RentEntryForm = z.infer<typeof rentEntrySchema>;
+
+export const staffSchema = z.object({
+  name: z.string().trim().min(1, 'Staff name is required'),
+  phone: z.string().refine((value) => value.replace(/\D/g, '').length >= 10, 'Enter a valid phone number'),
+  email: z.string(),
+  password: z.string().min(1, 'Set a password'),
+  propertyId: z.string().min(1, 'Choose a property')
+});
+export type StaffForm = z.infer<typeof staffSchema>;
+
+export const expenseSchema = z.object({
+  category: z.string(),
+  amount: positive('Enter the expense amount'),
+  spentOn: z.string().min(1, 'Choose the date'),
+  note: z.string().max(500)
+});
+export type ExpenseForm = z.infer<typeof expenseSchema>;
+
+export const electricityBillSchema = z.object({
+  period: z.string().regex(/^\d{4}-\d{2}$/, 'Choose the billing month'),
+  totalAmount: positive('Enter the bill total')
+});
+export type ElectricityBillForm = z.infer<typeof electricityBillSchema>;
+
+export const ownerTicketSchema = z.object({
+  title: z.string().trim().min(1, 'Add a short title'),
+  description: z.string().trim().min(1, 'Describe the issue'),
+  category: z.string(),
+  priority: z.string(),
+  assignedTo: z.string()
+});
+export type OwnerTicketForm = z.infer<typeof ownerTicketSchema>;

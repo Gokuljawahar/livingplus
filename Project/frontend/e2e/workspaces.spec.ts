@@ -42,6 +42,27 @@ test('the owner opens every workspace view and logs an expense', async ({ page }
   await page.getByRole('button', { name: 'Log expense' }).click();
   await expect(page.getByText('E2E plumbing').first()).toBeVisible();
   await shot(page, 'owner-expense-logged');
+
+  // Schema validation still guards the form when the browser's checks are bypassed.
+  await page.locator('form', { has: page.getByRole('button', { name: 'Log expense' }) }).evaluate((form: HTMLFormElement) => { form.noValidate = true; });
+  await page.getByPlaceholder('Amount').fill('');
+  await page.getByRole('button', { name: 'Log expense' }).click();
+  await expect(page.getByText('Enter the expense amount')).toBeVisible();
+
+  await nav.getByRole('button', { name: 'Properties & Beds', exact: true }).click();
+  await page.getByLabel('Room number').fill('E2E-1');
+  await page.getByLabel('Monthly rent').fill('7000');
+  await page.getByLabel('Number of beds').fill('2');
+  await page.getByRole('button', { name: 'Add room', exact: true }).click();
+  await expect(page.getByText('Room and beds added')).toBeVisible();
+  await shot(page, 'owner-room-added');
+
+  await nav.getByRole('button', { name: 'Maintenance', exact: true }).click();
+  await page.getByPlaceholder('Issue title').fill('E2E fan noise');
+  await page.getByPlaceholder('Describe the issue').fill('Ceiling fan rattles in room 101.');
+  await page.getByRole('button', { name: 'Create ticket' }).click();
+  await expect(page.getByText('E2E fan noise').first()).toBeVisible();
+  await shot(page, 'owner-ticket-created');
   assertClean();
 });
 
