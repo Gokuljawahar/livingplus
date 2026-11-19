@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BedDouble, Loader2, MapPin, Plus, Search, Trash2, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
@@ -34,40 +35,17 @@ async function fetchOperators(): Promise<Operator[]> {
 }
 
 export default function PGOperators() {
-  const [operators, setOperators] = useState<Operator[]>([]);
+  const queryClient = useQueryClient();
+  const { data: operators = [], isPending: loading } = useQuery({
+    queryKey: ['admin', 'operators'],
+    queryFn: fetchOperators,
+    meta: { errorMessage: 'Could not load PG operators' }
+  });
+  const reloadOperators = () => queryClient.invalidateQueries({ queryKey: ['admin', 'operators'] });
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [showCreateForm, setShowCreateForm] = useState(false);
-
-  const loadOperators = async () => {
-    try {
-      setLoading(true);
-      setOperators(await fetchOperators());
-    } catch (error) {
-      toast.error(apiErrorMessage(error, 'Could not load PG operators'));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    let live = true;
-    fetchOperators()
-      .then((rows) => {
-        if (live) setOperators(rows);
-      })
-      .catch((error: unknown) => {
-        if (live) toast.error(apiErrorMessage(error, 'Could not load PG operators'));
-      })
-      .finally(() => {
-        if (live) setLoading(false);
-      });
-    return () => {
-      live = false;
-    };
-  }, []);
 
   const filteredOperators = operators.filter((operator) => {
     const query = search.trim().toLowerCase();
@@ -85,7 +63,7 @@ export default function PGOperators() {
       toast.success('PG owner and property created');
       setForm(emptyForm);
       setShowCreateForm(false);
-      await loadOperators();
+      await reloadOperators();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not create PG operator'));
     } finally {
@@ -98,7 +76,7 @@ export default function PGOperators() {
     try {
       await api.delete(`/pg/admin/operators/${operator.id}`);
       toast.success('PG property deleted');
-      await loadOperators();
+      await reloadOperators();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not delete PG property'));
     }
@@ -136,7 +114,7 @@ export default function PGOperators() {
 
       <label className="flex max-w-lg items-center gap-3 border-b-2 border-slate-300 px-1 py-3 focus-within:border-[#02224B]">
         <Search className="h-5 w-5 shrink-0 text-slate-400" />
-        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search owner, PG, locality, or phone" className="w-full bg-transparent text-sm outline-none" />
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search owner, PG, locality, or phone" aria-label="Search operators" className="w-full bg-transparent text-sm outline-none" />
       </label>
 
       {loading ? <div className="flex justify-center py-16"><Loader2 className="h-7 w-7 animate-spin text-[#02224B]" /></div> : (

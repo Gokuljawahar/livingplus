@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, ClipboardList, Loader2, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
@@ -36,55 +36,26 @@ const STATUS_STYLES: Record<string, string> = {
  * Replaces the old anonymous booking-ref + phone tracker.
  */
 export default function MyRequests({ phone, refreshKey = 0 }: MyRequestsProps) {
-  const [bookings, setBookings] = useState<GuestBooking[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [cancelling, setCancelling] = useState('');
+  const queryClient = useQueryClient();
+  const { data: bookings = [], isPending: loading } = useQuery({
+    queryKey: ['bookings', 'mine', phone, refreshKey],
+    queryFn: async (): Promise<GuestBooking[]> => (await api.get('/pg/bookings/mine', { params: { phone } })).data || [],
+    meta: { errorMessage: 'Could not load your requests' }
+  });
 
-  const fetchBookings = useCallback(async (): Promise<GuestBooking[]> => {
-    const response = await api.get('/pg/bookings/mine', { params: { phone } });
-    return response.data || [];
-  }, [phone]);
-
-  const load = async () => {
-    setLoading(true);
-    try {
-      setBookings(await fetchBookings());
-    } catch (error) {
-      toast.error(apiErrorMessage(error, 'Could not load your requests'));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    let live = true;
-    fetchBookings()
-      .then((rows) => {
-        if (live) setBookings(rows);
-      })
-      .catch((error: unknown) => {
-        if (live) toast.error(apiErrorMessage(error, 'Could not load your requests'));
-      })
-      .finally(() => {
-        if (live) setLoading(false);
-      });
-    return () => {
-      live = false;
-    };
-  }, [fetchBookings, refreshKey]);
-
-  const cancel = async (booking: GuestBooking) => {
-    if (!window.confirm(`Cancel your request for ${booking.property?.name || 'this PG'}?`)) return;
-    setCancelling(booking.bookingRef);
-    try {
-      await api.post(`/pg/bookings/${encodeURIComponent(booking.bookingRef)}/cancel`, { phone });
+  const cancelRequest = useMutation({
+    mutationFn: (booking: GuestBooking) => api.post(`/pg/bookings/${encodeURIComponent(booking.bookingRef)}/cancel`, { phone }),
+    onSuccess: () => {
       toast.success('Booking request cancelled');
-      await load();
-    } catch (error) {
-      toast.error(apiErrorMessage(error, 'Could not cancel request'));
-    } finally {
-      setCancelling('');
-    }
+      return queryClient.invalidateQueries({ queryKey: ['bookings', 'mine', phone] });
+    },
+    onError: (error) => toast.error(apiErrorMessage(error, 'Could not cancel request'))
+  });
+  const cancelling = cancelRequest.isPending ? cancelRequest.variables?.bookingRef ?? '' : '';
+
+  const cancel = (booking: GuestBooking) => {
+    if (!window.confirm(`Cancel your request for ${booking.property?.name || 'this PG'}?`)) return;
+    cancelRequest.mutate(booking);
   };
 
   if (loading) {

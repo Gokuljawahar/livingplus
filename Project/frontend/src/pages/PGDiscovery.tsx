@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { Link } from 'react-router-dom';
 import {
   ArrowUpDown,
@@ -101,12 +103,24 @@ export default function PGDiscovery() {
   const { user, logout: authLogout } = useAuth();
   const [guest, setGuest] = useState<GuestSession | null>(() => getGuestSession());
   const [activeTab, setActiveTab] = useState<'search' | 'requests'>('search');
-  const [properties, setProperties] = useState<PGProperty[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [stays, setStays] = useState<ResidentStay[]>([]);
   const [requestsRefresh, setRequestsRefresh] = useState(0);
 
   const signedIn = Boolean(user || guest);
+  const queryClient = useQueryClient();
+  const { data: properties = [], isPending: propertiesPending } = useQuery({
+    queryKey: ['properties'],
+    queryFn: async (): Promise<PGProperty[]> => (await api.get('/pg/properties')).data,
+    enabled: signedIn,
+    meta: { errorMessage: 'Could not load PG listings' }
+  });
+  const loading = signedIn && propertiesPending;
+  // Onboarded residents see their profile strip above search. Only attempted
+  // when a resident token actually exists so guests never hit a 401.
+  const { data: stays = [] } = useQuery({
+    queryKey: ['tenant', 'stays', user?.id ?? null],
+    queryFn: async (): Promise<ResidentStay[]> => (await api.get('/pg/tenant/stays')).data || [],
+    enabled: signedIn && Boolean(localStorage.getItem(RESIDENT_TOKEN_KEY))
+  });
   const guestPhone = guest?.phone || '';
   const canResidentSignIn =
     isPathModeHost() || resolveAppHost().kind === 'property';
@@ -125,8 +139,6 @@ export default function PGDiscovery() {
   const [foodOnly, setFoodOnly] = useState(false);
   const [amenities, setAmenities] = useState<string[]>([]);
   const [sort, setSort] = useState('featured');
-  // Meaning-based matches from /pg/search (null: keyword search only).
-  const [semanticScores, setSemanticScores] = useState<Map<string, number> | null>(null);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   // Booking-request modal state.
@@ -140,37 +152,6 @@ export default function PGDiscovery() {
   const [otpLoading, setOtpLoading] = useState(false);
   const [request, setRequest] = useState({ residentName: '', phone: '', email: '', moveInDate: '', notes: '' });
   const { cooldown: otpCooldown, startCooldown: startOtpCooldown } = useOtpCooldown();
-
-  useEffect(() => {
-    if (!signedIn) return;
-    const loadProperties = async () => {
-      setLoading(true);
-      try {
-        const response = await api.get('/pg/properties');
-        setProperties(response.data);
-      } catch {
-        toast.error('Could not load PG listings');
-      } finally {
-        setLoading(false);
-      }
-    };
-    void loadProperties();
-  }, [signedIn]);
-
-  // Onboarded residents see their profile strip above search. Only attempted
-  // when a resident token actually exists so guests never hit a 401.
-  useEffect(() => {
-    if (!signedIn || !localStorage.getItem(RESIDENT_TOKEN_KEY)) return;
-    const loadStays = async () => {
-      try {
-        const response = await api.get('/pg/tenant/stays');
-        setStays(response.data || []);
-      } catch {
-        setStays([]);
-      }
-    };
-    void loadStays();
-  }, [signedIn, user]);
 
   const toggleInList = (list: string[], value: string, set: (next: string[]) => void) => {
     set(list.includes(value) ? list.filter((item) => item !== value) : [...list, value]);
@@ -205,29 +186,19 @@ export default function PGDiscovery() {
     [properties, ownPropertyIds]
   );
 
-  // Ask the API for meaning-based matches once typing pauses. Any failure
+  // Meaning-based matches from /pg/search once typing pauses. Any failure
   // (or semantic search being off) leaves plain keyword search in place.
-  useEffect(() => {
-    const text = query.trim();
-    let live = true;
-    const timer = window.setTimeout(() => {
-      if (text.length < 3) {
-        setSemanticScores(null);
-        return;
-      }
-      api.get('/pg/search', { params: { q: text } })
-        .then((response) => {
-          if (!live) return;
-          const data = response.data as { semantic?: boolean; results?: { propertyId: string; score: number }[] };
-          setSemanticScores(data.semantic ? new Map((data.results || []).map((r) => [r.propertyId, r.score])) : null);
-        })
-        .catch(() => { if (live) setSemanticScores(null); });
-    }, 350);
-    return () => {
-      live = false;
-      window.clearTimeout(timer);
-    };
-  }, [query]);
+  const searchText = useDebouncedValue(query.trim(), 350);
+  const { data: semanticScores = null } = useQuery({
+    queryKey: ['search', searchText],
+    queryFn: async (): Promise<Map<string, number> | null> => {
+      const data = (await api.get('/pg/search', { params: { q: searchText } })).data as { semantic?: boolean; results?: { propertyId: string; score: number }[] };
+      return data.semantic ? new Map((data.results || []).map((r) => [r.propertyId, r.score])) : null;
+    },
+    enabled: signedIn && searchText.length >= 3,
+    retry: false,
+    staleTime: 5 * 60_000
+  });
 
   const queryFiltered = useMemo(() => {
     const text = query.trim().toLowerCase();
@@ -376,8 +347,7 @@ export default function PGDiscovery() {
       setPhoneToken('');
       updateGuestToken('');
       setGuest(getGuestSession());
-      const listings = await api.get('/pg/properties');
-      setProperties(listings.data);
+      await queryClient.invalidateQueries({ queryKey: ['properties'] });
       closeRequest();
       if (guestPhone) {
         setRequestsRefresh((key) => key + 1);

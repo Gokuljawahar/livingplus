@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeftRight, Check, Loader2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
@@ -54,38 +55,28 @@ function bedLabel(bed: BedView | null): string {
 }
 
 export default function RoomChange() {
-  const [requests, setRequests] = useState<SwapRequest[]>([]);
-  const [matches, setMatches] = useState<Matches | null>(null);
-  const [vacantBeds, setVacantBeds] = useState<BedView[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [acting, setActing] = useState('');
-  const [refreshKey, setRefreshKey] = useState(0);
   const [form, setForm] = useState({ type: 'SWAP', bedId: '', floor: '', note: '', reason: '' });
 
-  useEffect(() => {
-    let live = true;
-    fetchRoomChangeData()
-      .then(({ rows, matchData }) => {
-        if (!live) return;
-        setRequests(rows);
-        setMatches(matchData);
-      })
-      .catch((error: unknown) => {
-        if (live) toast.error(apiErrorMessage(error, 'Could not load room changes'));
-      })
-      .finally(() => {
-        if (live) setLoading(false);
-      });
-    return () => { live = false; };
-  }, [refreshKey]);
+  const { data, isPending: loading } = useQuery({
+    queryKey: ['room-changes'],
+    queryFn: fetchRoomChangeData,
+    meta: { errorMessage: 'Could not load room changes' }
+  });
+  const requests = data?.rows ?? [];
+  const matches = data?.matchData ?? null;
+  // Vacant beds are only needed while the resident is choosing a move.
+  const { data: vacantBeds = [] } = useQuery({
+    queryKey: ['room-changes', 'vacant-beds'],
+    queryFn: async (): Promise<BedView[]> => (await api.get('/pg/tenant/vacant-beds')).data || [],
+    enabled: form.type === 'MOVE',
+    meta: { errorMessage: 'Could not load vacant beds' }
+  });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['room-changes'] });
 
   const pickType = (type: 'SWAP' | 'MOVE') => {
     setForm((current) => ({ ...current, type }));
-    if (type === 'MOVE' && !vacantBeds.length) {
-      api.get('/pg/tenant/vacant-beds')
-        .then((response) => setVacantBeds(response.data || []))
-        .catch((error) => toast.error(apiErrorMessage(error, 'Could not load vacant beds')));
-    }
   };
 
   const openRequest = async (event: React.FormEvent) => {
@@ -103,8 +94,7 @@ export default function RoomChange() {
       });
       toast.success(form.type === 'MOVE' ? 'Move request opened' : 'Swap request opened');
       setForm({ type: 'SWAP', bedId: '', floor: '', note: '', reason: '' });
-      setVacantBeds([]);
-      setRefreshKey((key) => key + 1);
+      await refresh();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not open request'));
     } finally {
@@ -117,7 +107,7 @@ export default function RoomChange() {
     try {
       await call();
       toast.success(success);
-      setRefreshKey((key) => key + 1);
+      await refresh();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Action failed'));
     } finally {
