@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",
+    "@vis.gl/react-google-maps": "1.10.2",
     "axios": "^1.16.0",
     "firebase": "13.4.0",
     "lucide-react": "^1.14.0",

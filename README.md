@@ -199,7 +199,10 @@ alone does not create that DB user. The active demo resident uses phone
   catalogues. Indexing runs at startup (internal scheduler), after listing
   edits, and via `POST /internal/cron/search-index` (Cloud Scheduler). Tune
   `SEMANTIC_SEARCH_MIN_SCORE` against real queries.
-- **Maps:** optional frontend `VITE_GOOGLE_MAPS_API_KEY`.
+- **Maps:** optional frontend `VITE_GOOGLE_MAPS_API_KEY` for the owner's location
+  picker. Enable **Maps JavaScript API**, **Places API (New)** and **Geocoding
+  API** for that key (the legacy Places Autocomplete widget is not available to
+  projects created after March 2025, so the picker uses Places API (New)).
 - **Uploads:** private files are stored by `UPLOAD_STORAGE`: `local`
   (default, `backend/private-uploads`), `gcs` (Google Cloud Storage bucket
   `GCS_BUCKET`) or `s3`. Files are never public; viewers get short-lived signed
