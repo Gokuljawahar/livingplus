@@ -227,6 +227,15 @@ alone does not create that DB user. The active demo resident uses phone
 Restart the API after changing backend environment values. Vite embeds
 `VITE_*` values during production builds.
 
+## Shared validation rules
+
+`Project/shared` (`@livingplus/shared`) holds the validation rules both apps
+use: patterns (UPI ID, payment reference, strong password, billing month),
+field limits, allowed values and user-facing messages. The API and the
+frontend wrap them in their own Zod schemas, so a rule changes in one place.
+After editing `Project/shared/src`, run `npm run build` there and commit
+`dist/` (CI fails if it is stale).
+
 ## Verification and Production Builds
 
 From the repository root:

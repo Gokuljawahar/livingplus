@@ -17,6 +17,7 @@ import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
 import { minSemanticScore, scheduleSearchIndex, semanticScores, semanticSearchEnabled } from '../services/semantic-search.js';
 import { bookingRequestBody, paymentClaimBody, paymentClaimReviewBody, rentEntryBody, rentPaymentBody } from '../validation/pg.schemas.js';
 import { logger } from '../utils/logger.js';
+import { isBloodGroup, isGenderPolicy, isKycType, isValidUpiId, LIMITS, MESSAGES } from '@livingplus/shared';
 import { cancelBookingBody, checkOutTenantBody, createMaintenanceTicketBody, createOwnerExpenseBody, createPropertyBody, createPropertyStaffBody, createRoomBody, createTenantTicketBody, markDepositRefundedBody, proposeElectricityBillBody, sendRentRemindersBody, updateBedStatusBody, updateBookingStatusBody, updateMaintenanceStatusBody, updatePropertyBody, updateResidentProfileBody, updateTenantProfileBody } from '../validation/request.schemas.js';
 
 function phoneVariants(phone: string): string[] {
@@ -255,8 +256,8 @@ export const createProperty = async (req: Request, res: Response): Promise<any> 
   if (!name?.trim() || !address?.trim() || !locality?.trim()) {
     return res.status(400).json({ message: 'Property name, address and locality are required' });
   }
-  if (upiId && !/^[a-zA-Z0-9._-]{2,100}@[a-zA-Z0-9.-]{2,60}$/.test(String(upiId).trim())) {
-    return res.status(400).json({ message: 'Enter a valid UPI ID' });
+  if (upiId && !isValidUpiId(String(upiId))) {
+    return res.status(400).json({ message: MESSAGES.upiId });
   }
 
   try {
@@ -274,7 +275,7 @@ export const createProperty = async (req: Request, res: Response): Promise<any> 
         pincode: pincode?.trim() || null,
         latitude: latitude !== undefined && latitude !== '' && Number.isFinite(Number(latitude)) ? Number(latitude) : null,
         longitude: longitude !== undefined && longitude !== '' && Number.isFinite(Number(longitude)) ? Number(longitude) : null,
-        genderPolicy: ['MEN', 'WOMEN', 'ANY'].includes(genderPolicy) ? genderPolicy : 'ANY',
+        genderPolicy: isGenderPolicy(String(genderPolicy)) ? genderPolicy : 'ANY',
         amenities: Array.isArray(amenities) ? amenities : [],
         houseRules: Array.isArray(houseRules) ? houseRules : [],
         photoUrls: Array.isArray(photoUrls) ? photoUrls : [],
@@ -332,8 +333,8 @@ export const updateProperty = async (req: Request, res: Response): Promise<any> 
   }
   if (data.upiId !== undefined) {
     const upiId = String(data.upiId || '').trim();
-    if (upiId && !/^[a-zA-Z0-9._-]{2,100}@[a-zA-Z0-9.-]{2,60}$/.test(upiId)) {
-      return res.status(400).json({ message: 'Enter a valid UPI ID' });
+    if (upiId && !isValidUpiId(upiId)) {
+      return res.status(400).json({ message: MESSAGES.upiId });
     }
     data.upiId = upiId || null;
   }
@@ -1521,8 +1522,8 @@ export const createTenantTicket = async (req: Request, res: Response): Promise<a
   if (!tenantId || !title?.trim() || !description?.trim()) {
     return res.status(400).json({ message: 'Stay, title and description are required' });
   }
-  if (title.trim().length > 120 || description.trim().length > 2000) {
-    return res.status(400).json({ message: 'Title must be 120 characters or less and description 2,000 characters or less' });
+  if (title.trim().length > LIMITS.ticketTitle || description.trim().length > LIMITS.ticketDetails) {
+    return res.status(400).json({ message: `Title must be ${LIMITS.ticketTitle} characters or less and description ${LIMITS.ticketDetails.toLocaleString('en-IN')} characters or less` });
   }
   const allowedCategories = ['PLUMBING', 'ELECTRICAL', 'APPLIANCE', 'CLEANING', 'SAFETY', 'PEST', 'OTHER'];
   const ticketCategory = String(category || 'OTHER').toUpperCase();
@@ -1582,20 +1583,20 @@ export const updateResidentProfile = async (req: Request, res: Response): Promis
     for (const field of allowedFields) {
       if (inputFields[field] === undefined) continue;
       const value = String(inputFields[field]).trim();
-      if (value.length > 200) return res.status(400).json({ message: `${field} must be 200 characters or less` });
+      if (value.length > LIMITS.profileText) return res.status(400).json({ message: `${field} must be ${LIMITS.profileText} characters or less` });
       data[field] = value || null;
     }
     if (input.bloodGroup !== undefined) {
       const bloodGroup = String(input.bloodGroup).toUpperCase();
-      if (bloodGroup && !['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].includes(bloodGroup)) {
-        return res.status(400).json({ message: 'Invalid blood group' });
+      if (bloodGroup && !isBloodGroup(bloodGroup)) {
+        return res.status(400).json({ message: MESSAGES.bloodGroup });
       }
       data.bloodGroup = bloodGroup || null;
     }
     if (input.kycType !== undefined) {
       const kycType = String(input.kycType).toUpperCase();
-      if (kycType && !['AADHAAR', 'PAN', 'PASSPORT', 'DRIVING_LICENSE', 'STUDENT_ID', 'WORK_ID'].includes(kycType)) {
-        return res.status(400).json({ message: 'Invalid KYC document type' });
+      if (kycType && !isKycType(kycType)) {
+        return res.status(400).json({ message: MESSAGES.kycType });
       }
       data.kycType = kycType || null;
     }

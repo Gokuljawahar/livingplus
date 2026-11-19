@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# Compiled shared rules are committed so both apps can install them without a build step.
+!Project/shared/dist/
 dist-ssr/
 *.db
 *.db-journal

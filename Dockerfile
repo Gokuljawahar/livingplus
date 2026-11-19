@@ -5,6 +5,8 @@
 
 # --- Frontend -------------------------------------------------------------
 FROM node:22-alpine AS frontend
+# Shared validation rules ("file:../shared" from each app).
+COPY Project/shared /app/shared
 WORKDIR /app/frontend
 COPY Project/frontend/package*.json ./
 RUN npm ci
@@ -19,6 +21,7 @@ RUN VITE_ROOT_DOMAIN="$VITE_ROOT_DOMAIN" \
 
 # --- Backend --------------------------------------------------------------
 FROM node:22-alpine AS backend
+COPY Project/shared /shared
 WORKDIR /app
 COPY Project/backend/package*.json ./
 RUN npm ci --include=dev
@@ -34,6 +37,7 @@ ENV NODE_ENV=production \
     UPLOAD_STORAGE=gcs \
     SCHEDULER_MODE=external \
     SINGLE_HOST_MODE=true
+COPY --from=backend /shared /shared
 COPY --from=backend /app/package.json ./package.json
 COPY --from=backend /app/node_modules ./node_modules
 COPY --from=backend /app/src ./src

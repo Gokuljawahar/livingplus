@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../app.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { logger } from '../utils/logger.js';
+import { isGenderPolicy } from '@livingplus/shared';
 import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
 import { createPgOperatorBody } from '../validation/request.schemas.js';
 const db = new Proxy({}, {
@@ -72,7 +73,7 @@ export const createPgOperator = async (req, res) => {
                     locality: locality.trim(),
                     contactPhone: finalPhone,
                     city: city?.trim() || 'Chennai',
-                    genderPolicy: ['MEN', 'WOMEN', 'ANY'].includes(genderPolicy) ? genderPolicy : 'ANY',
+                    genderPolicy: isGenderPolicy(String(genderPolicy)) ? genderPolicy : 'ANY',
                     amenities: Array.isArray(amenities) ? amenities : [],
                     access: { create: { userId: owner.id, role: 'OWNER' } }
                 }

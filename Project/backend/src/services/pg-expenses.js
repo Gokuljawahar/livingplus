@@ -2,8 +2,9 @@
 // conversational expense logging. Every write is validated and audited; the
 // AI layer may only propose entries through the log_expense tool.
 import { logAudit } from './pg-audit.js';
+import { EXPENSE_CATEGORIES, isYearMonth } from '@livingplus/shared';
 import { periodRange } from '../utils/app-time.js';
-export const EXPENSE_CATEGORIES = ['FOOD', 'STAFF', 'MAINTENANCE', 'UTILITIES', 'OTHER'];
+export { EXPENSE_CATEGORIES };
 export function validateExpenseInput(input) {
     const propertyId = String(input.propertyId || '').trim();
     if (!propertyId)
@@ -31,7 +32,7 @@ export async function createExpense(db, actorId, input) {
     return expense;
 }
 export async function listExpenses(db, propertyIds, period) {
-    const monthFilter = period && /^\d{4}-\d{2}$/.test(period)
+    const monthFilter = period && isYearMonth(period)
         ? periodRange(period)
         : undefined;
     const entries = await db.pGExpense.findMany({

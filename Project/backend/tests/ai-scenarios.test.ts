@@ -1032,6 +1032,14 @@ describe('request body validation (Zod)', () => {
     }
   });
 
+  it('enforces the shared password rule when an owner registers', async () => {
+    const auth = await import('../src/controllers/pg-auth.controller.js');
+    const res = respond();
+    await auth.register({ body: { name: 'Weak Owner', phone: '9877700001', password: 'password', propertyName: 'Weak PG', propertyAddress: '1 Road', locality: 'Adyar' }, headers: {} } as any, res as any);
+    assert.equal(res.statusCode, 400);
+    assert.match(res.body.message, /8\+ chars/);
+  });
+
   it('normalizes harmless input variations instead of rejecting them', async () => {
     const res = await call('createRoom', { roomNumber: 'Z9', roomType: 'SHARED', monthlyRent: '6500', hasAc: 'true', foodIncluded: 'false', numberOfBeds: 1 }, { params: { propertyId: ids.prop.id } });
     assert.equal(res.statusCode, 201);

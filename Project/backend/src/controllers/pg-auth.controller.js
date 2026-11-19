@@ -5,6 +5,7 @@ import { prisma } from '../app.js';
 import { getJwtSecret } from '../utils/auth-config.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { logger } from '../utils/logger.js';
+import { isGenderPolicy, isStrongPassword, MESSAGES } from '@livingplus/shared';
 import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
 import { adminResetPasswordBody, changePasswordBody, loginBody, otpRequestBody, otpVerifyBody, registerBody, updateProfileBody } from '../validation/request.schemas.js';
 import { otpProvider, verifyFirebasePhoneToken } from '../services/phone-verification.js';
@@ -113,6 +114,8 @@ export const register = async (req, res) => {
     if (!name?.trim() || !propertyName?.trim() || !propertyAddress?.trim() || !locality?.trim() || normalizedPhone.length < 10 || !password) {
         return res.status(400).json({ message: 'Owner, PG name, phone, address, locality and password are required' });
     }
+    if (!isStrongPassword(String(password)))
+        return res.status(400).json({ message: MESSAGES.strongPassword });
     try {
         const existing = await prisma.user.findFirst({
             where: {
@@ -145,7 +148,7 @@ export const register = async (req, res) => {
                     locality: locality.trim(),
                     contactPhone: contactPhone ? normalizePhone(String(contactPhone)) : null,
                     city: city?.trim() || 'Chennai',
-                    genderPolicy: ['MEN', 'WOMEN', 'ANY'].includes(genderPolicy) ? genderPolicy : 'ANY',
+                    genderPolicy: isGenderPolicy(String(genderPolicy)) ? genderPolicy : 'ANY',
                     amenities: Array.isArray(amenities) ? amenities : [],
                     houseRules: Array.isArray(houseRules) ? houseRules : [],
                     access: { create: { userId: user.id, role: 'OWNER' } }

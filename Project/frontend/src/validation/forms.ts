@@ -1,6 +1,7 @@
 // Form schemas (Zod) for react-hook-form. They mirror the API's rules, so
 // mistakes show next to the field before a request is sent.
 import { z } from 'zod';
+import { BLOOD_GROUPS, LIMITS, MESSAGES, PATTERNS, isValidPhone, isValidUpiId } from '@livingplus/shared';
 
 export const loginSchema = z.object({
   // Mobile number or admin username (the API field is named "email").
@@ -19,10 +20,9 @@ export const changePasswordSchema = z.object({
 });
 export type ChangePasswordForm = z.infer<typeof changePasswordSchema>;
 
-const STRONG_PASSWORD = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
 
 export const registerSchema = z.object({
-  phone: z.string().min(1, 'Phone number is required').refine((value) => value.replace(/\D/g, '').length >= 10, 'Enter a valid 10-digit number'),
+  phone: z.string().min(1, 'Phone number is required').refine(isValidPhone, MESSAGES.phone),
   name: z.string().trim().min(1, 'Owner name is required'),
   propertyName: z.string().trim().min(1, 'PG name is required'),
   propertyAddress: z.string().trim().min(1, 'Property address is required'),
@@ -31,14 +31,14 @@ export const registerSchema = z.object({
   genderPolicy: z.enum(['ANY', 'MEN', 'WOMEN']),
   contactPhone: z.string(),
   businessLogo: z.string(),
-  password: z.string().min(1, 'Password is required').regex(STRONG_PASSWORD, 'Must contain 8+ chars, 1 uppercase, 1 lowercase, 1 number, 1 special char'),
+  password: z.string().min(1, 'Password is required').regex(PATTERNS.strongPassword, MESSAGES.strongPassword),
   confirmPassword: z.string()
 }).refine((form) => form.password === form.confirmPassword, { path: ['confirmPassword'], message: 'Passwords do not match' });
 export type RegisterForm = z.infer<typeof registerSchema>;
 
 export const operatorSchema = z.object({
   ownerName: z.string().trim().min(1, 'Owner name is required'),
-  phone: z.string().refine((value) => value.replace(/\D/g, '').length >= 10, 'Enter a valid owner phone'),
+  phone: z.string().refine(isValidPhone, 'Enter a valid owner phone'),
   email: z.union([z.literal(''), z.email('Enter a valid email')]),
   password: z.string().min(8, 'Temporary password must be at least 8 characters'),
   propertyName: z.string().trim().min(1, 'PG name is required'),
@@ -54,8 +54,8 @@ export type OperatorForm = z.infer<typeof operatorSchema>;
 export const residentTicketSchema = z.object({
   tenantId: z.string(),
   category: z.string(),
-  title: z.string().trim().min(1, 'Add a short title').max(120, 'Keep the title under 120 characters'),
-  description: z.string().trim().min(1, 'Describe the issue').max(2000, 'Keep the details under 2000 characters')
+  title: z.string().trim().min(1, 'Add a short title').max(LIMITS.ticketTitle, MESSAGES.ticketTitle),
+  description: z.string().trim().min(1, 'Describe the issue').max(LIMITS.ticketDetails, MESSAGES.ticketDetails)
 });
 export type ResidentTicketForm = z.infer<typeof residentTicketSchema>;
 
@@ -63,16 +63,16 @@ export const paymentClaimSchema = z.object({
   tenantId: z.string(),
   rentEntryId: z.string(),
   amount: z.string().refine((value) => Number(value) > 0, 'Enter the amount you paid'),
-  reference: z.string().trim().regex(/^[a-zA-Z0-9._/-]{6,80}$/, 'Enter the UPI reference / UTR (6-80 letters or numbers)')
+  reference: z.string().trim().regex(PATTERNS.paymentReference, MESSAGES.paymentReference)
 });
 export type PaymentClaimForm = z.infer<typeof paymentClaimSchema>;
 
 export const residentProfileSchema = z.object({
-  permanentAddress: z.string().max(200),
-  institutionOrEmployer: z.string().max(200),
-  emergencyName: z.string().max(200),
-  emergencyPhone: z.string().max(20),
-  bloodGroup: z.enum(['', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']),
+  permanentAddress: z.string().max(LIMITS.profileText),
+  institutionOrEmployer: z.string().max(LIMITS.profileText),
+  emergencyName: z.string().max(LIMITS.profileText),
+  emergencyPhone: z.string().max(LIMITS.emergencyPhone),
+  bloodGroup: z.union([z.literal(''), z.enum(BLOOD_GROUPS)]),
   kycType: z.string(),
   foodOptOut: z.boolean()
 });
@@ -91,7 +91,7 @@ export const ownerPropertySchema = z.object({
   address: z.string().trim().min(1, 'Address is required'),
   locality: z.string().trim().min(1, 'Locality is required'),
   contactPhone: z.string(),
-  upiId: z.string().refine((value) => value.trim() === '' || /^[a-zA-Z0-9._-]{2,100}@[a-zA-Z0-9.-]{2,60}$/.test(value.trim()), 'Enter a valid UPI ID'),
+  upiId: z.string().refine((value) => value.trim() === '' || isValidUpiId(value), MESSAGES.upiId),
   city: z.string(),
   latitude: optionalCoordinate(90, 'Latitude must be between -90 and 90'),
   longitude: optionalCoordinate(180, 'Longitude must be between -180 and 180'),
@@ -123,7 +123,7 @@ export type OwnerRoomForm = z.infer<typeof ownerRoomSchema>;
 
 export const rentEntrySchema = z.object({
   tenantId: z.string().min(1, 'Choose a tenant'),
-  period: z.string().regex(/^\d{4}-\d{2}$/, 'Choose the billing month'),
+  period: z.string().regex(PATTERNS.yearMonth, MESSAGES.yearMonth),
   amount: positive('Enter a positive amount'),
   dueDate: z.string().min(1, 'Choose a due date')
 });
@@ -131,7 +131,7 @@ export type RentEntryForm = z.infer<typeof rentEntrySchema>;
 
 export const staffSchema = z.object({
   name: z.string().trim().min(1, 'Staff name is required'),
-  phone: z.string().refine((value) => value.replace(/\D/g, '').length >= 10, 'Enter a valid phone number'),
+  phone: z.string().refine(isValidPhone, 'Enter a valid phone number'),
   email: z.string(),
   password: z.string().min(1, 'Set a password'),
   propertyId: z.string().min(1, 'Choose a property')
@@ -147,7 +147,7 @@ export const expenseSchema = z.object({
 export type ExpenseForm = z.infer<typeof expenseSchema>;
 
 export const electricityBillSchema = z.object({
-  period: z.string().regex(/^\d{4}-\d{2}$/, 'Choose the billing month'),
+  period: z.string().regex(PATTERNS.yearMonth, MESSAGES.yearMonth),
   totalAmount: positive('Enter the bill total')
 });
 export type ElectricityBillForm = z.infer<typeof electricityBillSchema>;

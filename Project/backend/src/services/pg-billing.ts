@@ -3,6 +3,7 @@
 // the owner. Shares round to whole rupees with the remainder settled on the
 // largest share so the parts always sum to the bill total.
 import { logAudit } from './pg-audit.js';
+import { isYearMonth } from '@livingplus/shared';
 import { dueDateIn, periodOf, zonedDate } from '../utils/app-time.js';
 
 export interface SplitRow {
@@ -43,7 +44,7 @@ export function validateBillInput(input: { propertyId?: unknown; period?: unknow
   const propertyId = String(input.propertyId || '').trim();
   if (!propertyId) throw new Error('INVALID_PROPERTY');
   const period = String(input.period || '').trim();
-  if (!/^\d{4}-\d{2}$/.test(period)) throw new Error('INVALID_PERIOD');
+  if (!isYearMonth(period)) throw new Error('INVALID_PERIOD');
   const totalAmount = Number(input.totalAmount);
   if (!Number.isFinite(totalAmount) || totalAmount <= 0 || totalAmount > 10000000) throw new Error('INVALID_AMOUNT');
   return { propertyId, period, totalAmount };
