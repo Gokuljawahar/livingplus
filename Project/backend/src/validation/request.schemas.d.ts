@@ -100,13 +100,13 @@ export declare const createRoomBody: z.ZodObject<{
     maintenanceFee: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>>>;
     utilitiesSurcharge: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>>>;
     hasAc: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodBoolean, z.ZodPipe<z.ZodEnum<{
-        true: "true";
         false: "false";
-    }>, z.ZodTransform<boolean, "true" | "false">>]>>>;
+        true: "true";
+    }>, z.ZodTransform<boolean, "false" | "true">>]>>>;
     foodIncluded: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodBoolean, z.ZodPipe<z.ZodEnum<{
-        true: "true";
         false: "false";
-    }>, z.ZodTransform<boolean, "true" | "false">>]>>>;
+        true: "true";
+    }>, z.ZodTransform<boolean, "false" | "true">>]>>>;
     foodCharge: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>>>;
     numberOfBeds: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>>>;
     bedLabels: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodArray<z.ZodString>, z.ZodString]>>>;
@@ -139,9 +139,9 @@ export declare const markDepositRefundedBody: z.ZodObject<{
 }, z.core.$strip>;
 export declare const updateTenantProfileBody: z.ZodObject<{
     kycVerified: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodBoolean, z.ZodPipe<z.ZodEnum<{
-        true: "true";
         false: "false";
-    }>, z.ZodTransform<boolean, "true" | "false">>]>>>;
+        true: "true";
+    }>, z.ZodTransform<boolean, "false" | "true">>]>>>;
     permanentAddress: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
     bloodGroup: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
     institutionOrEmployer: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
@@ -150,9 +150,9 @@ export declare const updateTenantProfileBody: z.ZodObject<{
     kycType: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
     kycDocumentUrl: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
     foodOptOut: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodBoolean, z.ZodPipe<z.ZodEnum<{
-        true: "true";
         false: "false";
-    }>, z.ZodTransform<boolean, "true" | "false">>]>>>;
+        true: "true";
+    }>, z.ZodTransform<boolean, "false" | "true">>]>>>;
 }, z.core.$strip>;
 export declare const updateResidentProfileBody: z.ZodObject<{
     permanentAddress: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
@@ -163,9 +163,9 @@ export declare const updateResidentProfileBody: z.ZodObject<{
     kycType: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
     kycDocumentUrl: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
     foodOptOut: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodBoolean, z.ZodPipe<z.ZodEnum<{
-        true: "true";
         false: "false";
-    }>, z.ZodTransform<boolean, "true" | "false">>]>>>;
+        true: "true";
+    }>, z.ZodTransform<boolean, "false" | "true">>]>>>;
 }, z.core.$strip>;
 export declare const createMaintenanceTicketBody: z.ZodObject<{
     propertyId: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
@@ -202,9 +202,9 @@ export declare const proposeElectricityBillBody: z.ZodObject<{
 export declare const sendRentRemindersBody: z.ZodObject<{
     period: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
     force: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodBoolean, z.ZodPipe<z.ZodEnum<{
-        true: "true";
         false: "false";
-    }>, z.ZodTransform<boolean, "true" | "false">>]>>>;
+        true: "true";
+    }>, z.ZodTransform<boolean, "false" | "true">>]>>>;
 }, z.core.$strip>;
 export declare const aiChatBody: z.ZodObject<{
     message: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;

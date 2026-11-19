@@ -229,7 +229,14 @@ npm.cmd --prefix Project/backend test
 npm.cmd --prefix Project/backend run build
 npm.cmd --prefix Project/frontend run build
 npm.cmd --prefix Project/frontend run lint
+npm.cmd --prefix Project/frontend test        # Vitest unit/component tests
+npm.cmd --prefix Project/frontend run e2e     # Playwright end-to-end tests
 ```
+
+End-to-end tests start their own throwaway PostgreSQL with the demo seed, the
+API on port 4100 and Vite on port 5174, then drive Chromium through the guest,
+platform-admin and resident journeys. Install the browser once with
+`npx playwright install chromium` (CI uses `--with-deps`).
 
 Backend tests start a throwaway PostgreSQL on a free port and apply the real
 migrations (set `TEST_DATABASE_URL` to use an existing empty database instead);

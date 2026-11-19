@@ -16,9 +16,9 @@ export declare const textField: (max?: number) => z.ZodOptional<z.ZodNullable<z.
 export declare const numberLike: () => z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>>>;
 /** Boolean; "true"/"false" strings become real booleans. */
 export declare const booleanLike: () => z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodBoolean, z.ZodPipe<z.ZodEnum<{
-    true: "true";
     false: "false";
-}>, z.ZodTransform<boolean, "true" | "false">>]>>>;
+    true: "true";
+}>, z.ZodTransform<boolean, "false" | "true">>]>>>;
 /** A list of strings (or a single string, which handlers treat as no list). */
 export declare const textList: () => z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodArray<z.ZodString>, z.ZodString]>>>;
 export declare const INVALID_REQUEST = "Some fields have the wrong format";
