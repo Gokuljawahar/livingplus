@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { operatorSchema, type OperatorForm } from '../validation/forms';
 import { BedDouble, Loader2, MapPin, Plus, Search, Trash2, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
@@ -16,7 +19,7 @@ type Operator = {
   rooms: { id: string; totalBeds: number; occupiedBeds: number }[];
 };
 
-const emptyForm = {
+const emptyForm: OperatorForm = {
   ownerName: '',
   propertyName: '',
   email: '',
@@ -43,8 +46,11 @@ export default function PGOperators() {
   });
   const reloadOperators = () => queryClient.invalidateQueries({ queryKey: ['admin', 'operators'] });
   const [search, setSearch] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState(emptyForm);
+  const { register, handleSubmit, reset, formState: { errors, isSubmitting: saving } } = useForm<OperatorForm>({
+    resolver: zodResolver(operatorSchema),
+    defaultValues: emptyForm
+  });
+  const firstError = Object.values(errors)[0]?.message;
   const [showCreateForm, setShowCreateForm] = useState(false);
 
   const filteredOperators = operators.filter((operator) => {
@@ -52,22 +58,18 @@ export default function PGOperators() {
     return !query || `${operator.name} ${operator.locality} ${operator.city} ${operator.owner?.name || ''} ${operator.owner?.phone || ''}`.toLowerCase().includes(query);
   });
 
-  const createOperator = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setSaving(true);
+  const createOperator = async (form: OperatorForm) => {
     try {
       await api.post('/pg/admin/operators', {
         ...form,
         amenities: form.amenities.split(',').map((item) => item.trim()).filter(Boolean)
       });
       toast.success('PG owner and property created');
-      setForm(emptyForm);
+      reset(emptyForm);
       setShowCreateForm(false);
       await reloadOperators();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not create PG operator'));
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -95,20 +97,21 @@ export default function PGOperators() {
         </button>
       </header>
 
-      {showCreateForm && <form onSubmit={createOperator} className="border border-slate-200 bg-white p-5 md:p-6">
+      {showCreateForm && <form onSubmit={handleSubmit(createOperator)} className="border border-slate-200 bg-white p-5 md:p-6">
         <div className="flex items-center justify-between gap-4"><h2 className="font-semibold text-slate-900">Create owner and first property</h2><button type="button" onClick={() => setShowCreateForm(false)} className="text-sm font-semibold text-slate-500">Cancel</button></div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <input required placeholder="Owner full name" value={form.ownerName} onChange={(event) => setForm({ ...form, ownerName: event.target.value })} className="border border-slate-300 px-3 py-2.5 text-sm" />
-          <input required type="tel" placeholder="Owner phone" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} className="border border-slate-300 px-3 py-2.5 text-sm" />
-          <input type="email" placeholder="Email (optional)" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="border border-slate-300 px-3 py-2.5 text-sm" />
-          <input required type="password" minLength={8} placeholder="Temporary password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} className="border border-slate-300 px-3 py-2.5 text-sm" />
-          <input required placeholder="PG / hostel name" value={form.propertyName} onChange={(event) => setForm({ ...form, propertyName: event.target.value })} className="border border-slate-300 px-3 py-2.5 text-sm" />
-          <input required placeholder="Street address" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} className="border border-slate-300 px-3 py-2.5 text-sm" />
-          <input required placeholder="Locality" value={form.locality} onChange={(event) => setForm({ ...form, locality: event.target.value })} className="border border-slate-300 px-3 py-2.5 text-sm" />
-          <input required placeholder="City" value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} className="border border-slate-300 px-3 py-2.5 text-sm" />
-          <select value={form.genderPolicy} onChange={(event) => setForm({ ...form, genderPolicy: event.target.value })} className="border border-slate-300 bg-white px-3 py-2.5 text-sm"><option value="ANY">All residents</option><option value="WOMEN">Women</option><option value="MEN">Men</option></select>
-          <input placeholder="Amenities, separated by commas" value={form.amenities} onChange={(event) => setForm({ ...form, amenities: event.target.value })} className="border border-slate-300 px-3 py-2.5 text-sm sm:col-span-2 xl:col-span-3" />
+          <input required placeholder="Owner full name" {...register('ownerName')} className="border border-slate-300 px-3 py-2.5 text-sm" />
+          <input required type="tel" placeholder="Owner phone" {...register('phone')} className="border border-slate-300 px-3 py-2.5 text-sm" />
+          <input type="email" placeholder="Email (optional)" {...register('email')} className="border border-slate-300 px-3 py-2.5 text-sm" />
+          <input required type="password" minLength={8} placeholder="Temporary password" {...register('password')} className="border border-slate-300 px-3 py-2.5 text-sm" />
+          <input required placeholder="PG / hostel name" {...register('propertyName')} className="border border-slate-300 px-3 py-2.5 text-sm" />
+          <input required placeholder="Street address" {...register('address')} className="border border-slate-300 px-3 py-2.5 text-sm" />
+          <input required placeholder="Locality" {...register('locality')} className="border border-slate-300 px-3 py-2.5 text-sm" />
+          <input required placeholder="City" {...register('city')} className="border border-slate-300 px-3 py-2.5 text-sm" />
+          <select {...register('genderPolicy')} className="border border-slate-300 bg-white px-3 py-2.5 text-sm"><option value="ANY">All residents</option><option value="WOMEN">Women</option><option value="MEN">Men</option></select>
+          <input placeholder="Amenities, separated by commas" {...register('amenities')} className="border border-slate-300 px-3 py-2.5 text-sm sm:col-span-2 xl:col-span-3" />
         </div>
+        {firstError && <p role="alert" className="mt-3 text-sm font-medium text-red-600">{firstError}</p>}
         <button disabled={saving} className="mt-4 inline-flex items-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}Create owner account</button>
       </form>}
 

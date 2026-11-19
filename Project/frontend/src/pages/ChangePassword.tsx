@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import { Controller, useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
@@ -6,32 +7,28 @@ import { useAuth } from '../context/auth';
 import { Lock, Loader2, ArrowLeft } from 'lucide-react';
 import PasswordInput from '../components/PasswordInput';
 import { apiErrorMessage } from '../utils/api-error';
+import { changePasswordSchema, type ChangePasswordForm } from '../validation/forms';
+
+function FieldError({ message }: { message?: string | undefined }) {
+  return message ? <p role="alert" className="mt-1 text-xs font-medium text-red-600">{message}</p> : null;
+}
 
 export default function ChangePassword() {
-  const [formData, setFormData] = useState({
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: ''
+  const { control, handleSubmit, formState: { errors, isSubmitting } } = useForm<ChangePasswordForm>({
+    resolver: zodResolver(changePasswordSchema),
+    defaultValues: { currentPassword: '', newPassword: '', confirmPassword: '' }
   });
-  const [loading, setLoading] = useState(false);
   const { logout } = useAuth();
   const navigate = useNavigate();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (formData.newPassword !== formData.confirmPassword) {
-      toast.error('New passwords do not match');
-      return;
-    }
-    setLoading(true);
-
+  const onSubmit = async (form: ChangePasswordForm) => {
     try {
       await api.post('/auth/change-password', {
-        currentPassword: formData.currentPassword,
-        newPassword: formData.newPassword
+        currentPassword: form.currentPassword,
+        newPassword: form.newPassword
       });
       toast.success('Password updated successfully. Please log in again.');
-      
+
       // Force logout after password change
       setTimeout(() => {
         logout();
@@ -39,8 +36,6 @@ export default function ChangePassword() {
       }, 1500);
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Failed to update password.'));
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -55,45 +50,51 @@ export default function ChangePassword() {
       </div>
 
       <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-8">
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-6">
           <div>
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Current Password</label>
-            <PasswordInput
-              value={formData.currentPassword}
-              autoComplete="current-password"
-              ariaLabel="Current password"
-              onChange={(value) => setFormData({...formData, currentPassword: value})}
+            <Controller
+              name="currentPassword"
+              control={control}
+              render={({ field }) => (
+                <PasswordInput value={field.value} onChange={field.onChange} autoComplete="current-password" ariaLabel="Current password" required={false} />
+              )}
             />
+            <FieldError message={errors.currentPassword?.message} />
           </div>
 
           <div className="space-y-4 pt-4 border-t border-slate-50">
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">New Password</label>
-              <PasswordInput
-                value={formData.newPassword}
-                autoComplete="new-password"
-                ariaLabel="New password"
-                onChange={(value) => setFormData({...formData, newPassword: value})}
+              <Controller
+                name="newPassword"
+                control={control}
+                render={({ field }) => (
+                  <PasswordInput value={field.value} onChange={field.onChange} autoComplete="new-password" ariaLabel="New password" required={false} />
+                )}
               />
+              <FieldError message={errors.newPassword?.message} />
             </div>
 
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Confirm New Password</label>
-              <PasswordInput
-                value={formData.confirmPassword}
-                autoComplete="new-password"
-                ariaLabel="Confirm new password"
-                onChange={(value) => setFormData({...formData, confirmPassword: value})}
+              <Controller
+                name="confirmPassword"
+                control={control}
+                render={({ field }) => (
+                  <PasswordInput value={field.value} onChange={field.onChange} autoComplete="new-password" ariaLabel="Confirm new password" required={false} />
+                )}
               />
+              <FieldError message={errors.confirmPassword?.message} />
             </div>
           </div>
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={isSubmitting}
             className="w-full btn-primary justify-center py-3.5 shadow-lg shadow-blue-950/10 disabled:opacity-50"
           >
-            {loading ? (
+            {isSubmitting ? (
               <Loader2 className="w-5 h-5 animate-spin" />
             ) : (
               'Update Password'

@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+import { Controller, useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/auth';
 import api from '../api/axios';
@@ -7,22 +9,21 @@ import PasswordInput from '../components/PasswordInput';
 import logo from '../assets/logo_bg_black.png';
 import { resolveAppHost } from '../utils/pg-host';
 import { apiErrorMessage } from '../utils/api-error';
+import { loginSchema, type LoginForm } from '../validation/forms';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const { register, control, handleSubmit, setError, clearErrors, formState: { errors, isSubmitting: loading } } = useForm<LoginForm>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: '', password: '' }
+  });
+  // One message under the password field: a field problem or the server's answer.
+  const error = errors.root?.server?.message || errors.email?.message || errors.password?.message || '';
   const [showSupportModal, setShowSupportModal] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-
+  const onSubmit = async ({ email, password }: LoginForm) => {
     try {
       const response = await api.post('/auth/login', { email, password });
       const loggedUser = response.data.user;
@@ -39,9 +40,7 @@ export default function LoginPage() {
 
       navigate(redirectUrl, { replace: true });
     } catch (err) {
-      setError(apiErrorMessage(err, 'Failed to login. Please check your credentials.'));
-    } finally {
-      setLoading(false);
+      setError('root.server', { message: apiErrorMessage(err, 'Failed to login. Please check your credentials.') });
     }
   };
 
@@ -55,19 +54,15 @@ export default function LoginPage() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8">
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-6">
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Mobile Number</label>
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   type="text"
-                  required
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value);
-                    if (error) setError('');
-                  }}
+                  aria-label="Mobile number"
+                  {...register('email', { onChange: () => clearErrors('root.server') })}
                   className="w-full bg-slate-50 border-slate-100 rounded-xl py-3 pl-11 pr-4 text-sm focus:ring-2 focus:ring-[#02224B] focus:bg-white transition-all"
                   placeholder="Enter mobile number"
                 />
@@ -76,17 +71,24 @@ export default function LoginPage() {
 
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Password</label>
-              <PasswordInput
-                value={password}
-                autoComplete="current-password"
-                onChange={(value) => {
-                  setPassword(value);
-                  if (error) setError('');
-                }}
-                inputClassName={error ? 'focus:ring-red-500 border-red-200' : 'focus:ring-[#02224B]'}
+              <Controller
+                name="password"
+                control={control}
+                render={({ field }) => (
+                  <PasswordInput
+                    value={field.value}
+                    autoComplete="current-password"
+                    required={false}
+                    onChange={(value) => {
+                      field.onChange(value);
+                      clearErrors('root.server');
+                    }}
+                    inputClassName={error ? 'focus:ring-red-500 border-red-200' : 'focus:ring-[#02224B]'}
+                  />
+                )}
               />
               {error && (
-                <p className="text-red-500 text-xs mt-2 font-medium">{error}</p>
+                <p role="alert" className="text-red-500 text-xs mt-2 font-medium">{error}</p>
               )}
             </div>
 
