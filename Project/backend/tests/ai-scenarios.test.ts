@@ -37,7 +37,6 @@ process.env.ENABLE_AI_ORCHESTRATOR = 'true';
 process.env.AI_MODEL = 'google:gemini-3.8-flash';
 process.env.GOOGLE_API_KEY = 'test-key';
 process.env.MODEL_API_TIMEOUT_MS = '5000';
-process.env.ENCRYPTION_KEY = 'ab'.repeat(32);
 process.env.JWT_SECRET = 'test-secret-for-pg-scenario-suite-32-bytes';
 process.env.UPLOAD_STORAGE = 'local';
 process.env.UPLOAD_DIR = UPLOAD_TEST_DIR;
@@ -1293,6 +1292,14 @@ describe('HTTP hardening', () => {
   });
   after(() => { server?.close(); });
 
+  it('speaks plain JSON (TLS protects transport; no app-level payload encryption)', async () => {
+    const res = await fetch(`${base}/api/pg/config`);
+    const body = await res.json() as any;
+    assert.match(String(res.headers.get('content-type')), /application\/json/);
+    assert.equal(typeof body.phoneVerification?.provider, 'string');
+    assert.equal('data' in body, false);
+  });
+
   it('sends security headers and hides the framework', async () => {
     const res = await fetch(`${base}/healthz`);
     assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
@@ -1702,13 +1709,7 @@ describe('rent reminders', () => {
     const server = app.listen(0, '127.0.0.1');
     await new Promise<void>((r) => server.on('listening', () => r()));
     const port = (server.address() as any).port;
-    const key = Buffer.from(process.env.ENCRYPTION_KEY as string, 'hex');
-    const decryptBody = async (res: any) => {
-      const wrapper = await res.json();
-      const combined = Buffer.from(wrapper.data, 'base64');
-      const decipher = crypto.createDecipheriv('aes-256-cbc', key, combined.subarray(0, 16));
-      return JSON.parse(Buffer.concat([decipher.update(combined.subarray(16)), decipher.final()]).toString('utf8'));
-    };
+    const readBody = async (res: any) => res.json();
     try {
       const denied = await fetch(`http://127.0.0.1:${port}/api/pg/owner/rent/reminders`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ force: true })
@@ -1721,7 +1722,7 @@ describe('rent reminders', () => {
         body: JSON.stringify({ force: true })
       });
       assert.equal(allowed.status, 200);
-      const body = await decryptBody(allowed);
+      const body = await readBody(allowed);
       assert.equal(typeof body.sent, 'number');
       assert.ok(body.total >= 2);
     } finally {
@@ -1866,7 +1867,6 @@ describe('S3 image access', () => {
     const server = app.listen(0, '127.0.0.1');
     await new Promise<void>((resolve) => server.on('listening', resolve));
     const port = (server.address() as any).port;
-    const key = Buffer.from(process.env.ENCRYPTION_KEY as string, 'hex');
     try {
       const upload = await fetch(`http://127.0.0.1:${port}/api/upload-s3`, { method: 'POST' });
       assert.equal(upload.status, 401);
@@ -1900,10 +1900,7 @@ describe('S3 image access', () => {
         body: JSON.stringify({ keys: ['uploads/private-test.pdf'] })
       });
       assert.equal(bulk.status, 200);
-      const wrapper = await bulk.json() as { data: string };
-      const combined = Buffer.from(wrapper.data, 'base64');
-      const decipher = crypto.createDecipheriv('aes-256-cbc', key, combined.subarray(0, 16));
-      const body = JSON.parse(Buffer.concat([decipher.update(combined.subarray(16)), decipher.final()]).toString('utf8'));
+      const body = await bulk.json() as { urls: Record<string, string> };
       assert.deepEqual(body.urls, {});
     } finally {
       server.close();
@@ -1924,15 +1921,9 @@ describe('local filesystem media storage', () => {
     const server = app.listen(0, '127.0.0.1');
     await new Promise<void>((resolve) => server.on('listening', resolve));
     const port = (server.address() as any).port;
-    const key = Buffer.from(process.env.ENCRYPTION_KEY as string, 'hex');
     const ownerToken = jwt.sign({ userId: ids.owner.id, role: 'PG_OWNER' }, process.env.JWT_SECRET as string);
     const outsiderToken = jwt.sign({ userId: ids.outsider.id, role: 'PG_OWNER' }, process.env.JWT_SECRET as string);
-    const decryptBody = async (response: Response) => {
-      const wrapper = await response.json() as { data: string };
-      const combined = Buffer.from(wrapper.data, 'base64');
-      const decipher = crypto.createDecipheriv('aes-256-cbc', key, combined.subarray(0, 16));
-      return JSON.parse(Buffer.concat([decipher.update(combined.subarray(16)), decipher.final()]).toString('utf8'));
-    };
+    const readBody = async (response: any) => response.json();
 
     try {
       const image = new FormData();
@@ -1962,7 +1953,7 @@ describe('local filesystem media storage', () => {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ keys: [galleryKey, kycKey, 'local/not-a-real-key.webp'] })
       });
-      const gallery = await decryptBody(galleryResponse);
+      const gallery = await readBody(galleryResponse);
       assert.equal(galleryResponse.status, 200);
       assert.ok(gallery.urls[galleryKey]?.includes('/api/local-media/'));
       assert.equal(gallery.urls[kycKey], undefined);
@@ -1974,7 +1965,7 @@ describe('local filesystem media storage', () => {
       const authorizedKyc = await fetch(`http://127.0.0.1:${port}/api/view-image/${encodeURIComponent(kycKey)}`, {
         headers: { Authorization: `Bearer ${ownerToken}` }
       });
-      const { viewUrl } = await decryptBody(authorizedKyc);
+      const { viewUrl } = await readBody(authorizedKyc);
       assert.equal(authorizedKyc.status, 200);
       const pdfPreview = await fetch(viewUrl);
       assert.equal(pdfPreview.status, 200);
@@ -2145,13 +2136,7 @@ describe('property expenses', () => {
     const server = app.listen(0, '127.0.0.1');
     await new Promise<void>((r) => server.on('listening', () => r()));
     const port = (server.address() as any).port;
-    const key = Buffer.from(process.env.ENCRYPTION_KEY as string, 'hex');
-    const decryptBody = async (res: any) => {
-      const wrapper = await res.json();
-      const combined = Buffer.from(wrapper.data, 'base64');
-      const decipher = crypto.createDecipheriv('aes-256-cbc', key, combined.subarray(0, 16));
-      return JSON.parse(Buffer.concat([decipher.update(combined.subarray(16)), decipher.final()]).toString('utf8'));
-    };
+    const readBody = async (res: any) => res.json();
     const post = (token?: string, payload: any = {}) => fetch(`http://127.0.0.1:${port}/api/pg/owner/expenses`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -2168,7 +2153,7 @@ describe('property expenses', () => {
         headers: { Authorization: `Bearer ${token}` }
       });
       assert.equal(listed.status, 200);
-      const body = await decryptBody(listed);
+      const body = await readBody(listed);
       assert.ok(body.total >= 750);
       assert.ok(Array.isArray(body.entries));
     } finally {
@@ -2284,13 +2269,7 @@ describe('electricity billing and food charges', () => {
     const server = app.listen(0, '127.0.0.1');
     await new Promise<void>((r) => server.on('listening', () => r()));
     const port = (server.address() as any).port;
-    const key = Buffer.from(process.env.ENCRYPTION_KEY as string, 'hex');
-    const decryptBody = async (res: any) => {
-      const wrapper = await res.json();
-      const combined = Buffer.from(wrapper.data, 'base64');
-      const decipher = crypto.createDecipheriv('aes-256-cbc', key, combined.subarray(0, 16));
-      return JSON.parse(Buffer.concat([decipher.update(combined.subarray(16)), decipher.final()]).toString('utf8'));
-    };
+    const readBody = async (res: any) => res.json();
     try {
       const denied = await fetch(`http://127.0.0.1:${port}/api/pg/owner/electricity/bills`, { method: 'GET' });
       assert.equal(denied.status, 401);
@@ -2306,13 +2285,13 @@ describe('electricity billing and food charges', () => {
         body: JSON.stringify({ propertyId: ids.prop.id, period: '2027-02', totalAmount: 1800 })
       });
       assert.equal(created.status, 201);
-      const draft = await decryptBody(created);
+      const draft = await readBody(created);
       assert.ok(draft.split.rows.length >= 1);
       const approved = await fetch(`http://127.0.0.1:${port}/api/pg/owner/electricity/bills/${draft.id}/approve`, {
         method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify({})
       });
       assert.equal(approved.status, 200);
-      const result = await decryptBody(approved);
+      const result = await readBody(approved);
       assert.equal(result.bill.status, 'APPROVED');
       assert.ok(result.entries >= 1);
     } finally {

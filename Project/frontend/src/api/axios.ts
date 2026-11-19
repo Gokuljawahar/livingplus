@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { encrypt, decrypt } from '../utils/crypto';
 import { resolveAppHost } from '../utils/pg-host';
 import { OWNER_TOKEN_KEY, OWNER_USER_KEY, RESIDENT_TOKEN_KEY, RESIDENT_USER_KEY } from '../utils/session';
 
@@ -47,28 +46,11 @@ api.interceptors.request.use(async (config) => {
   const hostContext = resolveAppHost();
   if (hostContext.kind === 'property') config.headers['X-PG-Slug'] = hostContext.slug;
 
-  // Encrypt request body (skip FormData)
-  if (config.data !== undefined && config.data !== null && !(config.data instanceof FormData)) {
-    const encrypted = await encrypt(config.data);
-    config.data = { data: encrypted };
-  }
-
-  // Encrypt query params (GET and any request with params)
-  if (config.params && Object.keys(config.params).length > 0) {
-    const encrypted = await encrypt(config.params);
-    config.params = { data: encrypted };
-  }
-
   return config;
 });
 
 api.interceptors.response.use(
-  async (response) => {
-    if (response.data && typeof response.data.data === 'string') {
-      response.data = await decrypt(response.data.data);
-    }
-    return response;
-  },
+  (response) => response,
   async (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem(OWNER_TOKEN_KEY);
@@ -78,9 +60,6 @@ api.interceptors.response.use(
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }
-    }
-    if (error.response?.data && typeof error.response.data.data === 'string') {
-      error.response.data = await decrypt(error.response.data.data);
     }
     return Promise.reject(error);
   }

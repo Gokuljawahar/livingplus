@@ -99,7 +99,6 @@ run gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" --member "ser
 
 step "Secrets"
 ensure_secret livingplus-jwt-secret "$(random_hex)"
-ensure_secret livingplus-encryption-key "$(random_hex)"
 ensure_secret livingplus-admin-password "$(random_secret 20)"
 ensure_secret livingplus-db-password "$(random_secret 32)"
 if [ -n "${GOOGLE_API_KEY:-}" ]; then ensure_secret livingplus-google-api-key "$GOOGLE_API_KEY"; fi
@@ -120,11 +119,6 @@ fi
 ensure_secret livingplus-database-url "postgresql://${DB_USER}:${DB_PASSWORD}@localhost/${DB_NAME}?host=/cloudsql/${SQL_CONNECTION}"
 
 step "Building the image with Cloud Build"
-BUILD_SA="$(gcloud builds get-default-service-account --project "$PROJECT_ID" --format 'value(serviceAccountEmail)' 2>/dev/null | sed 's#.*/##' || true)"
-if [ -n "$BUILD_SA" ]; then
-  run gcloud secrets add-iam-policy-binding livingplus-encryption-key --project "$PROJECT_ID" \
-    --member "serviceAccount:${BUILD_SA}" --role roles/secretmanager.secretAccessor >/dev/null
-fi
 run gcloud builds submit --project "$PROJECT_ID" --region "$REGION" --config deploy/cloudbuild.yaml \
   --substitutions "_IMAGE=${IMAGE},_VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY:-}" .
 
@@ -132,7 +126,7 @@ step "Deploying Cloud Run service ${SERVICE}"
 ENV_VARS="APP_TIMEZONE=Asia/Kolkata,GCS_BUCKET=${BUCKET},ADMIN_USERNAME=${ADMIN_USERNAME},LOG_LEVEL=info"
 ENV_VARS+=",ENABLE_AI_ORCHESTRATOR=true,AI_MODEL=${AI_MODEL}"
 SECRETS="DATABASE_URL=livingplus-database-url:latest,JWT_SECRET=livingplus-jwt-secret:latest"
-SECRETS+=",ENCRYPTION_KEY=livingplus-encryption-key:latest,ADMIN_PASSWORD=livingplus-admin-password:latest"
+SECRETS+=",ADMIN_PASSWORD=livingplus-admin-password:latest"
 if [ -n "${GOOGLE_API_KEY:-}" ]; then
   ENV_VARS+=",ENABLE_SEMANTIC_SEARCH=true,AI_EMBEDDING_MODEL=google-genai:gemini-embedding-001"
   SECRETS+=",GOOGLE_API_KEY=livingplus-google-api-key:latest"

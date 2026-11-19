@@ -1,6 +1,6 @@
 # One container for the whole app (API + built frontend), for Cloud Run.
 # Build from the repository root:
-#   docker build -t livingplus --build-arg VITE_ENCRYPTION_KEY=... .
+#   docker build -t livingplus .
 # See deploy/gcp-deploy.sh for the full Google Cloud deployment.
 
 # --- Frontend -------------------------------------------------------------
@@ -10,13 +10,10 @@ COPY Project/frontend/package*.json ./
 RUN npm ci
 COPY Project/frontend/ ./
 # VITE_* values are compiled into the public JavaScript bundle (not secret).
-# VITE_ENCRYPTION_KEY must equal the backend ENCRYPTION_KEY.
-ARG VITE_ENCRYPTION_KEY
 ARG VITE_ROOT_DOMAIN=""
 ARG VITE_SINGLE_HOST_MODE="true"
 ARG VITE_GOOGLE_MAPS_API_KEY=""
-RUN test -n "$VITE_ENCRYPTION_KEY" || (echo "VITE_ENCRYPTION_KEY build arg is required" && exit 1)
-RUN VITE_ENCRYPTION_KEY="$VITE_ENCRYPTION_KEY" VITE_ROOT_DOMAIN="$VITE_ROOT_DOMAIN" \
+RUN VITE_ROOT_DOMAIN="$VITE_ROOT_DOMAIN" \
     VITE_SINGLE_HOST_MODE="$VITE_SINGLE_HOST_MODE" VITE_GOOGLE_MAPS_API_KEY="$VITE_GOOGLE_MAPS_API_KEY" \
     npm run build
 

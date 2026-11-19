@@ -34,14 +34,12 @@ DATABASE_URL="postgresql://livingplus:livingplus@localhost:5433/livingplus"
 PORT=4000
 LIVINGPLUS_ROOT_DOMAIN="livingplus.com"
 JWT_SECRET="<stable random secret, at least 32 characters>"
-ENCRYPTION_KEY="<64 hexadecimal characters>"
 UPLOAD_STORAGE="local"
 ADMIN_USERNAME="<your platform-admin login>"
 ADMIN_PASSWORD="<your platform-admin password>"
 ```
 
-Generate independent values for JWT and encryption with this command, once
-for each value:
+Generate a JWT secret with:
 
 ```powershell
 node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
@@ -57,13 +55,13 @@ Configure `Project/frontend/.env.local`:
 
 ```dotenv
 VITE_ROOT_DOMAIN="livingplus.com"
-VITE_ENCRYPTION_KEY="<the exact same ENCRYPTION_KEY as the backend>"
 ```
 
 Leave `VITE_API_BASE_URL` unset locally. Vite forwards `/api` to port 4000.
 For a separate API origin, this variable is the origin **without** an `/api`
-suffix. Frontend keys are browser-visible; payload encryption does not replace
-HTTPS or authorization. Restart Vite after changing frontend environment values.
+suffix. Everything in `VITE_*` is visible in the browser bundle, so never put
+secrets there. The API speaks plain JSON; use HTTPS in production (Cloud Run
+provides it). Restart Vite after changing frontend environment values.
 
 ### Database
 
@@ -257,7 +255,7 @@ DRY_RUN=1 deploy/gcp-deploy.sh          # review
 GOOGLE_API_KEY=... SEED_DEMO_DATA=1 deploy/gcp-deploy.sh
 ```
 
-- Secrets (JWT, encryption key, admin and database passwords) are generated
+- Secrets (JWT, admin and database passwords) are generated
   once into Secret Manager; the script prints how to read the admin password.
 - `GOOGLE_API_KEY` (optional) turns on semantic search; without it the
   assistant uses Vertex AI through the service account.
@@ -335,8 +333,6 @@ accounts, and their referenced gallery/KYC files were removed after testing.
 
 | Symptom | Check |
 |---|---|
-| Blank listings / missing `VITE_ENCRYPTION_KEY` | Set the frontend key, match the backend key, restart Vite. |
-| `Invalid encrypted payload` | Compare effective keys, including `.env.local` overrides. |
 | API proxy connection refused | Start the API on port 4000 first. |
 | `PG site not found` | Use the exact active `PGProperty.slug`. |
 | Sessions rejected after API restart | Set a stable JWT secret, then log in again. |

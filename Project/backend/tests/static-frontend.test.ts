@@ -13,7 +13,6 @@ fs.writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>LivingPlu
 fs.writeFileSync(path.join(dist, 'assets', 'app-abc123.js'), 'console.log(1)');
 process.env.FRONTEND_DIST_DIR = dist;
 process.env.LOG_LEVEL = 'silent';
-process.env.ENCRYPTION_KEY = 'ab'.repeat(32);
 process.env.JWT_SECRET = 'test-secret-for-static-frontend-32-bytes';
 
 let server: http.Server;

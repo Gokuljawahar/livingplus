@@ -4,7 +4,6 @@ import { access } from 'fs/promises';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import routes from './routes/index.js';
-import { decryptRequest, encryptResponse } from './middleware/encryption.middleware.js';
 import { authenticate } from './middleware/auth.middleware.js';
 import { getJwtSecret } from './utils/auth-config.js';
 import { resolvePgHost } from './middleware/pg-host.middleware.js';
@@ -21,15 +20,14 @@ app.use(express.urlencoded({ limit: '100kb', extended: true }));
 import path from 'path';
 import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Liveness probe and scheduled jobs: plain HTTP, outside /api encryption and PG host routing.
+// Liveness probe and scheduled jobs: outside /api PG host routing.
 app.get('/healthz', (_req, res) => { res.json({ ok: true }); });
 app.use('/internal/cron', cronRoutes(prisma));
 app.use('/api', resolvePgHost(prisma));
 app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
 app.use('/api/uploads', express.static(path.resolve(__dirname, '../uploads')));
-// Proxy upload endpoint — placed BEFORE encryption middleware so it can
-// receive multipart/form-data. Uploading through the API (instead of a direct
-// bucket URL) avoids storage CORS issues on mobile browsers.
+// Proxy upload endpoint (multipart/form-data). Uploading through the API
+// instead of a direct bucket URL avoids storage CORS issues on mobile browsers.
 import sharp from "sharp";
 const s3Upload = multer({
     storage: multer.memoryStorage(),
@@ -115,8 +113,6 @@ app.post('/api/upload-s3', authenticate, authorizePropertyStaffUpload, s3Upload.
         res.status(500).json({ error: "Failed to upload image" });
     }
 });
-app.use(decryptRequest);
-app.use(encryptResponse);
 app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
 });

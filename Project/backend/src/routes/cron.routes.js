@@ -1,5 +1,5 @@
 // Scheduled jobs as authenticated HTTP endpoints, for Google Cloud Scheduler
-// (or any external cron). Mounted outside /api: no payload encryption or PG
+// (or any external cron). Mounted outside /api, so no PG
 // host routing applies. Set SCHEDULER_MODE=external so the API process does not
 // also run its in-process timers.
 //
