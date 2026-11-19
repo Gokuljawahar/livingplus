@@ -245,8 +245,10 @@ missing); otherwise they have no owner. The active demo resident uses phone
   `LANGSMITH_HIDE_OUTPUTS=true` to redact them. On Cloud Run also set
   `LANGCHAIN_CALLBACKS_BACKGROUND=false` (the deploy script does this).
 - **Semantic PG search:** set `ENABLE_SEMANTIC_SEARCH=true` and
-  `AI_EMBEDDING_MODEL` (default `google-genai:gemini-embedding-001`, using
-  `GOOGLE_API_KEY`). Published listings are embedded from stable facts
+  `AI_EMBEDDING_MODEL`: `google-vertexai:gemini-embedding-001` uses Vertex AI
+  with the service account (no key; the Cloud Run default), and
+  `google-genai:gemini-embedding-001` uses `GOOGLE_API_KEY`. Both store
+  768-dimension vectors. Published listings are embedded from stable facts
   (location, description, amenities, rules, room types, rent range) and
   re-embedded only when those change. The listing search box adds matches by
   meaning ("quiet PG near the OMR tech park with veg food") to its keyword
@@ -261,8 +263,9 @@ missing); otherwise they have no owner. The active demo resident uses phone
   API** for that key (the legacy Places Autocomplete widget is not available to
   projects created after March 2025, so the picker uses Places API (New)).
 - **Uploads:** private files are stored by `UPLOAD_STORAGE`: `local`
-  (default, `backend/private-uploads`), `gcs` (Google Cloud Storage bucket
-  `GCS_BUCKET`) or `s3`. Files are never public; viewers get short-lived signed
+  (`backend/private-uploads`), `gcs` (Google Cloud Storage bucket
+  `GCS_BUCKET`) or `s3`. If it is unset, a configured `GCS_BUCKET` selects
+  Cloud Storage, so files never end up on a Cloud Run container's disk. Files are never public; viewers get short-lived signed
   URLs after access checks. Configure `PUBLIC_API_URL` when local signed media
   needs a public API origin. Back up the database and files together.
 
@@ -328,16 +331,29 @@ Storage, Secret Manager and Cloud Scheduler. It is idempotent and
 ```bash
 gcloud auth login && gcloud config set project YOUR_PROJECT
 DRY_RUN=1 deploy/gcp-deploy.sh          # review
-GOOGLE_API_KEY=... SEED_DEMO_DATA=1 deploy/gcp-deploy.sh
+SEED_DEMO_DATA=1 ALERT_EMAIL=you@example.com deploy/gcp-deploy.sh
 ```
 
 - Secrets (JWT, database and demo-owner passwords) are generated once into
   Secret Manager; the script prints how to read the demo owner's password.
-- `GOOGLE_API_KEY` (optional) turns on semantic search; without it the
-  assistant uses Vertex AI through the service account.
-- Firebase settings (optional) turn on Firebase Phone Auth; without them the
-  service runs in **OTP demo mode** (`OTP_DEMO_MODE=true`: codes are shown on
-  screen). Never use demo mode with real users.
+- No API keys are needed for AI: the assistant and semantic search use
+  Vertex AI through the service account. `GOOGLE_API_KEY` is optional.
+- Files go to a private Cloud Storage bucket (`UPLOAD_STORAGE=gcs`).
+- Cloud Monitoring gets an uptime check on `/health`, a log-based metric
+  for server errors, and one alert policy for "site down or more than 5 errors
+  in 5 minutes". `ALERT_EMAIL` (optional) adds an email channel; without it,
+  incidents show in the Cloud Console.
+- **Firebase Authentication:** if the project has a Firebase web app, the
+  script reads its config and turns on Firebase Phone Auth (real SMS codes).
+  Google sign-in follows the Firebase Google provider (or set
+  `ENABLE_GOOGLE_SIGN_IN`). Add the Cloud Run domain to Firebase
+  Authentication's authorized domains.
+  - With `SEED_DEMO_DATA=1`, the fictional demo residents (`9000000001`,
+    `9000000002`) are registered as Firebase test phone numbers, with code
+    `DEMO_OTP_CODE` (default `246810`, no SMS).
+  - Without a Firebase app, the service runs in **OTP demo mode**
+    (`OTP_DEMO_MODE=true`: codes are shown on screen). Never use demo mode
+    with real users.
 - A `*.run.app` URL has no per-PG subdomains, so the image runs in
   **single-host mode** (`SINGLE_HOST_MODE` / `VITE_SINGLE_HOST_MODE`): every
   area uses paths (`/owner`, `/stay/{slug}`) as in local
@@ -358,9 +374,11 @@ leaves scheduled jobs to Cloud Scheduler.
 |---|---|---|
 | Database | Cloud SQL for PostgreSQL | `DATABASE_URL=postgresql://USER:PASS@/livingplus?host=/cloudsql/PROJECT:REGION:INSTANCE`, plus `--add-cloudsql-instances` on the service |
 | Files | Cloud Storage | `UPLOAD_STORAGE=gcs`, `GCS_BUCKET`; grant the service account Storage Object Admin on the bucket and Service Account Token Creator on itself (for signed URLs) |
-| Scheduled jobs | Cloud Scheduler | `SCHEDULER_MODE=external`; HTTP POST jobs to `/internal/cron/monthly-rent` (`5 0 1 * *`, time zone Asia/Kolkata) and `/internal/cron/rent-reminders` (daily) and `/internal/cron/search-index` (hourly, when semantic search is on), with an OIDC token whose audience matches `CRON_OIDC_AUDIENCE` and service account `CRON_SERVICE_ACCOUNT` |
+| Scheduled jobs | Cloud Scheduler | `SCHEDULER_MODE=external`; HTTP POST jobs to `/internal/cron/monthly-rent` (`5 0 1 * *`, time zone Asia/Kolkata) and `/internal/cron/rent-reminders` (daily) and `/internal/cron/search-index` (hourly), with an OIDC token whose audience matches `CRON_OIDC_AUDIENCE` and service account `CRON_SERVICE_ACCOUNT` |
 | AI assistant | Vertex AI (Gemini) | `AI_MODEL=google:<model>` with no `GOOGLE_API_KEY`: the service account authenticates (grant Vertex AI User) |
+| Search embeddings | Vertex AI | `ENABLE_SEMANTIC_SEARCH=true`, `AI_EMBEDDING_MODEL=google-vertexai:gemini-embedding-001` (service account, Vertex AI User) |
 | Agent state | Cloud SQL (same database) | LangGraph checkpoints live in the `langgraph` schema, created automatically |
+| Monitoring | Cloud Monitoring + Logging | Uptime check on `/health`, log-based error metric `livingplus-server-errors`, alert policy (set up by the deploy script) |
 
 `/health` is the liveness endpoint (Cloud Run reserves paths ending in `z`,
 so `/healthz` only works locally).

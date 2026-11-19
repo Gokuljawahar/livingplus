@@ -11,14 +11,19 @@
 # Optional settings (environment variables):
 #   PROJECT_ID           default: gcloud config project
 #   REGION               default: asia-south1 (Mumbai)
-#   GOOGLE_API_KEY       Gemini API key; enables semantic search embeddings.
-#                        Without it, chat uses Vertex AI with the service account.
+#   GOOGLE_API_KEY       optional Gemini API key. Not needed: chat and semantic
+#                        search embeddings use Vertex AI with the service account.
+#   ALERT_EMAIL          email for Cloud Monitoring alerts (site down, server errors);
+#                        without it, incidents still show in the Cloud Console.
 #   AI_MODEL             default: google:gemini-3.8-flash
 #   FIREBASE_PROJECT_ID, FIREBASE_WEB_API_KEY, FIREBASE_APP_ID
-#                        enable Firebase Phone Auth; without them, OTP demo mode
-#                        (codes shown on screen) is turned on.
-#   ENABLE_GOOGLE_SIGN_IN=true  "Sign in with Google" for owners and wardens
-#                        (uses the same Firebase project).
+#                        Firebase Phone Auth. Read automatically from the project's
+#                        Firebase web app when not set; with no Firebase app, OTP demo
+#                        mode (codes shown on screen) is turned on.
+#   ENABLE_GOOGLE_SIGN_IN=true|false  "Sign in with Google" for owners and wardens;
+#                        defaults to on when Firebase's Google provider is enabled.
+#   DEMO_OTP_CODE        fixed code for the demo residents' Firebase test phone
+#                        numbers (with SEED_DEMO_DATA=1; default 246810).
 #   VITE_GOOGLE_MAPS_API_KEY  map picker in the owner workspace
 #   SQL_TIER             default: db-f1-micro (smallest; fine for a demo)
 #   SEED_DEMO_DATA=1     load the fictional demo PGs, rooms and residents once,
@@ -83,7 +88,7 @@ step "Enabling Google Cloud APIs"
 run gcloud services enable --project "$PROJECT_ID" \
   run.googleapis.com sqladmin.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com \
   secretmanager.googleapis.com cloudscheduler.googleapis.com aiplatform.googleapis.com \
-  storage.googleapis.com iamcredentials.googleapis.com
+  storage.googleapis.com iamcredentials.googleapis.com monitoring.googleapis.com logging.googleapis.com
 
 step "Service account ${SA_EMAIL}"
 exists gcloud iam service-accounts describe "$SA_EMAIL" --project "$PROJECT_ID" \
@@ -131,14 +136,41 @@ step "Building the image with Cloud Build"
 run gcloud builds submit --project "$PROJECT_ID" --region "$REGION" --config deploy/cloudbuild.yaml \
   --substitutions "_IMAGE=${IMAGE},_VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY:-}" .
 
-step "Deploying Cloud Run service ${SERVICE}"
-ENV_VARS="APP_TIMEZONE=Asia/Kolkata,GCS_BUCKET=${BUCKET},LOG_LEVEL=info"
-ENV_VARS+=",ENABLE_AI_ORCHESTRATOR=true,AI_MODEL=${AI_MODEL}"
-SECRETS="DATABASE_URL=livingplus-database-url:latest,JWT_SECRET=livingplus-jwt-secret:latest"
-if [ -n "${GOOGLE_API_KEY:-}" ]; then
-  ENV_VARS+=",ENABLE_SEMANTIC_SEARCH=true,AI_EMBEDDING_MODEL=google-genai:gemini-embedding-001"
-  SECRETS+=",GOOGLE_API_KEY=livingplus-google-api-key:latest"
+step "Firebase Authentication"
+# Reads a value from a Firebase / Identity Toolkit REST endpoint (read-only).
+firebase_get() {
+  curl -fsS -H "Authorization: Bearer $(gcloud auth print-access-token 2>/dev/null)" \
+    -H "x-goog-user-project: ${PROJECT_ID}" "$1" 2>/dev/null
+}
+if [ -z "${FIREBASE_PROJECT_ID:-}" ]; then
+  # A failed lookup must stop the deploy: falling back to OTP demo mode would
+  # silently switch a live site to on-screen codes. Only "no Firebase app" means demo mode.
+  if ! FB_APPS_JSON="$(firebase_get "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}/webApps")"; then
+    echo "Could not read Firebase apps for ${PROJECT_ID} (network, quota or permissions)." >&2
+    echo "Retry, or pass FIREBASE_PROJECT_ID, FIREBASE_WEB_API_KEY and FIREBASE_APP_ID explicitly." >&2
+    exit 1
+  fi
+  FB_APP_ID="$(printf '%s' "$FB_APPS_JSON" | python3 -c 'import sys,json; a=json.load(sys.stdin).get("apps",[]); print(a[0]["appId"] if a else "")')"
+  if [ -n "$FB_APP_ID" ]; then
+    read -r FIREBASE_PROJECT_ID FIREBASE_WEB_API_KEY FIREBASE_APP_ID < <(
+      firebase_get "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}/webApps/${FB_APP_ID}/config" \
+        | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["projectId"], d["apiKey"], d["appId"])')
+    echo "  using Firebase web app ${FIREBASE_APP_ID}"
+  fi
 fi
+if [ -n "${FIREBASE_PROJECT_ID:-}" ] && [ -z "${ENABLE_GOOGLE_SIGN_IN:-}" ]; then
+  ENABLE_GOOGLE_SIGN_IN="$(firebase_get "https://identitytoolkit.googleapis.com/admin/v2/projects/${FIREBASE_PROJECT_ID}/defaultSupportedIdpConfigs" \
+    | python3 -c 'import sys,json; print("true" if any(c["name"].endswith("/google.com") and c.get("enabled") for c in json.load(sys.stdin).get("defaultSupportedIdpConfigs",[])) else "false")' 2>/dev/null || echo false)"
+  echo "  Google sign-in: ${ENABLE_GOOGLE_SIGN_IN} (follows the Firebase Google provider)"
+fi
+
+step "Deploying Cloud Run service ${SERVICE}"
+ENV_VARS="APP_TIMEZONE=Asia/Kolkata,UPLOAD_STORAGE=gcs,GCS_BUCKET=${BUCKET},LOG_LEVEL=info"
+ENV_VARS+=",ENABLE_AI_ORCHESTRATOR=true,AI_MODEL=${AI_MODEL}"
+# Semantic search: Vertex AI embeddings with the service account (no API key).
+ENV_VARS+=",ENABLE_SEMANTIC_SEARCH=true,AI_EMBEDDING_MODEL=google-vertexai:gemini-embedding-001"
+SECRETS="DATABASE_URL=livingplus-database-url:latest,JWT_SECRET=livingplus-jwt-secret:latest"
+if [ -n "${GOOGLE_API_KEY:-}" ]; then SECRETS+=",GOOGLE_API_KEY=livingplus-google-api-key:latest"; fi
 if [ -n "${LANGSMITH_API_KEY:-}" ]; then
   ENV_VARS+=",LANGSMITH_TRACING=true,LANGSMITH_PROJECT=livingplus,LANGCHAIN_CALLBACKS_BACKGROUND=false"
   SECRETS+=",LANGSMITH_API_KEY=livingplus-langsmith-api-key:latest"
@@ -175,7 +207,7 @@ schedule() {
 }
 schedule livingplus-monthly-rent "5 0 1 * *" /internal/cron/monthly-rent
 schedule livingplus-rent-reminders "0 10 * * *" /internal/cron/rent-reminders
-if [ -n "${GOOGLE_API_KEY:-}" ]; then schedule livingplus-search-index "15 * * * *" /internal/cron/search-index; fi
+schedule livingplus-search-index "15 * * * *" /internal/cron/search-index
 
 if [ "${SEED_DEMO_DATA:-0}" = "1" ]; then
   step "Loading demo data (one-off Cloud Run job)"
@@ -185,9 +217,98 @@ if [ "${SEED_DEMO_DATA:-0}" = "1" ]; then
     --set-env-vars "DEMO_OWNER_PHONE=${DEMO_OWNER_PHONE}" \
     --command node --args prisma/seed-pg.js --max-retries 0 --task-timeout 600
   run gcloud run jobs execute livingplus-seed --project "$PROJECT_ID" --region "$REGION" --wait
-  if [ -n "${GOOGLE_API_KEY:-}" ]; then
-    run gcloud scheduler jobs run livingplus-search-index --project "$PROJECT_ID" --location "$REGION"
+  run gcloud scheduler jobs run livingplus-search-index --project "$PROJECT_ID" --location "$REGION"
+
+  # The demo residents' numbers are fictional, so real SMS can never reach them.
+  # Register them as Firebase test phone numbers (fixed code, no SMS), keeping any
+  # test numbers already configured.
+  if [ -n "${FIREBASE_PROJECT_ID:-}" ]; then
+    step "Firebase test phone numbers for the demo residents"
+    DEMO_OTP_CODE="${DEMO_OTP_CODE:-246810}"
+    FB_CONFIG_URL="https://identitytoolkit.googleapis.com/admin/v2/projects/${FIREBASE_PROJECT_ID}/config"
+    TEST_NUMBERS="$(firebase_get "$FB_CONFIG_URL" | DEMO_OTP_CODE="$DEMO_OTP_CODE" python3 -c '
+import json, os, sys
+current = json.load(sys.stdin).get("signIn", {}).get("phoneNumber", {}).get("testPhoneNumbers", {}) or {}
+for phone in ("+919000000001", "+919000000002"):
+    current.setdefault(phone, os.environ["DEMO_OTP_CODE"])
+print(json.dumps({"signIn": {"phoneNumber": {"enabled": True, "testPhoneNumbers": current}}}))')"
+    if [ "$DRY_RUN" = "1" ]; then
+      echo "  [dry-run] PATCH ${FB_CONFIG_URL} (test phone numbers)" >&2
+    else
+      curl -fsS -X PATCH -H "Authorization: Bearer $(gcloud auth print-access-token 2>/dev/null)" \
+        -H "x-goog-user-project: ${PROJECT_ID}" -H "content-type: application/json" \
+        "${FB_CONFIG_URL}?updateMask=signIn.phoneNumber.testPhoneNumbers" -d "$TEST_NUMBERS" -o /dev/null
+    fi
+    # Existing test numbers keep their codes; report what Firebase will actually accept.
+    printf '%s' "$TEST_NUMBERS" | python3 -c '
+import json, sys
+numbers = json.load(sys.stdin)["signIn"]["phoneNumber"]["testPhoneNumbers"]
+for phone in ("+919000000001", "+919000000002"):
+    print(f"  demo resident {phone[3:]} signs in with code {numbers[phone]} (no SMS)")'
   fi
+fi
+
+step "Cloud Monitoring: uptime check and alerts"
+UPTIME_NAME="${SERVICE} health"
+CHECK_ID="$(gcloud monitoring uptime list-configs --project "$PROJECT_ID" --filter "displayName=\"${UPTIME_NAME}\"" --format 'value(name.basename())' 2>/dev/null | head -1)"
+if [ -z "$CHECK_ID" ]; then
+  run gcloud monitoring uptime create "$UPTIME_NAME" --project "$PROJECT_ID" \
+    --resource-type uptime-url --resource-labels "host=${HOST},project_id=${PROJECT_ID}" \
+    --protocol https --path /health --period 5 --timeout 10 --matcher-content '"ok":true' --matcher-type contains-string
+  CHECK_ID="$(gcloud monitoring uptime list-configs --project "$PROJECT_ID" --filter "displayName=\"${UPTIME_NAME}\"" --format 'value(name.basename())' 2>/dev/null | head -1)"
+else
+  echo "  uptime check exists (kept)"
+fi
+[ -n "$CHECK_ID" ] || CHECK_ID="dry-run-check-id"
+
+ERROR_METRIC="${SERVICE}-server-errors"
+exists gcloud logging metrics describe "$ERROR_METRIC" --project "$PROJECT_ID" \
+  || run gcloud logging metrics create "$ERROR_METRIC" --project "$PROJECT_ID" \
+    --description "Error-level log entries from the ${SERVICE} Cloud Run service" \
+    --log-filter "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${SERVICE}\" AND severity>=ERROR"
+
+CHANNELS="[]"
+if [ -n "${ALERT_EMAIL:-}" ]; then
+  CHANNEL="$(gcloud beta monitoring channels list --project "$PROJECT_ID" --filter "labels.email_address=\"${ALERT_EMAIL}\"" --format 'value(name)' 2>/dev/null | head -1 || true)"
+  if [ -z "$CHANNEL" ] && [ "$DRY_RUN" != "1" ]; then
+    CHANNEL="$(gcloud beta monitoring channels create --project "$PROJECT_ID" --display-name "${SERVICE} alerts" \
+      --type email --channel-labels "email_address=${ALERT_EMAIL}" --format 'value(name)' 2>/dev/null || true)"
+  fi
+  if [ -n "$CHANNEL" ]; then CHANNELS="[\"${CHANNEL}\"]"; else echo "  could not set up the alert email channel; alerts stay visible in the console"; fi
+fi
+
+POLICY_NAME="${SERVICE}: site down or server errors"
+if exists_policy="$(gcloud monitoring policies list --project "$PROJECT_ID" --filter "displayName=\"${POLICY_NAME}\"" --format 'value(name)' 2>/dev/null)" && [ -n "$exists_policy" ]; then
+  echo "  alert policy exists (kept)"
+else
+  POLICY_FILE="$(mktemp)"
+  cat > "$POLICY_FILE" <<POLICY
+{
+  "displayName": "${POLICY_NAME}",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "Health check failing",
+      "conditionThreshold": {
+        "filter": "metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" AND resource.type=\"uptime_url\" AND metric.label.check_id=\"${CHECK_ID}\"",
+        "aggregations": [{ "alignmentPeriod": "1200s", "perSeriesAligner": "ALIGN_NEXT_OLDER", "crossSeriesReducer": "REDUCE_COUNT_FALSE", "groupByFields": ["resource.label.host"] }],
+        "comparison": "COMPARISON_GT", "thresholdValue": 1, "duration": "300s", "trigger": { "count": 1 }
+      }
+    },
+    {
+      "displayName": "More than 5 server errors in 5 minutes",
+      "conditionThreshold": {
+        "filter": "metric.type=\"logging.googleapis.com/user/${ERROR_METRIC}\" AND resource.type=\"cloud_run_revision\"",
+        "aggregations": [{ "alignmentPeriod": "300s", "perSeriesAligner": "ALIGN_SUM", "crossSeriesReducer": "REDUCE_SUM" }],
+        "comparison": "COMPARISON_GT", "thresholdValue": 5, "duration": "0s", "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "notificationChannels": ${CHANNELS}
+}
+POLICY
+  run gcloud monitoring policies create --project "$PROJECT_ID" --policy-from-file "$POLICY_FILE"
+  rm -f "$POLICY_FILE"
 fi
 
 cat <<EOF

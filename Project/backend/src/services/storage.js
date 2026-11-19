@@ -7,6 +7,7 @@
 //                          the service account signs URLs via the IAM API, so it
 //                          needs roles/iam.serviceAccountTokenCreator on itself.
 // UPLOAD_STORAGE=s3     -> S3_BUCKET_NAME, S3_BUCKET_REGION, AWS credentials
+// Unset: gcs when GCS_BUCKET is set, s3 when S3_BUCKET_NAME is set, else local.
 import { access, mkdir, writeFile } from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
@@ -15,7 +16,15 @@ import jwt from 'jsonwebtoken';
 import { getJwtSecret } from '../utils/auth-config.js';
 export const storageKind = () => {
     const value = process.env.UPLOAD_STORAGE;
-    return value === 's3' || value === 'gcs' ? value : 'local';
+    if (value === 's3' || value === 'gcs' || value === 'local')
+        return value;
+    // A configured bucket means Cloud Storage: never fall back to the container's
+    // disk there, which Cloud Run wipes on restart and does not share between instances.
+    if (process.env.GCS_BUCKET)
+        return 'gcs';
+    if (process.env.S3_BUCKET_NAME)
+        return 's3';
+    return 'local';
 };
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const localUploadDir = () => (process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.resolve(__dirname, '../../private-uploads'));

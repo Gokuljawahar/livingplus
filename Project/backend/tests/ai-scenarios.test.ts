@@ -961,6 +961,24 @@ describe('file storage drivers', () => {
     }
   });
 
+  it('uses Cloud Storage whenever a bucket is configured, never the container disk', async () => {
+    const storage = await import('../src/services/storage.js');
+    const keep = { kind: process.env.UPLOAD_STORAGE, bucket: process.env.GCS_BUCKET };
+    try {
+      delete process.env.UPLOAD_STORAGE;
+      process.env.GCS_BUCKET = 'livingplus-uploads';
+      assert.equal(storage.storageKind(), 'gcs');
+      process.env.UPLOAD_STORAGE = 'local';
+      assert.equal(storage.storageKind(), 'local', 'an explicit choice still wins');
+      delete process.env.UPLOAD_STORAGE;
+      delete process.env.GCS_BUCKET;
+      assert.equal(storage.storageKind(), 'local');
+    } finally {
+      if (keep.kind === undefined) delete process.env.UPLOAD_STORAGE; else process.env.UPLOAD_STORAGE = keep.kind;
+      if (keep.bucket === undefined) delete process.env.GCS_BUCKET; else process.env.GCS_BUCKET = keep.bucket;
+    }
+  });
+
   it('keeps local storage private and refuses direct uploads there', async () => {
     const storage = await import('../src/services/storage.js');
     assert.equal(storage.storageKind(), 'local');
@@ -1435,6 +1453,20 @@ describe('semantic PG search', () => {
       assert.ok(results.every((r: any) => r.match_score === undefined));
     } finally {
       process.env.ENABLE_SEMANTIC_SEARCH = 'true';
+    }
+  });
+
+  it('builds Vertex AI embeddings (service account, no key) at the stored vector size', async () => {
+    embeddingsMod.setEmbeddingsForTests(null);
+    const keep = process.env.AI_EMBEDDING_MODEL;
+    try {
+      process.env.AI_EMBEDDING_MODEL = 'google-vertexai:gemini-embedding-001';
+      const vertex: any = await embeddingsMod.createEmbeddings('document');
+      assert.equal(vertex.constructor.name, 'VertexAIEmbeddings');
+      assert.equal(vertex.model, 'gemini-embedding-001');
+      assert.equal(vertex.buildParameters().outputDimensionality, 768, 'must match the 768-dim vectors already stored');
+    } finally {
+      if (keep === undefined) delete process.env.AI_EMBEDDING_MODEL; else process.env.AI_EMBEDDING_MODEL = keep;
     }
   });
 

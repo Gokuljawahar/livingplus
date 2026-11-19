@@ -1,7 +1,9 @@
 // Provider-agnostic text embeddings, configured like the chat model:
-// AI_EMBEDDING_MODEL="<provider>:<model>", e.g. "google-genai:gemini-embedding-001",
-// "openai:text-embedding-3-small" or "ollama:nomic-embed-text". Each provider
-// reads its usual credentials (GOOGLE_API_KEY, OPENAI_API_KEY, ...);
+// AI_EMBEDDING_MODEL="<provider>:<model>", e.g. "google-vertexai:gemini-embedding-001"
+// (Vertex AI with the service account, no key: the Cloud Run default),
+// "google-genai:gemini-embedding-001" (Gemini API key), "openai:text-embedding-3-small"
+// or "ollama:nomic-embed-text". Each provider reads its usual credentials
+// (Google ADC, GOOGLE_API_KEY, OPENAI_API_KEY, ...);
 // AI_EMBEDDING_OPTIONS passes provider options as JSON.
 // (LangChain has initChatModel for chat models but no equivalent for
 // embeddings, hence this small registry over its standard Embeddings classes.)
@@ -31,7 +33,8 @@ const PROVIDERS: Record<string, ProviderEntry> = {
 
 /** Gemini's recommended compact size; other providers ignore unknown options. */
 const DEFAULT_OPTIONS: Record<string, Record<string, unknown>> = {
-  'google-genai': { outputDimensionality: 768 }
+  'google-genai': { outputDimensionality: 768 },
+  'google-vertexai': { dimensions: 768 }
 };
 
 export function embeddingModelId(): string {

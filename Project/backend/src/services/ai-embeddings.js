@@ -12,7 +12,8 @@ const PROVIDERS = {
 };
 /** Gemini's recommended compact size; other providers ignore unknown options. */
 const DEFAULT_OPTIONS = {
-    'google-genai': { outputDimensionality: 768 }
+    'google-genai': { outputDimensionality: 768 },
+    'google-vertexai': { dimensions: 768 }
 };
 export function embeddingModelId() {
     return (process.env.AI_EMBEDDING_MODEL || '').trim();
