@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth';
 import { Lock, Loader2, ArrowLeft } from 'lucide-react';
 import PasswordInput from '../components/PasswordInput';
+import { apiErrorMessage } from '../utils/api-error';
 
 export default function ChangePassword() {
   const [formData, setFormData] = useState({
@@ -36,8 +37,8 @@ export default function ChangePassword() {
         logout();
         navigate('/');
       }, 1500);
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to update password.');
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to update password.'));
     } finally {
       setLoading(false);
     }

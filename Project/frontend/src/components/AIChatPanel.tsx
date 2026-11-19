@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth';
 import { OWNER_USER_KEY, RESIDENT_USER_KEY } from '../utils/session';
 
 function readStoredRole(key: string): string | null {

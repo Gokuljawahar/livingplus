@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { Building2, ChevronDown, Menu, LogOut } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import { useSidebar } from '../../context/SidebarContext';
+import { useAuth } from '../../context/auth';
+import { useSidebar } from '../../context/sidebar';
 import { SecureImage } from '../SecureImage';
 import { resolveAppHost } from '../../utils/pg-host';
 

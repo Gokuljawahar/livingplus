@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth';
 import { RESIDENT_TOKEN_KEY } from '../utils/session';
 import { resolveAppHost } from '../utils/pg-host';
 import {

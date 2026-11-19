@@ -1,22 +1,5 @@
-import React, { createContext, useContext, useState, type ComponentType } from 'react';
-
-interface SectionNavItem {
-  id: string;
-  label: string;
-  icon: ComponentType<{ className?: string }>;
-  active: boolean;
-  onSelect: () => void;
-}
-
-interface SidebarContextType {
-  isOpen: boolean;
-  toggle: () => void;
-  close: () => void;
-  sectionNav: SectionNavItem[] | null;
-  setSectionNav: (nav: SectionNavItem[] | null) => void;
-}
-
-const SidebarContext = createContext<SidebarContextType | undefined>(undefined);
+import React, { useState } from 'react';
+import { SidebarContext, type SectionNavItem } from './sidebar';
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -30,12 +13,4 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       {children}
     </SidebarContext.Provider>
   );
-}
-
-export function useSidebar() {
-  const context = useContext(SidebarContext);
-  if (context === undefined) {
-    throw new Error('useSidebar must be used within a SidebarProvider');
-  }
-  return context;
 }

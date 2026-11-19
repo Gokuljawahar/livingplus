@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth';
 import api from '../api/axios';
 import { LogIn, Loader2, X, Phone, MessageCircle } from 'lucide-react';
 import PasswordInput from '../components/PasswordInput';
 import logo from '../assets/logo_bg_black.png';
 import { resolveAppHost } from '../utils/pg-host';
+import { apiErrorMessage } from '../utils/api-error';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -37,8 +38,8 @@ export default function LoginPage() {
       const redirectUrl = searchParams.get('redirect') || defaultUrl;
 
       navigate(redirectUrl, { replace: true });
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to login. Please check your credentials.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Failed to login. Please check your credentials.'));
     } finally {
       setLoading(false);
     }

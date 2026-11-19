@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BedDouble, Loader2, MapPin, Plus, Search, Trash2, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
+import { apiErrorMessage } from '../utils/api-error';
 
 type Operator = {
   id: string;
@@ -27,6 +28,11 @@ const emptyForm = {
   amenities: ''
 };
 
+async function fetchOperators(): Promise<Operator[]> {
+  const response = await api.get('/pg/admin/operators');
+  return response.data;
+}
+
 export default function PGOperators() {
   const [operators, setOperators] = useState<Operator[]>([]);
   const [search, setSearch] = useState('');
@@ -38,17 +44,29 @@ export default function PGOperators() {
   const loadOperators = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/pg/admin/operators');
-      setOperators(response.data);
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not load PG operators');
+      setOperators(await fetchOperators());
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not load PG operators'));
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    void loadOperators();
+    let live = true;
+    fetchOperators()
+      .then((rows) => {
+        if (live) setOperators(rows);
+      })
+      .catch((error: unknown) => {
+        if (live) toast.error(apiErrorMessage(error, 'Could not load PG operators'));
+      })
+      .finally(() => {
+        if (live) setLoading(false);
+      });
+    return () => {
+      live = false;
+    };
   }, []);
 
   const filteredOperators = operators.filter((operator) => {
@@ -68,8 +86,8 @@ export default function PGOperators() {
       setForm(emptyForm);
       setShowCreateForm(false);
       await loadOperators();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not create PG operator');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not create PG operator'));
     } finally {
       setSaving(false);
     }
@@ -81,8 +99,8 @@ export default function PGOperators() {
       await api.delete(`/pg/admin/operators/${operator.id}`);
       toast.success('PG property deleted');
       await loadOperators();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not delete PG property');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not delete PG property'));
     }
   };
 

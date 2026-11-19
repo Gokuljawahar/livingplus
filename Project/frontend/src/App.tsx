@@ -1,7 +1,8 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './context/auth';
 import AppLayout from './components/layout/AppLayout';
 import { resolveAppHost } from './utils/pg-host';
 

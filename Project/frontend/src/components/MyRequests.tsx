@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ClipboardList, Loader2, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
+import { apiErrorMessage } from '../utils/api-error';
 
 export interface GuestBooking {
   id: string;
@@ -39,21 +40,38 @@ export default function MyRequests({ phone, refreshKey = 0 }: MyRequestsProps) {
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState('');
 
-  const load = useCallback(async () => {
+  const fetchBookings = useCallback(async (): Promise<GuestBooking[]> => {
+    const response = await api.get('/pg/bookings/mine', { params: { phone } });
+    return response.data || [];
+  }, [phone]);
+
+  const load = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/pg/bookings/mine', { params: { phone } });
-      setBookings(response.data || []);
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not load your requests');
+      setBookings(await fetchBookings());
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not load your requests'));
     } finally {
       setLoading(false);
     }
-  }, [phone]);
+  };
 
   useEffect(() => {
-    void load();
-  }, [load, refreshKey]);
+    let live = true;
+    fetchBookings()
+      .then((rows) => {
+        if (live) setBookings(rows);
+      })
+      .catch((error: unknown) => {
+        if (live) toast.error(apiErrorMessage(error, 'Could not load your requests'));
+      })
+      .finally(() => {
+        if (live) setLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [fetchBookings, refreshKey]);
 
   const cancel = async (booking: GuestBooking) => {
     if (!window.confirm(`Cancel your request for ${booking.property?.name || 'this PG'}?`)) return;
@@ -62,8 +80,8 @@ export default function MyRequests({ phone, refreshKey = 0 }: MyRequestsProps) {
       await api.post(`/pg/bookings/${encodeURIComponent(booking.bookingRef)}/cancel`, { phone });
       toast.success('Booking request cancelled');
       await load();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not cancel request');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not cancel request'));
     } finally {
       setCancelling('');
     }

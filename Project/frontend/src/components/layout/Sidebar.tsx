@@ -1,9 +1,13 @@
 import { LogOut, Building2, X, BedDouble, Search } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import { useSidebar } from '../../context/SidebarContext';
+import { useAuth } from '../../context/auth';
+import { useSidebar } from '../../context/sidebar';
 import logo from '../../assets/logo_bg_black.png';
 import { resolveAppHost } from '../../utils/pg-host';
+
+type NavLink = { label: string; path: string; icon?: LucideIcon; children?: NavLink[] };
+type NavItem = NavLink & { icon: LucideIcon };
 
 export default function Sidebar() {
   const location = useLocation();
@@ -11,7 +15,7 @@ export default function Sidebar() {
   const { isOpen, close, sectionNav } = useSidebar();
   
   const residentBase = location.pathname.startsWith('/pg/') ? '/pg/resident' : '/resident';
-  const navItems: any[] = user?.role === 'PG_TENANT'
+  const navItems: NavItem[] = user?.role === 'PG_TENANT'
     ? [
       { icon: Building2, label: 'My stays', path: residentBase },
       { icon: Search, label: 'Find a PG', path: '/pg' }
@@ -60,7 +64,7 @@ export default function Sidebar() {
                       <span>{item.label}</span>
                     </div>
                     <div className="pl-6 space-y-1 mt-1">
-                      {item.children.map((child: any) => {
+                      {item.children.map((child) => {
                         if (child.children) {
                           return (
                             <div key={child.label} className="mb-2">
@@ -68,7 +72,7 @@ export default function Sidebar() {
                                 <span>{child.label}</span>
                               </div>
                               <div className="pl-4 space-y-1 mt-1">
-                                {child.children.map((subChild: any) => {
+                                {child.children.map((subChild) => {
                                   const isActive = location.pathname === subChild.path;
                                   return (
                                     <Link

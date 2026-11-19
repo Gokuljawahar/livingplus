@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeftRight, BedDouble, Building2, Check, ClipboardList, Clock, Download, FileText, IndianRupee, Loader2, Plus, Users, Wallet, Wrench, X, Zap } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
 import { SecureImage } from '../components/SecureImage';
 import { MapPicker } from '../components/MapPicker';
 import { downloadXlsx } from '../utils/xlsx';
 import { pgHostUrl, resolveAppHost } from '../utils/pg-host';
-import { useSidebar } from '../context/SidebarContext';
+import { useSidebar } from '../context/sidebar';
+import { apiErrorMessage } from '../utils/api-error';
 
 type Activity = { id: string; action: string; entityType?: string | null; entityId?: string | null; detail?: string | null; actorName?: string | null; createdAt: string; propertyId: string };
-type Property = { id: string; name: string; description?: string | null; address: string; locality: string; contactPhone?: string | null; upiId?: string | null; city: string; latitude?: number | null; longitude?: number | null; genderPolicy: string; amenities: string[]; houseRules: string[]; photoUrls: string[]; rooms: { id: string; roomNumber: string; monthlyRent: number; depositAmount: number; maintenanceFee: number; utilitiesSurcharge: number; foodCharge: number; roomType: string; beds: { id: string; label: string; status: string; maintenanceNote?: string | null }[] }[] };
+type Property = { id: string; name: string; description?: string | null; address: string; locality: string; contactPhone?: string | null; upiId?: string | null; city: string; latitude?: number | null; longitude?: number | null; genderPolicy: string; status?: string; bookingLockMinutes?: number; rentDay?: number; rentDueDay?: number; amenities: string[]; houseRules: string[]; photoUrls: string[]; rooms: { id: string; roomNumber: string; monthlyRent: number; depositAmount: number; maintenanceFee: number; utilitiesSurcharge: number; foodCharge: number; roomType: string; beds: { id: string; label: string; status: string; maintenanceNote?: string | null }[] }[] };
 type Booking = { id: string; bookingRef: string; residentName: string; phone: string; moveInDate: string; status: string; rejectionReason?: string | null; property: { name: string; locality: string }; bed: { label: string; room: { roomNumber: string } } | null; bedId: string | null; tenant?: { id: string; status: string } | null };
 type Ticket = { id: string; title: string; description: string; category: string; priority: string; status: string; imageUrl?: string | null; assignedName?: string | null; property: { name: string }; tenant?: { name: string } | null };
 type Tenant = { id: string; name: string; phone: string; email?: string | null; status: string; monthlyRent: number; depositAmount: number; depositReceived: number; kycVerified?: boolean; foodOptOut?: boolean; noticeDate?: string | null; depositDeductions?: number; depositRefundAmount?: number | null; depositRefundStatus?: string; depositRefundReference?: string | null; checkoutNote?: string | null; permanentAddress?: string | null; bloodGroup?: string | null; institutionOrEmployer?: string | null; emergencyName?: string | null; emergencyPhone?: string | null; kycType?: string | null; kycDocumentUrl?: string | null; checkedInAt?: string | null; property: { id: string; name: string; locality: string }; bed?: { label: string; room: { roomNumber: string } } | null };
@@ -112,8 +114,8 @@ export default function PGManagement() {
           setPaymentClaims([]);
         }
         setSelectedPropertyId((current) => current || propertyResponse.data[0]?.id || '');
-      } catch (error: any) {
-        toast.error(error.response?.data?.message || 'Could not load PG operations');
+      } catch (error) {
+        toast.error(apiErrorMessage(error, 'Could not load PG operations'));
       } finally {
         setLoading(false);
       }
@@ -155,8 +157,8 @@ export default function PGManagement() {
         return;
       }
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not add property');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not add property'));
     } finally {
       setSaving(false);
     }
@@ -178,10 +180,10 @@ export default function PGManagement() {
       genderPolicy: property.genderPolicy,
       amenities: Array.isArray(property.amenities) ? property.amenities.join(', ') : '',
       houseRules: Array.isArray(property.houseRules) ? property.houseRules.join('\n') : '',
-      status: (property as any).status || 'ACTIVE',
-      bookingLockMinutes: String((property as any).bookingLockMinutes ?? 120),
-      rentDay: String((property as any).rentDay ?? 1),
-      rentDueDay: String((property as any).rentDueDay ?? 5)
+      status: property.status || 'ACTIVE',
+      bookingLockMinutes: String(property.bookingLockMinutes ?? 120),
+      rentDay: String(property.rentDay ?? 1),
+      rentDueDay: String(property.rentDueDay ?? 5)
     });
     setExistingPhotoUrls(Array.isArray(property.photoUrls) ? property.photoUrls : []);
     setPropertyPhotoFiles([]);
@@ -211,18 +213,18 @@ export default function PGManagement() {
         return;
       }
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not delete property');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not delete property'));
     }
   };
 
   const togglePublish = async (property: Property) => {
     try {
-      await api.patch(`/pg/owner/properties/${property.id}`, { status: (property as any).status === 'INACTIVE' ? 'ACTIVE' : 'INACTIVE' });
-      toast.success((property as any).status === 'INACTIVE' ? 'Property published' : 'Property unpublished');
+      await api.patch(`/pg/owner/properties/${property.id}`, { status: property.status === 'INACTIVE' ? 'ACTIVE' : 'INACTIVE' });
+      toast.success(property.status === 'INACTIVE' ? 'Property published' : 'Property unpublished');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not update property');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not update property'));
     }
   };
 
@@ -235,8 +237,8 @@ export default function PGManagement() {
       setRoomForm({ roomNumber: '', block: '', floor: '', roomType: 'SHARED', monthlyRent: '', depositAmount: '', maintenanceFee: '', utilitiesSurcharge: '', foodCharge: '', numberOfBeds: '1', hasAc: false, foodIncluded: false });
       toast.success('Room and beds added');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not add room');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not add room'));
     } finally {
       setSaving(false);
     }
@@ -250,8 +252,8 @@ export default function PGManagement() {
       setRejectingBookingId('');
       setRejectionReason('');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not update booking');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not update booking'));
     }
   };
 
@@ -260,8 +262,8 @@ export default function PGManagement() {
       await api.patch(`/pg/owner/beds/${bedId}/status`, { status });
       toast.success(status === 'MAINTENANCE' ? 'Bed marked for maintenance' : 'Bed is available again');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not update bed status');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not update bed status'));
     }
   };
 
@@ -289,8 +291,8 @@ export default function PGManagement() {
       });
       toast.success('Tenant profile updated');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not update tenant profile');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not update tenant profile'));
     } finally {
       setSaving(false);
     }
@@ -302,9 +304,9 @@ export default function PGManagement() {
       const response = await api.get(`/view-image/${encodeURIComponent(fileKey)}`);
       if (preview) preview.location.href = response.data.viewUrl;
       else toast.error('Allow pop-ups to open the KYC document');
-    } catch (error: any) {
+    } catch (error) {
       preview?.close();
-      toast.error(error.response?.data?.message || 'Could not open KYC document');
+      toast.error(apiErrorMessage(error, 'Could not open KYC document'));
     }
   };
 
@@ -313,8 +315,8 @@ export default function PGManagement() {
       await api.patch(`/pg/owner/tenants/${tenantId}`, { kycVerified: verified });
       toast.success(verified ? 'KYC marked verified' : 'KYC verification revoked');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not update KYC status');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not update KYC status'));
     }
   };
 
@@ -324,8 +326,8 @@ export default function PGManagement() {
       toast.success(action === 'check-in' ? 'Tenant checked in' : 'Tenant checked out; bed released');
       setCheckoutTenantId('');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || `Could not ${action} tenant`);
+    } catch (error) {
+      toast.error(apiErrorMessage(error, `Could not ${action} tenant`));
     }
   };
 
@@ -335,8 +337,8 @@ export default function PGManagement() {
       toast.success('Deposit refund recorded');
       setRefundReference('');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not record deposit refund');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not record deposit refund'));
     }
   };
 
@@ -348,8 +350,8 @@ export default function PGManagement() {
       setRentForm({ tenantId: '', period: new Date().toISOString().slice(0, 7), amount: '', dueDate: '' });
       toast.success('Ledger entry created');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not create ledger entry');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not create ledger entry'));
     } finally {
       setSaving(false);
     }
@@ -363,8 +365,8 @@ export default function PGManagement() {
       setStaffForm({ name: '', phone: '', email: '', password: '', propertyId: '' });
       toast.success('Warden account created');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not create staff account');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not create staff account'));
     } finally {
       setSaving(false);
     }
@@ -375,8 +377,8 @@ export default function PGManagement() {
       await api.delete(`/pg/owner/staff/${member.property.id}/${member.id}`);
       toast.success('Staff access removed');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not remove staff access');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not remove staff access'));
     }
   };
 
@@ -391,8 +393,8 @@ export default function PGManagement() {
       });
       toast.success('Payment recorded');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not record payment');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not record payment'));
     }
   };
 
@@ -522,8 +524,8 @@ export default function PGManagement() {
       setTicketImage(null);
       toast.success('Maintenance ticket created');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not create ticket');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not create ticket'));
     } finally {
       setSaving(false);
     }
@@ -534,8 +536,8 @@ export default function PGManagement() {
       await api.patch(`/pg/owner/maintenance/${ticketId}/status`, { status });
       toast.success('Ticket status updated');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not update ticket');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not update ticket'));
     }
   };
 
@@ -548,8 +550,8 @@ export default function PGManagement() {
       setRejectingClaimId('');
       setClaimRejectionReason('');
       refresh();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not review payment claim');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not review payment claim'));
     }
   };
 
@@ -629,14 +631,14 @@ export default function PGManagement() {
 
             {view === 'overview' && <section className="pt-6">
               <div className="grid gap-px border border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">
-                {[
+                {([
                   ['Properties', summary.properties, Building2],
                   ['Beds occupied', `${summary.occupiedBeds} / ${summary.totalBeds}`, BedDouble],
                   ['Occupancy', `${summary.occupancyRate}%`, Building2],
                   ...(summary.canManageStaff ? [['Rent outstanding', `₹${summary.rentOutstanding.toLocaleString('en-IN')}`, IndianRupee]] : []),
                   ['Pending requests', summary.pendingBookings, ClipboardList],
                   ['Open maintenance', summary.openTickets, Wrench]
-                ].map(([label, value, Icon]: any) => <div key={label} className="bg-white p-5"><div className="flex items-center justify-between text-sm text-slate-500"><span>{label}</span><Icon className="h-4 w-4" /></div><p className="mt-3 text-2xl font-bold text-[#02224B]">{value}</p></div>)}
+                ] as [string, string | number, LucideIcon][]).map(([label, value, Icon]) => <div key={label} className="bg-white p-5"><div className="flex items-center justify-between text-sm text-slate-500"><span>{label}</span><Icon className="h-4 w-4" /></div><p className="mt-3 text-2xl font-bold text-[#02224B]">{value}</p></div>)}
               </div>
               <div className="mt-8 grid gap-8 lg:grid-cols-2">
                 <div><div className="flex items-center justify-between"><h2 className="font-semibold text-slate-900">Latest booking requests</h2><button onClick={() => setView('bookings')} className="text-sm font-semibold text-[#02224B]">View all</button></div><div className="mt-3 divide-y divide-slate-200 border-y border-slate-200">{bookings.slice(0, 4).map((booking) => <div key={booking.id} className="flex items-center justify-between gap-4 py-3"><div><p className="font-medium">{booking.residentName}</p><p className="text-sm text-slate-500">{booking.property.name} · {booking.status.toLowerCase()}</p></div><span className="text-xs text-slate-500">{new Date(booking.moveInDate).toLocaleDateString()}</span></div>)}{!bookings.length && <p className="py-5 text-sm text-slate-500">No booking requests yet.</p>}</div></div>
@@ -660,7 +662,7 @@ export default function PGManagement() {
                           <div className="flex flex-wrap items-center justify-between gap-2 text-sm"><span className="font-semibold">Room {room.roomNumber} · {room.roomType}</span><span className="text-slate-500">₹{room.monthlyRent.toLocaleString('en-IN')} / month</span></div>
                           <div className="mt-2 flex flex-wrap gap-2">{room.beds.map((bed) => <span key={bed.id} className="inline-flex items-center gap-2 border border-slate-200 px-2 py-1 text-xs"><span className={`h-2 w-2 rounded-full ${bed.status === 'AVAILABLE' ? 'bg-emerald-500' : bed.status === 'OCCUPIED' ? 'bg-blue-500' : bed.status === 'MAINTENANCE' ? 'bg-red-500' : 'bg-amber-500'}`} />{bed.label} · {bed.status.toLowerCase().replace('_', ' ')}{summary.canManageStaff && ['AVAILABLE', 'MAINTENANCE'].includes(bed.status) && <button type="button" title={bed.status === 'AVAILABLE' ? 'Mark bed for maintenance' : 'Mark bed available'} onClick={() => void updateBedStatus(bed.id, bed.status === 'AVAILABLE' ? 'MAINTENANCE' : 'AVAILABLE')} className="font-semibold text-[#02224B]">{bed.status === 'AVAILABLE' ? 'Repair' : 'Release'}</button>}</span>)}</div>
                         </div>)}
-                        {summary.canManageStaff && <div className="flex gap-2"><button type="button" onClick={() => void togglePublish(property)} className="border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">{(property as any).status === 'INACTIVE' ? 'Publish' : 'Unpublish'}</button><button type="button" onClick={() => void removeProperty(property.id)} className="border border-red-200 px-3 py-2 text-xs font-semibold text-red-700">Delete property</button></div>}
+                        {summary.canManageStaff && <div className="flex gap-2"><button type="button" onClick={() => void togglePublish(property)} className="border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">{property.status === 'INACTIVE' ? 'Publish' : 'Unpublish'}</button><button type="button" onClick={() => void removeProperty(property.id)} className="border border-red-200 px-3 py-2 text-xs font-semibold text-red-700">Delete property</button></div>}
                       </div>}
                     </div>;
                   })}

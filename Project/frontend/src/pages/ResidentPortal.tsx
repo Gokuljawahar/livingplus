@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, ArrowLeftRight, Bell, Building2, Check, Download, History, Loader2, LogOut, Menu, Plus, ReceiptIndianRupee, Send, UserRound, UtensilsCrossed, Wallet, Wrench } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
-import { useAuth } from '../context/AuthContext';
-import { SidebarProvider, useSidebar } from '../context/SidebarContext';
+import { useAuth } from '../context/auth';
+import { SidebarProvider } from '../context/SidebarContext';
+import { useSidebar } from '../context/sidebar';
 import Sidebar from '../components/layout/Sidebar';
 import { RESIDENT_TOKEN_KEY } from '../utils/session';
 import { resolveAppHost } from '../utils/pg-host';
@@ -14,6 +15,7 @@ import FoodPreferences from '../components/FoodPreferences';
 import MoneyOverview from '../components/MoneyOverview';
 import StayServices from '../components/StayServices';
 import SplitAuthLayout from '../components/SplitAuthLayout';
+import { apiErrorMessage } from '../utils/api-error';
 
 type Stay = {
   id: string; name: string; status: string; monthlyRent: number; depositAmount: number;
@@ -85,8 +87,8 @@ function ResidentPortalView() {
         setTickets(ticketResponse.data);
         setNotifications(notificationResponse.data.notifications || []);
         setPaymentClaims(claimResponse.data || []);
-      } catch (error: any) {
-        toast.error(error.response?.data?.message || 'Could not load resident account');
+      } catch (error) {
+        toast.error(apiErrorMessage(error, 'Could not load resident account'));
       }
     };
     void loadPortal();
@@ -121,8 +123,8 @@ function ResidentPortalView() {
       else toast.success('Code sent');
       setStep('code');
       startCooldown();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not send code');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not send code'));
     } finally {
       setLoading(false);
     }
@@ -136,8 +138,8 @@ function ResidentPortalView() {
       login(response.data.token, response.data.user);
       setStep('portal');
       toast.success('Welcome back');
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Invalid code');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Invalid code'));
     } finally {
       setLoading(false);
     }
@@ -149,8 +151,8 @@ function ResidentPortalView() {
       await api.post(`/pg/tenant/${stayId}/notice`);
       toast.success('Notice submitted');
       await loadStays();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not submit notice');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not submit notice'));
     }
   };
 
@@ -160,8 +162,8 @@ function ResidentPortalView() {
       await api.post(`/pg/tenant/${stayId}/notice-cancel`);
       toast.success('Vacating notice cancelled');
       await loadStays();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not cancel notice');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not cancel notice'));
     }
   };
 
@@ -179,8 +181,8 @@ function ResidentPortalView() {
       setTicketFormFor('');
       setTicketForm({ tenantId: '', title: '', description: '', category: 'OTHER' });
       await refreshResidentData();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not send maintenance request');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not send maintenance request'));
     } finally {
       setSubmittingTicket(false);
     }
@@ -216,8 +218,8 @@ function ResidentPortalView() {
       setProfileEditingFor('');
       setProfileFile(null);
       await refreshResidentData();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not save profile');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not save profile'));
     } finally {
       setSavingProfile(false);
     }
@@ -237,8 +239,8 @@ function ResidentPortalView() {
       setPaymentFormFor('');
       setPaymentForm({ tenantId: '', rentEntryId: '', amount: '', reference: '' });
       await refreshResidentData();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not submit payment');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not submit payment'));
     } finally {
       setSubmittingPayment(false);
     }
@@ -248,8 +250,8 @@ function ResidentPortalView() {
     try {
       await api.patch(`/pg/tenant/notifications/${notificationId}/read`);
       setNotifications((current) => current.map((notification) => notification.id === notificationId ? { ...notification, readAt: new Date().toISOString() } : notification));
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not update notification');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not update notification'));
     }
   };
 

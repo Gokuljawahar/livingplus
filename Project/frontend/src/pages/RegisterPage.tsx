@@ -9,6 +9,7 @@ import LogoLoader from '../components/LogoLoader';
 import logo from '../assets/logo_bg_white.png';
 import logoBlack from '../assets/logo_bg_black.png';
 import { pgHostUrl, resolveAppHost } from '../utils/pg-host';
+import { apiErrorMessage } from '../utils/api-error';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -107,8 +108,8 @@ export default function RegisterPage() {
         { duration: 4000 }
       );
       setShowLoader(true);
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Registration failed');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Registration failed'));
     } finally {
       setLoading(false);
     }

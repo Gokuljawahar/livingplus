@@ -1,9 +1,10 @@
+/// <reference types="google.maps" />
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { MapPin, Loader2, Crosshair, Search } from 'lucide-react';
 
 declare global {
   interface Window {
-    google: any;
+    google: typeof google;
   }
 }
 
@@ -55,7 +56,7 @@ const loadGoogleMapsApi = (apiKey: string) => {
   });
 };
 
-const extractAddressComponents = (components: any[]) => {
+const extractAddressComponents = (components: google.maps.GeocoderAddressComponent[] | undefined) => {
   let pincode = '';
   let city = '';
   let state = '';
@@ -81,15 +82,26 @@ export const MapPicker: React.FC<MapPickerProps> = ({
 }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [map, setMap] = useState<any | null>(null);
-  const [geocoder, setGeocoder] = useState<any | null>(null);
+  const [map, setMap] = useState<google.maps.Map | null>(null);
+  const [geocoder, setGeocoder] = useState<google.maps.Geocoder | null>(null);
   const [loading, setLoading] = useState(true);
   const [addressLoading, setAddressLoading] = useState(false);
   const [currentAddress, setCurrentAddress] = useState(defaultAddress || '');
+  const [prevDefaultAddress, setPrevDefaultAddress] = useState(defaultAddress);
+
+  // Adopt a default address that arrives after mount, unless one is already shown.
+  if (defaultAddress !== prevDefaultAddress) {
+    setPrevDefaultAddress(defaultAddress);
+    if (defaultAddress && !currentAddress) {
+      setCurrentAddress(defaultAddress);
+    }
+  }
 
   const onAddressChangeRef = useRef(onAddressChange);
   const onLocationSelectRef = useRef(onLocationSelect);
-  
+  const currentAddressRef = useRef(currentAddress);
+  const initialCoordinatesRef = useRef(initialCoordinates);
+
   useEffect(() => {
     onAddressChangeRef.current = onAddressChange;
   }, [onAddressChange]);
@@ -99,20 +111,23 @@ export const MapPicker: React.FC<MapPickerProps> = ({
   }, [onLocationSelect]);
 
   useEffect(() => {
-    if (defaultAddress && !currentAddress) {
-      setCurrentAddress(defaultAddress);
-    }
-  }, [defaultAddress]);
+    currentAddressRef.current = currentAddress;
+  }, [currentAddress]);
 
+  useEffect(() => {
+    initialCoordinatesRef.current = initialCoordinates;
+  }, [initialCoordinates]);
+
+  // Stable so map listeners registered once always use the latest address.
   const reverseGeocode = useCallback(
-    (latLng: any, geo: any) => {
+    (latLng: google.maps.LatLng, geo: google.maps.Geocoder) => {
       setAddressLoading(true);
-      geo.geocode({ location: latLng }, (results: any, status: any) => {
+      geo.geocode({ location: latLng }, (results, status) => {
         setAddressLoading(false);
-        const lat = typeof latLng.lat === 'function' ? latLng.lat() : latLng.lat;
-        const lng = typeof latLng.lng === 'function' ? latLng.lng() : latLng.lng;
+        const lat = latLng.lat();
+        const lng = latLng.lng();
 
-        if (status === 'OK' && results && results[0]) {
+        if (status === window.google.maps.GeocoderStatus.OK && results && results[0]) {
           const rawAddr = results[0].formatted_address;
           const addr = cleanAddress(rawAddr);
           setCurrentAddress(addr);
@@ -134,7 +149,7 @@ export const MapPicker: React.FC<MapPickerProps> = ({
           console.error('Geocoder failed due to: ' + status);
           if (onLocationSelectRef.current) {
             onLocationSelectRef.current({
-              address: currentAddress || '',
+              address: currentAddressRef.current || '',
               lat,
               lng
             });
@@ -142,7 +157,7 @@ export const MapPicker: React.FC<MapPickerProps> = ({
         }
       });
     },
-    [currentAddress]
+    []
   );
 
   const mapInitialized = useRef(false);
@@ -155,7 +170,8 @@ export const MapPicker: React.FC<MapPickerProps> = ({
       .then(() => {
         if (!isMounted || !mapRef.current || mapInitialized.current) return;
         mapInitialized.current = true;
-        
+        const initialCoordinates = initialCoordinatesRef.current;
+
         // Priority: initial coordinates -> geolocation -> default India center
         const defaultCenter = initialCoordinates && initialCoordinates.lat && initialCoordinates.lng
           ? { lat: initialCoordinates.lat, lng: initialCoordinates.lng }
@@ -244,7 +260,7 @@ export const MapPicker: React.FC<MapPickerProps> = ({
       return () => {
         isMounted = false;
       };
-  }, [apiKey]); // Run only once when apiKey is set
+  }, [apiKey, reverseGeocode]); // Initializes once; mapInitialized guards re-runs
 
   const handleLocateMe = () => {
     if (navigator.geolocation && map && geocoder) {

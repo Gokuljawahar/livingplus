@@ -4,10 +4,11 @@ import { Building2, ClipboardList, Loader2, Phone, Search, ShieldCheck } from 'l
 import SplitAuthLayout from './SplitAuthLayout';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth';
 import { normalizePhoneDigits, saveGuestSession, type GuestSession } from '../utils/guest-session';
 import { useOtpCooldown } from '../hooks/useOtpCooldown';
 import { resolveAppHost } from '../utils/pg-host';
+import { apiErrorMessage } from '../utils/api-error';
 
 interface GuestLoginGateProps {
   onVerified: (session: GuestSession) => void;
@@ -40,8 +41,8 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
       else toast.success('Verification code sent');
       setStep('code');
       startCooldown();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Could not send code');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not send code'));
     } finally {
       setLoading(false);
     }
@@ -68,8 +69,8 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
         return;
       }
       toast.success('Signed in — happy house hunting');
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Invalid code');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Invalid code'));
     } finally {
       setLoading(false);
     }
