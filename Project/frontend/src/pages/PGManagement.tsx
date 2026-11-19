@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeftRight, BedDouble, Building2, Check, ClipboardList, Clock, Download, FileText, IndianRupee, Loader2, Plus, Users, Wallet, Wrench, X, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -27,32 +28,60 @@ type OwnerReport = { period: string; properties: number; totalBeds: number; occu
 
 const emptySummary: Summary = { properties: 0, totalBeds: 0, occupiedBeds: 0, occupancyRate: 0, pendingBookings: 0, openTickets: 0, rentOutstanding: 0, canManageStaff: false };
 
+interface Workspace {
+  properties: Property[]; bookings: Booking[]; tickets: Ticket[]; summary: Summary; tenants: Tenant[];
+  activity: Activity[]; roomChanges: RoomChangeRow[]; rentEntries: RentEntry[]; expenses: Expense[];
+  expenseTotal: number; bills: ElecBill[]; report: OwnerReport | null; staff: Staff[]; paymentClaims: PaymentClaim[];
+}
+
+const EMPTY_WORKSPACE: Workspace = {
+  properties: [], bookings: [], tickets: [], summary: emptySummary, tenants: [], activity: [], roomChanges: [],
+  rentEntries: [], expenses: [], expenseTotal: 0, bills: [], report: null, staff: [], paymentClaims: []
+};
+
+async function fetchWorkspace(): Promise<Workspace> {
+  const [propertyResponse, bookingResponse, ticketResponse, summaryResponse, tenantResponse] = await Promise.all([
+    api.get('/pg/owner/properties'),
+    api.get('/pg/owner/bookings'),
+    api.get('/pg/owner/maintenance'),
+    api.get('/pg/owner/summary'),
+    api.get('/pg/owner/tenants')
+  ]);
+  // Activity and room changes are optional extras: failures leave them empty.
+  const activity = await api.get('/pg/owner/activity').then((r) => r.data as Activity[]).catch(() => []);
+  const roomChanges = await api.get('/pg/owner/room-changes').then((r) => (r.data || []) as RoomChangeRow[]).catch(() => []);
+  const base = {
+    ...EMPTY_WORKSPACE,
+    properties: propertyResponse.data, bookings: bookingResponse.data, tickets: ticketResponse.data,
+    summary: summaryResponse.data, tenants: tenantResponse.data, activity, roomChanges
+  };
+  if (!summaryResponse.data.canManageStaff) return base;
+  const [rentResponse, expenseResponse, billResponse, reportResponse, staffResponse, claimResponse] = await Promise.all([
+    api.get('/pg/owner/rent'),
+    api.get('/pg/owner/expenses'),
+    api.get('/pg/owner/electricity/bills'),
+    api.get('/pg/owner/reports'),
+    api.get('/pg/owner/staff'),
+    api.get('/pg/owner/payment-claims')
+  ]);
+  return {
+    ...base,
+    rentEntries: rentResponse.data, expenses: expenseResponse.data.entries || [], expenseTotal: expenseResponse.data.total || 0,
+    bills: billResponse.data || [], report: reportResponse.data, staff: staffResponse.data, paymentClaims: claimResponse.data || []
+  };
+}
+
 export default function PGManagement() {
   const [view, setView] = useState<'overview' | 'properties' | 'bookings' | 'roomchanges' | 'tenants' | 'activity' | 'rent' | 'payments' | 'expenses' | 'utilities' | 'maintenance' | 'reports' | 'staff'>('overview');
-  const [properties, setProperties] = useState<Property[]>([]);
-  const [bookings, setBookings] = useState<Booking[]>([]);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [staff, setStaff] = useState<Staff[]>([]);
-  const [rentEntries, setRentEntries] = useState<RentEntry[]>([]);
-  const [paymentClaims, setPaymentClaims] = useState<PaymentClaim[]>([]);
   const [rejectingClaimId, setRejectingClaimId] = useState('');
   const [claimRejectionReason, setClaimRejectionReason] = useState('');
   const [reminding, setReminding] = useState(false);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [expenseTotal, setExpenseTotal] = useState(0);
-  const [bills, setBills] = useState<ElecBill[]>([]);
   const [billForm, setBillForm] = useState({ period: new Date().toISOString().slice(0, 7), totalAmount: '' });
   const [expenseForm, setExpenseForm] = useState({ category: 'FOOD', amount: '', spentOn: new Date().toISOString().slice(0, 10), note: '' });
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [summary, setSummary] = useState<Summary>(emptySummary);
-  const [report, setReport] = useState<OwnerReport | null>(null);
   const [selectedPropertyId, setSelectedPropertyId] = useState('');
   const [editingPropertyId, setEditingPropertyId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [propertyForm, setPropertyForm] = useState({ name: '', description: '', address: '', locality: '', contactPhone: '', upiId: '', city: 'Chennai', latitude: '', longitude: '', genderPolicy: 'ANY', amenities: '', houseRules: '', status: 'ACTIVE', bookingLockMinutes: '120', rentDay: '1', rentDueDay: '5' });
-  const [activity, setActivity] = useState<Activity[]>([]);
   const [tenantFilter, setTenantFilter] = useState('');
   const [reassignBed, setReassignBed] = useState<Record<string, string>>({});
   const [propertyPhotoFiles, setPropertyPhotoFiles] = useState<File[]>([]);
@@ -63,67 +92,27 @@ export default function PGManagement() {
   const [ticketForm, setTicketForm] = useState({ title: '', description: '', category: 'PLUMBING', priority: 'NORMAL', assignedTo: '' });
   const [rejectingBookingId, setRejectingBookingId] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
-  const [roomChanges, setRoomChanges] = useState<RoomChangeRow[]>([]);
   const [decliningChangeId, setDecliningChangeId] = useState('');
   const [changeDecisionNote, setChangeDecisionNote] = useState('');
   const [checkoutTenantId, setCheckoutTenantId] = useState('');
   const [refundReference, setRefundReference] = useState('');
   const [ticketImage, setTicketImage] = useState<File | null>(null);
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const [propertyResponse, bookingResponse, ticketResponse, summaryResponse, tenantResponse] = await Promise.all([
-          api.get('/pg/owner/properties'),
-          api.get('/pg/owner/bookings'),
-          api.get('/pg/owner/maintenance'),
-          api.get('/pg/owner/summary'),
-          api.get('/pg/owner/tenants')
-        ]);
-        setProperties(propertyResponse.data);
-        setBookings(bookingResponse.data);
-        setTickets(ticketResponse.data);
-        setSummary(summaryResponse.data);
-        setTenants(tenantResponse.data);
-        try { const activityResponse = await api.get('/pg/owner/activity'); setActivity(activityResponse.data); } catch { setActivity([]); }
-        try { const roomChangeResponse = await api.get('/pg/owner/room-changes'); setRoomChanges(roomChangeResponse.data || []); } catch { setRoomChanges([]); }
-        if (summaryResponse.data.canManageStaff) {
-          const [rentResponse, expenseResponse, billResponse, reportResponse, staffResponse, claimResponse] = await Promise.all([
-            api.get('/pg/owner/rent'),
-            api.get('/pg/owner/expenses'),
-            api.get('/pg/owner/electricity/bills'),
-            api.get('/pg/owner/reports'),
-            api.get('/pg/owner/staff'),
-            api.get('/pg/owner/payment-claims')
-          ]);
-          setRentEntries(rentResponse.data);
-          setExpenses(expenseResponse.data.entries || []);
-          setExpenseTotal(expenseResponse.data.total || 0);
-          setBills(billResponse.data || []);
-          setReport(reportResponse.data);
-          setStaff(staffResponse.data);
-          setPaymentClaims(claimResponse.data || []);
-        } else {
-          setRentEntries([]);
-          setExpenses([]);
-          setExpenseTotal(0);
-          setBills([]);
-          setReport(null);
-          setStaff([]);
-          setPaymentClaims([]);
-        }
-        setSelectedPropertyId((current) => current || propertyResponse.data[0]?.id || '');
-      } catch (error) {
-        toast.error(apiErrorMessage(error, 'Could not load PG operations'));
-      } finally {
-        setLoading(false);
-      }
-    };
-    void load();
-  }, [refreshKey]);
-
-  const refresh = () => setRefreshKey((current) => current + 1);
+  // Workspace data: one query (same requests as before; owner-only data
+  // only for owners). refresh() re-fetches it after any change.
+  const queryClient = useQueryClient();
+  const { data: workspace, isPending: loading } = useQuery({
+    queryKey: ['owner', 'workspace'],
+    queryFn: fetchWorkspace,
+    meta: { errorMessage: 'Could not load PG operations' }
+  });
+  const {
+    properties, bookings, tickets, summary, tenants, activity, roomChanges,
+    rentEntries, expenses, expenseTotal, bills, report, staff, paymentClaims
+  } = workspace ?? EMPTY_WORKSPACE;
+  const refresh = () => { void queryClient.invalidateQueries({ queryKey: ['owner', 'workspace'] }); };
+  // Default the property pickers to the first property once it is known.
+  if (!selectedPropertyId && properties[0]) setSelectedPropertyId(properties[0].id);
 
   const saveProperty = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
