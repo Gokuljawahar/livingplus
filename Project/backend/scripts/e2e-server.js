@@ -31,6 +31,8 @@ if (prisma(['migrate', 'reset', '--force', '--skip-seed', '--skip-generate']).st
     throw new Error('migrate failed');
 if (spawnSync(process.execPath, ['--import', 'tsx', 'prisma/seed-pg.ts'], { env, stdio: 'inherit' }).status !== 0)
     throw new Error('seed failed');
+if (spawnSync(process.execPath, ['--import', 'tsx', 'scripts/e2e-fixtures.ts'], { env, stdio: 'inherit' }).status !== 0)
+    throw new Error('fixtures failed');
 const api = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], { env, stdio: 'inherit' });
 const shutdown = async () => {
     api.kill('SIGTERM');
