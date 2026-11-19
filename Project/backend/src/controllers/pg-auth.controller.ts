@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { issueGuestToken } from '../utils/guest-token.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { createHash, randomInt, randomUUID, timingSafeEqual } from 'crypto';
@@ -8,7 +9,7 @@ import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { logger } from '../utils/logger.js';
 import { isGenderPolicy, isStrongPassword, MESSAGES } from '@livingplus/shared';
 import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
-import { adminResetPasswordBody, changePasswordBody, googleLoginBody, loginBody, otpRequestBody, otpVerifyBody, registerBody, updateProfileBody } from '../validation/request.schemas.js';
+import { changePasswordBody, googleLoginBody, loginBody, otpRequestBody, otpVerifyBody, registerBody, updateProfileBody } from '../validation/request.schemas.js';
 import { googleSignInEnabled, otpProvider, verifyFirebaseGoogleToken, verifyFirebasePhoneToken } from '../services/phone-verification.js';
 
 function normalizePhone(phone: string): string {
@@ -59,21 +60,12 @@ async function residentSessionForPhone(phone: string, propertyId?: string): Prom
 
 /** On a PG host, staff may sign in only to the PGs they own or are warden of. */
 async function hasPropertyAccess(user: { id: string; role: string }, propertyId?: string): Promise<boolean> {
-  if (!propertyId || user.role === 'SUPER_ADMIN') return true;
+  if (!propertyId) return true;
   const propertyAccess = await prisma.pGPropertyAccess.findFirst({
     where: { propertyId, userId: user.id, role: user.role === 'PG_WARDEN' ? 'WARDEN' : 'OWNER' },
     select: { id: true }
   });
   return Boolean(propertyAccess);
-}
-
-/** Google accounts allowed to sign in as platform admin (ADMIN_GOOGLE_EMAILS, comma-separated). */
-function isAdminGoogleEmail(email: string): boolean {
-  return String(process.env.ADMIN_GOOGLE_EMAILS || '')
-    .split(',')
-    .map((entry) => entry.trim().toLowerCase())
-    .filter(Boolean)
-    .includes(email);
 }
 
 export const login = async (req: Request, res: Response): Promise<any> => {
@@ -86,14 +78,6 @@ export const login = async (req: Request, res: Response): Promise<any> => {
   if (!loginId || !password) return res.status(400).json({ message: 'Phone or email and password are required' });
 
   try {
-    if (email === process.env.ADMIN_USERNAME && password === process.env.ADMIN_PASSWORD) {
-      const user = { id: 'env-admin', role: 'SUPER_ADMIN' };
-      return res.json({
-        token: createToken(user, propertyId),
-        user: { id: user.id, email: process.env.ADMIN_USERNAME, name: 'Super Admin', role: user.role, profileImage: null }
-      });
-    }
-
     const digits = normalizePhone(loginId);
     const phoneOptions = [...new Set([loginId, digits, digits.startsWith('91') ? digits.slice(2) : digits])];
     const user = await prisma.user.findFirst({
@@ -186,8 +170,8 @@ export const register = async (req: Request, res: Response): Promise<any> => {
  * "Sign in with Google": the browser signs in with Firebase (Google provider)
  * and sends the Firebase ID token. Staff accounts sign in only with a Google
  * account they linked themselves after a password sign-in (matched by the
- * Google uid, never by the unverified email typed at registration), plus the
- * platform admins in ADMIN_GOOGLE_EMAILS. Residents keep using phone OTP.
+ * Google uid, never by the unverified email typed at registration).
+ * Residents keep using phone OTP.
  */
 export const googleLogin = async (req: Request, res: Response): Promise<any> => {
   const input: any = parseBody(googleLoginBody, req, res, INVALID_REQUEST);
@@ -209,14 +193,6 @@ export const googleLogin = async (req: Request, res: Response): Promise<any> => 
   }
 
   try {
-    if (isAdminGoogleEmail(account.email)) {
-      const admin = { id: 'env-admin', role: 'SUPER_ADMIN' };
-      return res.json({
-        token: createToken(admin, propertyId),
-        user: { id: admin.id, email: account.email, name: account.name || 'Super Admin', role: admin.role, profileImage: null }
-      });
-    }
-
     const user = await prisma.user.findUnique({ where: { googleUid: account.uid } });
     if (!user) {
       return res.status(403).json({
@@ -234,7 +210,7 @@ export const googleLogin = async (req: Request, res: Response): Promise<any> => 
   }
 };
 
-const STAFF_ROLES = ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'];
+const STAFF_ROLES = ['PG_OWNER', 'PG_WARDEN'];
 
 /**
  * Links the Google account in the Firebase ID token to the signed-in staff
@@ -247,7 +223,6 @@ export const linkGoogle = async (req: Request, res: Response): Promise<any> => {
   const { userId } = (req as any).user || {};
   if (!googleSignInEnabled()) return res.status(404).json({ message: 'Google sign-in is not enabled' });
   if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-  if (userId === 'env-admin') return res.status(400).json({ message: 'The platform admin uses ADMIN_GOOGLE_EMAILS instead of linking.' });
   const idToken = typeof input.firebaseIdToken === 'string' ? input.firebaseIdToken.trim() : '';
   if (!idToken) return res.status(400).json({ message: 'Google sign-in is required' });
 
@@ -276,7 +251,7 @@ export const linkGoogle = async (req: Request, res: Response): Promise<any> => {
 /** Removes the Google link; the account signs in with its password again. */
 export const unlinkGoogle = async (req: Request, res: Response): Promise<any> => {
   const { userId } = (req as any).user || {};
-  if (!userId || userId === 'env-admin') return res.status(400).json({ message: 'No linked Google account' });
+  if (!userId) return res.status(400).json({ message: 'No linked Google account' });
   try {
     const updated = await prisma.user.update({ where: { id: String(userId) }, data: { googleUid: null, googleLinkedAt: null } });
     res.json(toUserResponse(updated));
@@ -417,6 +392,8 @@ export const verifyOtp = async (req: Request, res: Response): Promise<any> => {
     const resident = await residentSessionForPhone(phone, propertyId);
     res.json({
       phoneToken: verifiedToken,
+      // Lets this visitor see and cancel their own booking requests (and only theirs).
+      guestToken: issueGuestToken(phone),
       ...(!resident || 'forbidden' in resident ? {} : { resident })
     });
   } catch (error) {
@@ -467,25 +444,6 @@ export const changePassword = async (req: Request, res: Response): Promise<any> 
   }
 };
 
-export const adminResetPassword = async (req: Request, res: Response): Promise<any> => {
-  // Shape check only; the rules below still validate values.
-  const input: any = parseBody(adminResetPasswordBody, req, res, INVALID_REQUEST);
-  if (!input) return;
-  const { role } = (req as any).user || {};
-  const { userId, newPassword } = input;
-  if (role !== 'SUPER_ADMIN') return res.status(403).json({ message: 'Only Super Admins can reset passwords' });
-  if (!userId || !newPassword) return res.status(400).json({ message: 'User ID and new password are required' });
-
-  try {
-    const password = await bcrypt.hash(String(newPassword), 10);
-    await prisma.user.update({ where: { id: String(userId) }, data: { password } });
-    res.json({ message: 'Password reset successfully' });
-  } catch (error) {
-    logger.error({ err: error }, 'PG admin password reset error');
-    res.status(500).json({ message: 'Failed to reset password' });
-  }
-};
-
 export const updateProfile = async (req: Request, res: Response): Promise<any> => {
   // Shape check only; the rules below still validate values.
   const input: any = parseBody(updateProfileBody, req, res, INVALID_REQUEST);
@@ -493,7 +451,6 @@ export const updateProfile = async (req: Request, res: Response): Promise<any> =
   const { userId } = (req as any).user || {};
   const { name, profileImage } = input;
   if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-  if (userId === 'env-admin') return res.status(400).json({ message: 'The environment admin profile cannot be changed.' });
 
   try {
     const user = await prisma.user.update({

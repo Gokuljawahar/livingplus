@@ -20,8 +20,8 @@ export default function GoogleLinkSection() {
   const [busy, setBusy] = useState(false);
   const { data: config } = useQuery({ queryKey: ['google-sign-in-config'], queryFn: loadGoogleSignInConfig, staleTime: 5 * 60_000 });
 
-  // Platform admins sign in with ADMIN_GOOGLE_EMAILS; residents use phone OTP.
-  if (!config || !user || user.id === 'env-admin' || user.role === 'PG_TENANT') return null;
+  // Residents use phone OTP instead.
+  if (!config || !user || user.role === 'PG_TENANT') return null;
   const linked = Boolean(user.googleLinked);
 
   const link = async () => {

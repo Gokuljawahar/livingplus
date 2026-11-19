@@ -1,4 +1,5 @@
 import { Controller, useForm } from 'react-hook-form';
+import { ROUTES } from '../utils/app-areas';
 import { zodResolver } from '@hookform/resolvers/zod';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
@@ -33,7 +34,7 @@ export default function ChangePassword() {
       // Force logout after password change
       setTimeout(() => {
         logout();
-        navigate('/');
+        navigate(ROUTES.ownerLogin);
       }, 1500);
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Failed to update password.'));

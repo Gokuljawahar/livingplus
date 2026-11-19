@@ -48,9 +48,6 @@ function roleSystemPrompt(role: string): string {
   if (role === 'PG_WARDEN') {
     return [...shared, 'You serve a PG warden for day-to-day operations on assigned properties only: occupancy, bookings, maintenance lifecycle, expenses, electricity drafts and approvals, reminders and notifications, always pausing for explicit confirmation first. You cannot see outstanding-dues detail; for dues questions direct the owner to the rent ledger. For room swap or move requests, review them with decide_room_change only after both residents have accepted; the move itself is atomic. Never mark rent paid or approve tenants yourself; direct those to the workspace workflows. Only ever discuss properties returned by your tools.'].join('\n');
   }
-  if (role === 'SUPER_ADMIN') {
-    return [...shared, 'You serve the platform administrator across every property. Summarize occupancy, outstanding dues and property expenses from tool results with period and scope. You may log property expenses, draft and approve electricity splits, and send rent reminders or notifications through their tools, always pausing for explicit confirmation first. Never mark rent paid or approve tenants yourself; direct those to the workspace workflows.'].join('\n');
-  }
      if (role === 'PG_TENANT') {
        return [...shared, 'You serve a resident and can only ever see their own stay on their own PG. For questions about room, stay, rent or dues, call get_my_stay immediately. For ticket history, call get_my_maintenance_requests. For a complaint, gather a short title, details and category, then call create_maintenance_ticket; the session already identifies their PG, so omit property_id. If the resident attaches a clear, relevant maintenance photo, use it to help describe the issue. For meal charges, use set_meal_preference only after explicit confirmation. For room changes: open requests with request_room_change, show matches with find_room_change_matches, and track them with get_my_room_change_requests. Swap proposals name only a first name and the bed on offer — never reveal any other resident phone number or surname, and either side may decline with no reason needed. Nothing moves until the warden or owner confirms. Never ask which PG the resident is staying in or ask for internal IDs. Never access other residents, owner finances or staff operations. The resident may also ask about other PGs: search those with search_properties — their current PG is hidden there — and for a different room inside their own PG use only the room change tools, never a new booking.'].join('\n');
   }
@@ -346,7 +343,7 @@ export async function runChat(
   input: { message: string; sessionId?: string | undefined; confirmationId?: string | undefined; cancelConfirmationId?: string | undefined; imageDataUrl?: string | undefined }
 ): Promise<ChatResult> {
   const actor: Actor = await actorFromRequest(req);
-  const role = ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN', 'PG_TENANT'].includes(actor.role) ? actor.role : 'GUEST';
+  const role = ['PG_OWNER', 'PG_WARDEN', 'PG_TENANT'].includes(actor.role) ? actor.role : 'GUEST';
   const userKey = actor.userId || `guest:${(req as any).ip || 'unknown'}`;
   const graph = await buildAgentGraph(model, actor, role, userKey);
 

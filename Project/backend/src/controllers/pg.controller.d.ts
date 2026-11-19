@@ -13,6 +13,10 @@ export declare const getPublicConfig: (_req: Request, res: Response) => Promise<
  * so the client simply keeps its keyword search.
  */
 export declare const searchPropertiesSemantic: (req: Request, res: Response) => Promise<any>;
+/** Public directory of PG resident sites (/stay/<slug>): name and place only. */
+export declare const listPgSites: (req: Request, res: Response) => Promise<any>;
+/** One PG resident site by slug, for the resident site header. */
+export declare const getPgSite: (req: Request, res: Response) => Promise<any>;
 export declare const listProperties: (req: Request, res: Response) => Promise<any>;
 export declare const listOwnerProperties: (req: Request, res: Response) => Promise<any>;
 export declare const createProperty: (req: Request, res: Response) => Promise<any>;

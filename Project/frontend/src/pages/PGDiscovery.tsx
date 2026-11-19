@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowUpDown,
   BedDouble,
@@ -23,10 +23,13 @@ import toast from 'react-hot-toast';
 import api from '../api/axios';
 import { useAuth } from '../context/auth';
 import { RESIDENT_TOKEN_KEY } from '../utils/session';
-import { resolveAppHost, isPathModeHost } from '../utils/pg-host';
+import { ROUTES } from '../utils/app-areas';
+import { RESIDENT_SITE_KEY } from '../utils/session';
 import {
   clearGuestSession,
   getGuestSession,
+  normalizePhoneDigits,
+  saveGuestSession,
   updateGuestToken,
   type GuestSession,
 } from '../utils/guest-session';
@@ -102,7 +105,9 @@ function keywordMatch(property: PGProperty, text: string): boolean {
 export default function PGDiscovery() {
   const { user, logout: authLogout } = useAuth();
   const [guest, setGuest] = useState<GuestSession | null>(() => getGuestSession());
-  const [activeTab, setActiveTab] = useState<'search' | 'requests'>('search');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const activeTab: 'search' | 'requests' = location.pathname === ROUTES.guestRequests ? 'requests' : 'search';
   const [requestsRefresh, setRequestsRefresh] = useState(0);
 
   const signedIn = Boolean(user || guest);
@@ -110,22 +115,21 @@ export default function PGDiscovery() {
   const { data: properties = [], isPending: propertiesPending } = useQuery({
     queryKey: ['properties'],
     queryFn: async (): Promise<PGProperty[]> => (await api.get('/pg/properties')).data,
-    enabled: signedIn,
     meta: { errorMessage: 'Could not load PG listings' }
   });
-  const loading = signedIn && propertiesPending;
+  const loading = propertiesPending;
   // Onboarded residents see their profile strip above search. Only attempted
   // when a resident token actually exists so guests never hit a 401.
   const { data: stays = [] } = useQuery({
     queryKey: ['tenant', 'stays', user?.id ?? null],
     queryFn: async (): Promise<ResidentStay[]> => (await api.get('/pg/tenant/stays')).data || [],
-    enabled: signedIn && Boolean(localStorage.getItem(RESIDENT_TOKEN_KEY))
+    enabled: Boolean(localStorage.getItem(RESIDENT_TOKEN_KEY))
   });
   const guestPhone = guest?.phone || '';
-  const canResidentSignIn =
-    isPathModeHost() || resolveAppHost().kind === 'property';
+  const residentSiteSlug = localStorage.getItem(RESIDENT_TOKEN_KEY) ? localStorage.getItem(RESIDENT_SITE_KEY) : null;
+  const residentHome = residentSiteSlug ? ROUTES.residentSite(residentSiteSlug) : ROUTES.residentFinder;
   const [aiRequest, setAiRequest] = useState<{ query: string; nonce: number } | null>(null);
-  const isStaff = ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'].includes(user?.role || '');
+  const isStaff = ['PG_OWNER', 'PG_WARDEN'].includes(user?.role || '');
   const isOnboarded = stays.length > 0 || user?.role === 'PG_TENANT';
 
   // Amazon-style search state: one text box plus a sidebar of refinements.
@@ -195,7 +199,7 @@ export default function PGDiscovery() {
       const data = (await api.get('/pg/search', { params: { q: searchText } })).data as { semantic?: boolean; results?: { propertyId: string; score: number }[] };
       return data.semantic ? new Map((data.results || []).map((r) => [r.propertyId, r.score])) : null;
     },
-    enabled: signedIn && searchText.length >= 3,
+    enabled: searchText.length >= 3,
     retry: false,
     staleTime: 5 * 60_000
   });
@@ -271,7 +275,7 @@ export default function PGDiscovery() {
       setGuest(null);
     }
     if (user) authLogout();
-    setActiveTab('search');
+    navigate(ROUTES.guestHome);
   };
 
   const openRequest = (property: PGProperty) => {
@@ -322,7 +326,9 @@ export default function PGDiscovery() {
     try {
       const data = await otpChallenge.current.verify(otpCode);
       setPhoneToken(data.phoneToken);
-      if (guest && request.phone.replace(/\D/g, '') === guest.phone) updateGuestToken(data.phoneToken);
+      // The first verification also signs the guest in, so "My requests" works without a second code.
+      const digits = normalizePhoneDigits(request.phone);
+      if (!guest || digits === guest.phone) setGuest(saveGuestSession(digits, data.phoneToken, data.guestToken));
       toast.success('Phone verified');
     } catch (error: unknown) {
       toast.error(phoneOtpErrorMessage(error, 'Invalid code'));
@@ -349,9 +355,9 @@ export default function PGDiscovery() {
       setGuest(getGuestSession());
       await queryClient.invalidateQueries({ queryKey: ['properties'] });
       closeRequest();
-      if (guestPhone) {
+      if (getGuestSession()) {
         setRequestsRefresh((key) => key + 1);
-        setActiveTab('requests');
+        navigate(ROUTES.guestRequests);
       }
     } catch (error: unknown) {
       if (apiErrorStatus(error) === 403) {
@@ -367,7 +373,8 @@ export default function PGDiscovery() {
     }
   };
 
-  if (!signedIn) {
+  // Browsing is open to everyone; only "My requests" needs a verified phone.
+  if (activeTab === 'requests' && !guestPhone) {
     return <GuestLoginGate onVerified={(session) => setGuest(session)} />;
   }
 
@@ -504,13 +511,13 @@ export default function PGDiscovery() {
       {/* Store-style header: brand, one search bar, account. */}
       <header className="bg-[#02224B] text-white">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3">
-          <span className="flex items-center gap-2 text-lg font-bold">
+          <Link to={ROUTES.guestHome} className="flex items-center gap-2 text-lg font-bold">
             <Building2 className="h-5 w-5 text-[#FEB109]" /> LivingPlus PG
-          </span>
+          </Link>
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              setActiveTab('search');
+              if (activeTab !== 'search') navigate(ROUTES.guestHome);
             }}
             className="flex min-w-52 flex-1 items-stretch overflow-hidden bg-white text-slate-900"
             role="search"
@@ -565,25 +572,26 @@ export default function PGDiscovery() {
         </div>
         <nav className="border-t border-white/10">
           <div className="mx-auto flex max-w-7xl items-center gap-1 px-4 text-sm">
-            <button
-              onClick={() => setActiveTab('search')}
+            <Link
+              to={ROUTES.guestHome}
               className={`px-3 py-2 font-semibold ${activeTab === 'search' ? 'text-[#FEB109] underline underline-offset-4' : 'text-blue-100 hover:text-white'}`}
             >
               Search PGs
-            </button>
-            {guestPhone && (
-              <button
-                onClick={() => setActiveTab('requests')}
-                className={`px-3 py-2 font-semibold ${activeTab === 'requests' ? 'text-[#FEB109] underline underline-offset-4' : 'text-blue-100 hover:text-white'}`}
-              >
-                My requests
-              </button>
-            )}
-            {canResidentSignIn && (
-              <Link to="/resident" className="px-3 py-2 font-semibold text-blue-100 hover:text-white">
-                {stays.length > 0 ? 'My stays & profile' : 'Resident sign in'}
-              </Link>
-            )}
+            </Link>
+            <Link
+              to={ROUTES.guestRequests}
+              className={`px-3 py-2 font-semibold ${activeTab === 'requests' ? 'text-[#FEB109] underline underline-offset-4' : 'text-blue-100 hover:text-white'}`}
+            >
+              My requests
+            </Link>
+            <span className="ml-auto flex items-center">
+              <a href={residentHome} className="px-3 py-2 font-semibold text-blue-100 hover:text-white">
+                {stays.length > 0 ? 'My stay' : 'Residents'}
+              </a>
+              <a href={ROUTES.ownerLogin} className="px-3 py-2 font-semibold text-blue-100 hover:text-white">
+                For PG owners
+              </a>
+            </span>
           </div>
         </nav>
       </header>
@@ -603,16 +611,16 @@ export default function PGDiscovery() {
                 {stay.monthlyRent.toLocaleString('en-IN')}/mo
               </p>
             ))}
-            <Link to="/resident" className="ml-auto text-sm font-bold text-[#02224B] hover:underline">
-              Open full profile →
-            </Link>
+            <a href={residentHome} className="ml-auto text-sm font-bold text-[#02224B] hover:underline">
+              Open your resident site →
+            </a>
             {ownPropertyIds.size > 0 && (
               <p className="w-full text-xs text-slate-500">
                 Your current PG{ownPropertyIds.size > 1 ? 's are' : ' is'} hidden from search. To change rooms, use
                 Room change in your{' '}
-                <Link to="/resident" className="font-bold text-[#02224B] hover:underline">
-                  resident portal
-                </Link>
+                <a href={residentHome} className="font-bold text-[#02224B] hover:underline">
+                  resident site
+                </a>
                 .
               </p>
             )}
@@ -625,7 +633,14 @@ export default function PGDiscovery() {
           <h1 className="text-xl font-bold text-[#02224B]">My booking requests</h1>
           <p className="mt-1 text-sm text-slate-500">Signed in as +{guestPhone}. Live status of every request from this number.</p>
           <div className="mt-4 border border-slate-200 bg-white px-5">
-            <MyRequests phone={guestPhone} refreshKey={requestsRefresh} />
+            <MyRequests
+              guestToken={guest?.guestToken || ''}
+              refreshKey={requestsRefresh}
+              onSessionExpired={() => {
+                clearGuestSession();
+                setGuest(null);
+              }}
+            />
           </div>
         </section>
       ) : (

@@ -1,32 +1,26 @@
-import { LogOut, Building2, X, BedDouble, Search } from 'lucide-react';
+import { LogOut, Building2, X, BedDouble } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/auth';
 import { useSidebar } from '../../context/sidebar';
 import logo from '../../assets/logo_bg_black.png';
-import { resolveAppHost } from '../../utils/pg-host';
+import { areaOf, ROUTES } from '../../utils/app-areas';
+import { RESIDENT_SITE_KEY } from '../../utils/session';
 
 type NavLink = { label: string; path: string; icon?: LucideIcon; children?: NavLink[] };
 type NavItem = NavLink & { icon: LucideIcon };
 
 export default function Sidebar() {
   const location = useLocation();
-  const { logout, user } = useAuth();
+  const { logout } = useAuth();
   const { isOpen, close, sectionNav } = useSidebar();
   
-  const residentBase = location.pathname.startsWith('/pg/') ? '/pg/resident' : '/resident';
-  const navItems: NavItem[] = user?.role === 'PG_TENANT'
-    ? [
-      { icon: Building2, label: 'My stays', path: residentBase },
-      { icon: Search, label: 'Find a PG', path: '/pg' }
-    ]
-    : [
-      { icon: BedDouble, label: 'PG Operations', path: resolveAppHost().kind === 'property' ? '/owner/manage' : '/pg/manage' }
-    ];
+  // Each area shows only its own links: a resident site never links to the owner workspace and vice versa.
+  const area = areaOf(location.pathname);
+  const navItems: NavItem[] = area === 'resident'
+    ? [{ icon: Building2, label: 'My stay', path: location.pathname }]
+    : [{ icon: BedDouble, label: 'PG Operations', path: ROUTES.ownerHome }];
 
-  const adminItems = [
-    { icon: Building2, label: 'PG Operators', path: '/pg/operators' }
-  ];
 
   return (
     <>
@@ -166,39 +160,17 @@ export default function Sidebar() {
             </div>
           )}
 
-          {user?.role === 'SUPER_ADMIN' && (
-            <div className="space-y-1">
-              <p className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Admin Control</p>
-              {adminItems.map((item) => {
-                const isItemActive = item.path && item.path.includes('?') 
-                  ? location.pathname + location.search === item.path
-                  : location.pathname === item.path;
-
-                return (
-                  <Link
-                    key={item.label}
-                    to={item.path || '#'}
-                    onClick={() => {
-                      if (window.innerWidth < 1024) close();
-                    }}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
-                      isItemActive 
-                        ? 'bg-amber-50/50 text-[#02224B] font-semibold border-r-4 border-[#FEB109] rounded-r-none' 
-                        : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
-                    }`}
-                  >
-                    <item.icon className="w-5 h-5" />
-                    <span className="font-medium text-slate-900 whitespace-nowrap">{item.label}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
         </nav>
 
         <div className="p-6 shrink-0 bg-white border-t border-slate-100">
           <button 
-                onClick={() => logout()}
+                onClick={() => {
+                  logout();
+                  if (area === 'resident') {
+                    localStorage.removeItem(RESIDENT_SITE_KEY);
+                    window.location.reload();
+                  }
+                }}
             className="flex items-center gap-3 px-3 py-2 text-slate-500 hover:text-slate-900 w-full transition-colors rounded-lg hover:bg-slate-50"
           >
             <LogOut className="w-5 h-5" />

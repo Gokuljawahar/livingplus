@@ -6,7 +6,7 @@ import { currentUser } from './pg.controller.js';
 import { logger } from '../utils/logger.js';
 
 const RESIDENT_ROLES = ['PG_TENANT'];
-const STAFF_ROLES = ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'];
+const STAFF_ROLES = ['PG_OWNER', 'PG_WARDEN'];
 
 const FRIENDLY_MESSAGES: Record<string, string> = {
   FORBIDDEN: 'You do not have access to this.',

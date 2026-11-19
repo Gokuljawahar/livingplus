@@ -35,8 +35,9 @@ PORT=4000
 LIVINGPLUS_ROOT_DOMAIN="livingplus.com"
 JWT_SECRET="<stable random secret, at least 32 characters>"
 UPLOAD_STORAGE="local"
-ADMIN_USERNAME="<your platform-admin login>"
-ADMIN_PASSWORD="<your platform-admin password>"
+# Optional: give the demo seed's PGs an owner you can sign in as.
+DEMO_OWNER_PHONE="9555500001"
+DEMO_OWNER_PASSWORD="<a password for the demo owner>"
 ```
 
 Generate a JWT secret with:
@@ -108,27 +109,76 @@ Open `http://localhost:5173/`. Keep both terminals running. `Ctrl+C` stops each
 server. If 5173 is occupied, choose 5174 and use that port in every frontend
 URL. Changing the API port also requires updating the Vite proxy target.
 
-### Portal URLs
+### App areas
 
-| Persona | Local URL | Production URL |
-|---|---|---|
-| Visitor | `http://localhost:5173/` | `https://livingplus.com/` |
-| New owner signup | `http://localhost:5173/register` | `https://livingplus.com/register` |
-| PG owner/warden login | `http://{slug}.localhost:5173/login` | `https://{slug}.livingplus.com/login` |
-| PG operations | `http://{slug}.localhost:5173/owner/manage` | `https://{slug}.livingplus.com/owner/manage` |
-| Resident OTP login | `http://{slug}.localhost:5173/resident` | `https://{slug}.livingplus.com/resident` |
-| Platform admin | `http://localhost:5173/login` then `/pg/operators` | `https://admin.livingplus.com/login` |
+LivingPlus is one app with four separate areas. Each has its own URLs,
+sign-in and navigation, and never links into another area's workspace
+(routing lives in `Project/frontend/src/utils/app-areas.ts`).
 
-Signup redirects to the generated PG host. Existing slugs are stored in
-`PGProperty.slug` (inspect with `npx.cmd prisma studio`); do not guess them from
-display names. One PG host selects one property, but database authorization
-still decides access. Public discovery has no portal links.
+| Area | Who | URL | Sign-in |
+|---|---|---|---|
+| Guest site | Anyone looking for a PG | `/` · `/requests` | None to browse; phone code once, when requesting a bed |
+| Resident site | Residents of one PG | `/stay/{slug}` (finder at `/stay`) | Phone code, scoped to that PG |
+| Owner workspace | Owners and wardens | `/owner` · `/owner/register` · `/owner/account` | `/owner/login` (password or linked Google) |
+
+There is no platform super admin: no account can see across PG workspaces
+(see [Workspace isolation](#workspace-isolation)).
+
+Locally these are `http://localhost:5173/...`; on Cloud Run, the service URL.
+Owners find their PG's shareable resident link under **Properties & Beds**.
+Slugs are stored in `PGProperty.slug`; do not guess them from display names.
+The resident site sends the slug as `X-PG-Slug`, so the API scopes sign-in
+and data to that PG, and database authorization still decides access.
+
+Old addresses (`/login`, `/register`, `/pg`, `/pg/manage`, `/pg/resident`,
+`/resident`) redirect to the new areas.
+
+With a custom domain (single-host mode off), `{slug}.yourdomain` opens that
+PG's resident site.
 
 Chromium/Edge normally resolve `*.localhost` to loopback; Windows PowerShell
 HTTP clients may not. If your browser cannot resolve a PG host, configure that
 exact host in your OS hosts file/local DNS yourself. Public DNS changes are not
-needed. `admin.localhost` is not a platform-admin alias; use localhost path mode
-for local admin testing.
+needed.
+
+### Workspace isolation
+
+Each PG is a **workspace**. PostgreSQL itself keeps workspaces apart with
+Row-Level Security, so a query that forgets its `WHERE propertyId = ...`
+still cannot read or change another PG's data.
+
+- **Every PG table has a workspace key** (`propertyId`). Beds and rent
+  entries get theirs from their room or resident through a trigger, whatever
+  the client sends. Other triggers refuse rows that point at a bed, resident,
+  booking or rent entry from a different PG.
+- **Requests run as `livingplus_app`**, a database role that owns nothing and
+  cannot bypass RLS. For each query, `Project/backend/src/db/client.ts`
+  switches to it inside a short transaction and sets who is asking
+  (`app.user_id`, `app.role`, `app.property_id`), taken from the verified
+  session and the resident site's PG (`src/db/context.ts`).
+- **Policies** (migration `tenant_isolation`):
+  - Staff-only tables (bookings, expenses, electricity bills, staff access)
+    are visible to owners and wardens of that PG.
+  - Resident-visible tables (residents, rent, tickets, payment claims,
+    notifications, room changes) are visible to that PG's staff and its
+    residents. Which resident sees which row is still decided in the app.
+  - Listings, rooms and beds are public only while the PG is published.
+  - Audit entries can be written by anyone in the PG; only staff read them.
+- **Fail closed.** Code outside a request has no identity and sees only
+  public listings, unless it is wrapped in `asSystem(reason, ...)` or a route
+  uses `systemRoute(...)`. Only a few things use these:
+  - scheduled jobs and search indexing;
+  - registration and adding a PG;
+  - sign-in and phone codes;
+  - guest booking requests and lookups;
+  - resolving a PG slug.
+
+  Search for `asSystem(` and `systemRoute(` to review them.
+- `User` and `OtpCode` are global identity tables (sign-in looks up any phone
+  number) and stay outside RLS.
+- Tests in `tests/ai-scenarios.test.ts` ("workspace isolation") query with no
+  filter and check that the database blocks cross-PG access. One of them fails
+  if a new table with a `propertyId` column has no policy.
 
 ### Optional Demo Seed
 
@@ -139,9 +189,9 @@ npm.cmd run seed
 
 Only seed a disposable development DB: it upserts fictional properties,
 bookings, tenants, bills and rooms and can overwrite demo-field values and bed
-states. It is not normal startup. Demo property access is assigned to an
-existing database `SUPER_ADMIN` user if one exists; the environment admin login
-alone does not create that DB user. The active demo resident uses phone
+states. It is not normal startup. With `DEMO_OWNER_PHONE` and
+`DEMO_OWNER_PASSWORD` set, the demo PGs belong to that owner (created if
+missing); otherwise they have no owner. The active demo resident uses phone
 `9000000001`; inspect their property's actual slug before opening it.
 
 ## Optional Services
@@ -251,7 +301,7 @@ npm.cmd --prefix Project/frontend run e2e     # Playwright end-to-end tests
 
 End-to-end tests start their own throwaway PostgreSQL with the demo seed, the
 API on port 4100 and Vite on port 5174, then drive Chromium through the guest,
-platform-admin and resident journeys. Install the browser once with
+owner and resident journeys. Install the browser once with
 `npx playwright install chromium` (CI uses `--with-deps`).
 
 Backend tests start a throwaway PostgreSQL on a free port and apply the real
@@ -281,16 +331,16 @@ DRY_RUN=1 deploy/gcp-deploy.sh          # review
 GOOGLE_API_KEY=... SEED_DEMO_DATA=1 deploy/gcp-deploy.sh
 ```
 
-- Secrets (JWT, admin and database passwords) are generated
-  once into Secret Manager; the script prints how to read the admin password.
+- Secrets (JWT, database and demo-owner passwords) are generated once into
+  Secret Manager; the script prints how to read the demo owner's password.
 - `GOOGLE_API_KEY` (optional) turns on semantic search; without it the
   assistant uses Vertex AI through the service account.
 - Firebase settings (optional) turn on Firebase Phone Auth; without them the
   service runs in **OTP demo mode** (`OTP_DEMO_MODE=true`: codes are shown on
   screen). Never use demo mode with real users.
 - A `*.run.app` URL has no per-PG subdomains, so the image runs in
-  **single-host mode** (`SINGLE_HOST_MODE` / `VITE_SINGLE_HOST_MODE`): owner and
-  resident portals use paths (`/pg/manage`, `/pg/resident`) as in local
+  **single-host mode** (`SINGLE_HOST_MODE` / `VITE_SINGLE_HOST_MODE`): every
+  area uses paths (`/owner`, `/stay/{slug}`) as in local
   development. For production with `{slug}.yourdomain` hosts, put a global
   external HTTPS load balancer with a wildcard certificate in front of Cloud
   Run and turn single-host mode off.
@@ -334,7 +384,6 @@ integration.
 | Billing | Deposit receipt, electricity draft/approval, expense create/remove, monthly report and activity records. |
 | Notifications | Complaint/payment updates visible to the resident; mark-as-read updates the unread count. |
 | Checkout | Bed release, deposit deduction calculation, refund and reference recording. |
-| Platform admin | Login, operator search, owner/PG creation and empty-PG deletion. |
 | Access and AI | Wrong-PG owner login rejected; resident AI returns own dues with formatted lists and refuses owner/other-resident data. |
 | Files | Gallery loads; signed KYC media returns 200; receipt CSV contents generated correctly. |
 

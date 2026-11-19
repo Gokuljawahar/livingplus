@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient() as any;
 
@@ -47,10 +48,17 @@ const demoProperties = [
 ];
 
 async function main() {
-  const owner = await prisma.user.findFirst({
-    where: { role: 'SUPER_ADMIN' },
-    select: { id: true }
-  });
+  // Optional demo owner for the demo PGs (DEMO_OWNER_PHONE + DEMO_OWNER_PASSWORD).
+  // There is no platform super admin: every PG belongs to its owner's workspace.
+  const ownerPhone = String(process.env.DEMO_OWNER_PHONE || '').replace(/\D/g, '');
+  const owner = ownerPhone && process.env.DEMO_OWNER_PASSWORD
+    ? await prisma.user.upsert({
+      where: { phone: ownerPhone },
+      update: {},
+      create: { phone: ownerPhone, name: 'Demo Owner', role: 'PG_OWNER', password: await bcrypt.hash(process.env.DEMO_OWNER_PASSWORD, 10) },
+      select: { id: true }
+    })
+    : null;
 
   await prisma.pGProperty.updateMany({
     where: { id: { in: demoProperties.map((property) => property.id) } },
@@ -209,7 +217,7 @@ async function main() {
     }
   });
 
-  console.log(`Seeded ${demoProperties.length} PG demo properties${owner ? ' and assigned them to the super admin' : '; no super admin was found for owner access'}.`);
+  console.log(`Seeded ${demoProperties.length} PG demo properties${owner ? ' owned by the demo owner' : ' (set DEMO_OWNER_PHONE and DEMO_OWNER_PASSWORD to give them an owner)'}.`);
 }
 
 main()

@@ -15,7 +15,6 @@ export const otpRequestBody = z.object({ phone: t(30), purpose: t(30) });
 export const otpVerifyBody = z.object({ phone: t(30), purpose: t(30), code: t(20), firebaseIdToken: t(8192) });
 export const googleLoginBody = z.object({ firebaseIdToken: t(8192) });
 export const changePasswordBody = z.object({ currentPassword: t(200), newPassword: t(200) });
-export const adminResetPasswordBody = z.object({ userId: t(100), newPassword: t(200) });
 export const updateProfileBody = z.object({ name: t(200), profileImage: t(1_000_000) });
 
 // Platform admin
@@ -42,7 +41,8 @@ export const createPropertyStaffBody = z.object({ propertyId: t(100), name: t(20
 export const updateBedStatusBody = z.object({ status: t(30), note: t(500) });
 
 // Bookings and tenants
-export const cancelBookingBody = z.object({ phone: t(30) });
+// The phone is taken from the guest token; a body phone is accepted but ignored.
+export const cancelBookingBody = z.object({ phone: t(30).optional() });
 export const updateBookingStatusBody = z.object({ status: t(30), rejectionReason: t(500), newBedId: t(100) });
 export const checkOutTenantBody = z.object({ checkoutNote: t(1000), depositDeductions: numberLike() });
 export const markDepositRefundedBody = z.object({ reference: t(120) });

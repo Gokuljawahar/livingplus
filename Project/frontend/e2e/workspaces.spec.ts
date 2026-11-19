@@ -22,11 +22,11 @@ async function shot(page: Page, name: string) {
 
 test('the owner opens every workspace view and logs an expense', async ({ page }) => {
   const assertClean = watchForErrors(page);
-  await page.goto('/login');
+  await page.goto('/owner/login');
   await page.getByLabel('Mobile number').fill(OWNER.phone);
   await page.getByLabel('Password', { exact: true }).fill(OWNER.password);
   await page.getByRole('button', { name: /sign in/i }).click();
-  await expect(page).toHaveURL(/\/pg\/manage/);
+  await expect(page).toHaveURL(/\/owner$/);
 
   const nav = page.locator('aside');
   for (const view of OWNER_VIEWS) {
@@ -68,7 +68,7 @@ test('the owner opens every workspace view and logs an expense', async ({ page }
 
 test('a resident opens the portal sections after signing in', async ({ page }) => {
   const assertClean = watchForErrors(page);
-  await page.goto('/pg/resident');
+  await page.goto('/stay/palm-grove-womens-residence');
   await page.getByPlaceholder('Phone number').fill('9000000001');
   await page.getByRole('button', { name: /code/i }).first().click();
   const toast = page.getByText(/Demo code: \d{6}/);

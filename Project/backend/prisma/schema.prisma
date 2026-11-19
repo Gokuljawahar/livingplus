@@ -107,6 +107,8 @@ model PGRoom {
 
 model PGBed {
   id              String   @id @default(uuid())
+  /// Workspace key, set by a database trigger from the room (see the tenant_isolation migration).
+  propertyId      String   @default(dbgenerated("''"))
   roomId          String
   label           String
   status          String   @default("AVAILABLE")
@@ -121,6 +123,7 @@ model PGBed {
 
   @@unique([roomId, label])
   @@index([roomId, status])
+  @@index([propertyId])
 }
 
 model PGBooking {
@@ -198,6 +201,8 @@ model PGTenant {
 
 model PGRentEntry {
   id          String   @id @default(uuid())
+  /// Workspace key, set by a database trigger from the resident (see the tenant_isolation migration).
+  propertyId  String   @default(dbgenerated("''"))
   tenantId    String
   entryType   String   @default("RENT")
   period      String
@@ -218,6 +223,7 @@ model PGRentEntry {
 
   @@unique([tenantId, period, entryType])
   @@index([period, status])
+  @@index([propertyId, period])
 }
 
 model PGMaintenanceTicket {

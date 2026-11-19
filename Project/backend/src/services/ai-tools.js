@@ -3,6 +3,7 @@
 // property scope server-side. Tool outputs are concise and structured; the
 // model must never fabricate fields the tools did not return.
 import { randomUUID } from 'crypto';
+import { asSystem } from '../db/context.js';
 import { prisma } from '../app.js';
 import { consumePhoneToken } from '../controllers/pg-auth.controller.js';
 import { ACTIVE_ROOM_CHANGE_STATUSES, canTransitionRoomChange, maskSwapPartner, parseRoomPreferences, roomPreferencesCompatible } from '../utils/room-change.js';
@@ -20,25 +21,16 @@ const db = new Proxy({}, {
 export async function actorFromRequest(req) {
     const user = req.user || {};
     const role = String(user.role || 'GUEST');
-    const account = user.userId && user.userId !== 'env-admin'
+    const account = user.userId
         ? await db.user.findUnique({ where: { id: String(user.userId) }, select: { phone: true } }).catch(() => null)
         : null;
     const digits = String(account?.phone || '').replace(/\D/g, '');
     const normalized = digits.length === 10 ? `91${digits}` : digits;
     const phoneVariants = digits.length > 10 ? digits.slice(-10) : digits;
     const phones = [...new Set([digits, normalized, phoneVariants].filter(Boolean))];
-    const isSuperAdmin = role === 'SUPER_ADMIN';
     const hostPropertyId = typeof req.pgPropertyId === 'string' ? req.pgPropertyId : undefined;
     let propertyIds = [];
-    if (isSuperAdmin) {
-        if (hostPropertyId)
-            propertyIds = [hostPropertyId];
-        else {
-            const all = await db.pGProperty.findMany({ select: { id: true } });
-            propertyIds = all.map((p) => p.id);
-        }
-    }
-    else if (role === 'PG_TENANT' && phones.length && (hostPropertyId || user.propertyId)) {
+    if (role === 'PG_TENANT' && phones.length && (hostPropertyId || user.propertyId)) {
         const tenantPropertyId = hostPropertyId || String(user.propertyId);
         const stays = await db.pGTenant.findMany({
             where: { propertyId: tenantPropertyId, phone: { in: phones }, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
@@ -53,7 +45,7 @@ export async function actorFromRequest(req) {
     }
     const tokenPropertyId = typeof user.propertyId === 'string' ? user.propertyId : undefined;
     const effectivePropertyId = hostPropertyId || (role === 'PG_TENANT' ? tokenPropertyId : undefined);
-    return { userId: user.userId ? String(user.userId) : null, role, phones, propertyIds, isSuperAdmin, ...(effectivePropertyId ? { propertyId: effectivePropertyId } : {}) };
+    return { userId: user.userId ? String(user.userId) : null, role, phones, propertyIds, ...(effectivePropertyId ? { propertyId: effectivePropertyId } : {}) };
 }
 const str = (v) => String(v || '').trim();
 // Tool argument schemas (Zod). Each tool's schema is the single source for
@@ -167,7 +159,7 @@ export const toolCatalogue = {
         description: 'Find published PG properties matching location, budget, gender policy, room type, AC, food and amenities. A resident never sees their current PG here; room moves inside it go through the room change tools, never a new booking. For free-text wishes (vibe, nearby offices or landmarks, food habits) pass query: results are then ranked by meaning and include match_score.',
         schema: toolArgs({ query: z.string().optional().describe('Free-text description of what the guest wants, e.g. quiet, near the OMR tech park, veg food.'), location: z.string().optional(), budget_max: num().optional(), gender: z.enum(['MEN', 'WOMEN', 'ANY']).optional(), room_type: z.string().optional(), ac: bool().optional(), food_included: bool().optional(), amenities: z.array(z.string()).optional() }),
         requiresConfirmation: false,
-        roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+        roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args = {}) => {
             const q = str(args.location).toLowerCase();
             const exclusion = actor.role === 'PG_TENANT' && actor.propertyId ? ownPropertyExclusionWhere([actor.propertyId]) : {};
@@ -202,12 +194,12 @@ export const toolCatalogue = {
         description: 'Verified details, rules and current availability for one published property.',
         schema: toolArgs({ property_id: z.string().optional() }),
         requiresConfirmation: false,
-        roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+        roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args) => {
             const requestedPropertyId = String(args.property_id || actor.propertyId || '');
             if (!requestedPropertyId)
                 throw new Error('PROPERTY_REQUIRED');
-            if (['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'].includes(actor.role) && !actor.propertyIds.includes(requestedPropertyId))
+            if (['PG_OWNER', 'PG_WARDEN'].includes(actor.role) && !actor.propertyIds.includes(requestedPropertyId))
                 throw new Error('FORBIDDEN');
             const property = await db.pGProperty.findFirst({
                 where: { id: requestedPropertyId, status: 'ACTIVE' },
@@ -222,12 +214,12 @@ export const toolCatalogue = {
         description: 'Fresh bed-level availability for a property, optionally one room.',
         schema: toolArgs({ property_id: z.string(), room_id: z.string().optional() }),
         requiresConfirmation: false,
-        roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+        roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args) => {
             const requestedPropertyId = actor.role === 'PG_TENANT' && actor.propertyId ? actor.propertyId : String(args.property_id || '');
             if (!requestedPropertyId)
                 throw new Error('PROPERTY_REQUIRED');
-            if (['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'].includes(actor.role) && !actor.propertyIds.includes(requestedPropertyId))
+            if (['PG_OWNER', 'PG_WARDEN'].includes(actor.role) && !actor.propertyIds.includes(requestedPropertyId))
                 throw new Error('FORBIDDEN');
             const rooms = await db.pGRoom.findMany({
                 where: { propertyId: requestedPropertyId, status: 'ACTIVE', ...(args.room_id ? { id: String(args.room_id) } : {}) },
@@ -244,7 +236,8 @@ export const toolCatalogue = {
         schema: toolArgs({ bed_id: z.string(), move_in_date: z.string(), resident_name: z.string(), phone: z.string(), phone_token: z.string(), idempotency_key: z.string().optional() }),
         requiresConfirmation: true,
         roles: ['GUEST', 'PG_TENANT'],
-        execute: async (actor, args) => {
+        // A verified guest holds a bed in any published PG: same system flow as POST /pg/bookings.
+        execute: (actor, args) => asSystem('a verified guest holds a bed in any published PG', async () => {
             const moveIn = new Date(String(args.move_in_date));
             if (Number.isNaN(moveIn.getTime()))
                 throw new Error('INVALID_DATE');
@@ -297,18 +290,19 @@ export const toolCatalogue = {
             });
             logAudit(booking.propertyId, actor.userId, 'BOOKING_CREATED_VIA_AI', 'PGBooking', booking.id, booking.residentName);
             return { booking_ref: booking.bookingRef, status: booking.status, move_in_date: booking.moveInDate };
-        }
+        })
     },
     get_booking_status: {
         description: 'Status of the caller’s own booking. Never reveal whether other records exist.',
         schema: toolArgs({ booking_ref: z.string(), phone: z.string() }),
         requiresConfirmation: false,
-        roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+        roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args) => {
-            const booking = await db.pGBooking.findUnique({
+            // Guests look up by reference and phone (checked below), across PGs by design.
+            const booking = await asSystem('guest booking status by reference and phone', () => db.pGBooking.findUnique({
                 where: { bookingRef: String(args.booking_ref) },
                 include: { property: { select: { name: true, locality: true } }, bed: { include: { room: { select: { roomNumber: true } } } } }
-            });
+            }));
             const digits = String(args.phone).replace(/\D/g, '');
             if (!booking || booking.phone.replace(/\D/g, '') !== digits ||
                 (actor.role === 'PG_TENANT' && actor.propertyId && booking.propertyId !== actor.propertyId) ||
@@ -592,7 +586,7 @@ export const toolCatalogue = {
         description: 'List room swap and move requests across the caller’s properties, newest first. Staff only; resident phone numbers are never returned.',
         schema: toolArgs({ status: z.string().describe('Optional status filter such as ACCEPTED or PENDING_MATCH.').optional() }),
         requiresConfirmation: false,
-        roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+        roles: ['PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args = {}) => {
             if (!actor.propertyIds.length)
                 throw new Error('FORBIDDEN');
@@ -625,7 +619,7 @@ export const toolCatalogue = {
         description: 'Staff decision on a room swap or move. Approving moves the residents to their new beds atomically. Staff only, audited.',
         schema: toolArgs({ request_id: z.string(), decision: z.enum(['APPROVE_AND_MOVE', 'DECLINE']), note: z.string().optional() }),
         requiresConfirmation: true,
-        roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+        roles: ['PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args) => {
             const row = await db.pGRoomChangeRequest.findUnique({
                 where: { id: String(args.request_id) },
@@ -658,22 +652,23 @@ export const toolCatalogue = {
                 });
                 if (!partner || !partner.bedId || partner.bedId !== row.toBedId)
                     throw new Error('STALE_BEDS');
-                const [, , updated] = await db.$transaction([
-                    db.pGTenant.update({ where: { id: requester.id }, data: { bedId: partner.bedId } }),
-                    db.pGTenant.update({ where: { id: partner.id }, data: { bedId: requester.bedId } }),
-                    db.pGRoomChangeRequest.update({
+                const updated = await db.$transaction(async (tx) => {
+                    await tx.pGTenant.update({ where: { id: requester.id }, data: { bedId: partner.bedId } });
+                    await tx.pGTenant.update({ where: { id: partner.id }, data: { bedId: requester.bedId } });
+                    const completed = await tx.pGRoomChangeRequest.update({
                         where: { id: row.id },
                         data: { status: 'COMPLETED', decidedBy: actor.userId, decidedAt: new Date() }
-                    }),
-                    db.pGRoomChangeRequest.updateMany({
+                    });
+                    await tx.pGRoomChangeRequest.updateMany({
                         where: {
                             propertyId: row.propertyId, id: { not: row.id },
                             requesterId: { in: [requester.id, partner.id] },
                             status: { in: [...ACTIVE_ROOM_CHANGE_STATUSES] }
                         },
                         data: { status: 'WITHDRAWN' }
-                    })
-                ]);
+                    });
+                    return completed;
+                });
                 logAudit(row.propertyId, actor.userId, 'ROOM_SWAP_COMPLETED_VIA_AI', 'PGRoomChangeRequest', row.id, str(args.note).slice(0, 200));
                 return { request_id: updated.id, status: updated.status };
             }
@@ -682,24 +677,24 @@ export const toolCatalogue = {
             });
             if (!bed)
                 throw new Error('BED_UNAVAILABLE');
-            const ops = [
-                db.pGRoomChangeRequest.update({
+            const updated = await db.$transaction(async (tx) => {
+                const completed = await tx.pGRoomChangeRequest.update({
                     where: { id: row.id },
                     data: { status: 'COMPLETED', decidedBy: actor.userId, decidedAt: new Date() }
-                }),
-                db.pGTenant.update({ where: { id: requester.id }, data: { bedId: bed.id } }),
-                db.pGBed.update({ where: { id: bed.id }, data: { status: 'OCCUPIED' } }),
-                db.pGRoomChangeRequest.updateMany({
+                });
+                await tx.pGTenant.update({ where: { id: requester.id }, data: { bedId: bed.id } });
+                await tx.pGBed.update({ where: { id: bed.id }, data: { status: 'OCCUPIED' } });
+                await tx.pGRoomChangeRequest.updateMany({
                     where: {
                         propertyId: row.propertyId, id: { not: row.id },
                         requesterId: requester.id, status: { in: [...ACTIVE_ROOM_CHANGE_STATUSES] }
                     },
                     data: { status: 'WITHDRAWN' }
-                })
-            ];
-            if (requester.bedId)
-                ops.push(db.pGBed.update({ where: { id: requester.bedId }, data: { status: 'AVAILABLE' } }));
-            const [updated] = await db.$transaction(ops);
+                });
+                if (requester.bedId)
+                    await tx.pGBed.update({ where: { id: requester.bedId }, data: { status: 'AVAILABLE' } });
+                return completed;
+            });
             logAudit(row.propertyId, actor.userId, 'ROOM_MOVE_COMPLETED_VIA_AI', 'PGRoomChangeRequest', row.id, str(args.note).slice(0, 200));
             return { request_id: updated.id, status: updated.status };
         }
@@ -708,7 +703,7 @@ export const toolCatalogue = {
         description: 'Occupancy aggregates for properties the caller may access.',
         schema: toolArgs({ property_id: z.string().optional(), period: z.string().optional() }),
         requiresConfirmation: false,
-        roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+        roles: ['PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args) => {
             const scopedPropertyId = args.property_id ? await resolveScopedPropertyId(actor, args.property_id) : null;
             if (args.property_id && !scopedPropertyId)
@@ -733,7 +728,7 @@ export const toolCatalogue = {
         description: 'Outstanding rent for the caller’s properties. Owners only.',
         schema: toolArgs({ property_id: z.string().optional(), period: z.string().optional() }),
         requiresConfirmation: false,
-        roles: ['PG_OWNER', 'SUPER_ADMIN'],
+        roles: ['PG_OWNER'],
         execute: async (actor, args) => {
             const scopedPropertyId = args.property_id ? await resolveScopedPropertyId(actor, args.property_id) : null;
             if (args.property_id && !scopedPropertyId)
@@ -754,7 +749,7 @@ export const toolCatalogue = {
         description: 'Move a maintenance ticket through its lifecycle. Staff only, audited.',
         schema: toolArgs({ ticket_id: z.string(), status: z.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED']) }),
         requiresConfirmation: false,
-        roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+        roles: ['PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args) => {
             const ticket = await db.pGMaintenanceTicket.findUnique({ where: { id: String(args.ticket_id) } });
             if (!ticket || !actor.propertyIds.includes(ticket.propertyId))
@@ -768,7 +763,7 @@ export const toolCatalogue = {
         description: 'Send rent-due reminders for outstanding entries in the caller’s properties. Returns counts only; resident phone numbers stay server-side.',
         schema: toolArgs({ property_id: z.string().optional(), period: z.string().optional(), force: bool().optional() }),
         requiresConfirmation: true,
-        roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+        roles: ['PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args = {}) => {
             const scopedPropertyId = args.property_id ? await resolveScopedPropertyId(actor, args.property_id) : null;
             if (args.property_id && !scopedPropertyId)
@@ -787,7 +782,7 @@ export const toolCatalogue = {
         description: 'Record a property expense (food, staff, maintenance, utilities). Only call after the owner explicitly confirmed amount, category and date.',
         schema: toolArgs({ property_id: z.string(), category: z.string().optional(), amount: num(), spent_on: z.string().optional(), note: z.string().optional() }),
         requiresConfirmation: true,
-        roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+        roles: ['PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args = {}) => {
             if (!actor.propertyIds.includes(String(args.property_id)))
                 throw new Error('FORBIDDEN');
@@ -805,7 +800,7 @@ export const toolCatalogue = {
         description: 'Totaled expenses by category for the caller’s properties, optionally one month (YYYY-MM).',
         schema: toolArgs({ property_id: z.string().optional(), period: z.string().optional() }),
         requiresConfirmation: false,
-        roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+        roles: ['PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args = {}) => {
             const scope = args.property_id ? [String(args.property_id)] : actor.propertyIds;
             if (args.property_id && !actor.propertyIds.includes(String(args.property_id)))
@@ -818,7 +813,7 @@ export const toolCatalogue = {
         description: 'Compute a per-tenant electricity split for a property and period and save it as a reviewable DRAFT. Nothing is billed until approve_electricity_bill runs.',
         schema: toolArgs({ property_id: z.string(), period: z.string(), total_amount: num() }),
         requiresConfirmation: false,
-        roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+        roles: ['PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args = {}) => {
             if (!actor.propertyIds.includes(String(args.property_id)))
                 throw new Error('FORBIDDEN');
@@ -838,7 +833,7 @@ export const toolCatalogue = {
         description: 'Approve a DRAFT electricity bill, creating one ELECTRICITY ledger entry per tenant for the period. Only call after the owner explicitly confirmed the split.',
         schema: toolArgs({ bill_id: z.string() }),
         requiresConfirmation: true,
-        roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+        roles: ['PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args = {}) => {
             const { approveElectricityBill: approve } = await import('./pg-billing.js');
             const result = await approve(db, actor.userId, String(args.bill_id), actor.propertyIds);
@@ -859,7 +854,7 @@ export const toolCatalogue = {
         description: 'Queue an approved transactional template message. Allowlisted templates only.',
         schema: toolArgs({ recipient_phone: z.string(), template: z.enum(['booking_received', 'booking_approved', 'booking_rejected', 'rent_due', 'check_in_reminder']) }),
         requiresConfirmation: true,
-        roles: ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'],
+        roles: ['PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args) => {
             if (process.env.ENABLE_WHATSAPP_CLOUD_API !== 'true') {
                 return { sent: false, skipped: 'channel-disabled' };

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
-import { login, googleLogin, linkGoogle, unlinkGoogle, register, updateProfile, forgotPassword, changePassword, adminResetPassword, requestOtp, verifyOtp } from '../controllers/pg-auth.controller.js';
+import { login, googleLogin, linkGoogle, unlinkGoogle, register, updateProfile, forgotPassword, changePassword, requestOtp, verifyOtp } from '../controllers/pg-auth.controller.js';
+import { systemRoute } from '../db/context.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 
 const router = Router();
@@ -28,16 +29,17 @@ const googleLimiter = rateLimit({
 	message: { message: 'Too many Google sign-in attempts. Try again in 10 minutes.' }
 });
 
-router.post('/login', login);
-router.post('/google', googleLimiter, googleLogin);
+// Sign-in, sign-up and phone codes look up accounts and PGs before anyone is
+// authenticated, so they run as the system (each checks credentials itself).
+router.post('/login', systemRoute('password sign-in looks up any account', login));
+router.post('/google', googleLimiter, systemRoute('Google sign-in looks up the linked account', googleLogin));
 router.post('/google/link', authenticate, googleLimiter, linkGoogle);
 router.delete('/google/link', authenticate, unlinkGoogle);
-router.post('/otp-request', otpRequestLimiter, requestOtp);
-router.post('/otp-verify', otpVerifyLimiter, verifyOtp);
-router.post('/register', register);
+router.post('/otp-request', otpRequestLimiter, systemRoute('phone codes check residency before sign-in', requestOtp));
+router.post('/otp-verify', otpVerifyLimiter, systemRoute('phone codes check residency before sign-in', verifyOtp));
+router.post('/register', systemRoute('registration creates a new PG workspace', register));
 router.post('/forgot-password', forgotPassword);
 router.post('/change-password', authenticate, changePassword);
-router.post('/admin-reset-password', authenticate, adminResetPassword);
 router.put('/profile', authenticate, updateProfile);
 
 export default router;

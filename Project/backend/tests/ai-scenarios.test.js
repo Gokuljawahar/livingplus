@@ -13,6 +13,7 @@ import { AIMessage } from '@langchain/core/messages';
 import { inAppZone, periodOf } from '../src/utils/app-time.js';
 const UPLOAD_TEST_DIR = path.resolve('./tests/tmp-local-uploads');
 const PG_TEST_DIR = path.resolve(`./tests/.tmp-postgres-${process.pid}`);
+let dbContext;
 let testPostgres = null;
 async function freePort() {
     return new Promise((resolve, reject) => {
@@ -51,7 +52,7 @@ const userReq = (user) => ({
     ...(user.role === 'PG_TENANT' ? { pgPropertyId: ids.prop.id } : {}),
     ip: '127.0.0.1'
 });
-const guestActor = { userId: null, role: 'GUEST', phones: [], propertyIds: [], isSuperAdmin: false };
+const guestActor = { userId: null, role: 'GUEST', phones: [], propertyIds: [] };
 // Scripted stand-in for a LangChain chat model: each turn returns the next step.
 function stubProvider(script) {
     let i = 0;
@@ -93,6 +94,10 @@ before(async () => {
     // Apply the real migrations, so the suite also proves they are complete.
     execFileSync(process.execPath, ['node_modules/prisma/build/index.js', 'migrate', 'reset', '--force', '--skip-generate', '--skip-seed'], { stdio: 'pipe' });
     ({ prisma } = await import('../src/app.js'));
+    // Fixtures and direct service calls run outside any HTTP request: give them
+    // system access. HTTP requests still run under Row-Level Security.
+    dbContext = await import('../src/db/context.js');
+    dbContext.setOutsideRequestScope('system');
     tools = await import('../src/services/ai-tools.js');
     orchestrator = await import('../src/services/ai-orchestrator.js');
     providerMod = await import('../src/services/ai-provider.js');
@@ -192,7 +197,7 @@ describe('resident own-PG exclusion in AI search and booking', () => {
 });
 describe('staff property resolution in AI tools', () => {
     it('accepts a property name for dues and reminders inside the caller scope', async () => {
-        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: ['9100000001'], propertyIds: [ids.prop.id], isSuperAdmin: false };
+        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: ['9100000001'], propertyIds: [ids.prop.id] };
         const dues = await tools.toolCatalogue.get_pending_rent.execute(actor, { property_id: 'Spec House' });
         assert.equal(dues.outstanding_total, 7000);
         assert.equal(dues.entries_due, 2);
@@ -201,7 +206,7 @@ describe('staff property resolution in AI tools', () => {
         assert.equal(reminders.sent, 0);
     });
     it('still refuses properties outside the caller scope without leaking data', async () => {
-        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id], isSuperAdmin: false };
+        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id] };
         await assert.rejects(tools.toolCatalogue.send_rent_reminders.execute(actor, { property_id: 'Other House' }), /FORBIDDEN/);
         await assert.rejects(tools.toolCatalogue.get_pending_rent.execute(actor, { property_id: 'No Such House' }), /FORBIDDEN/);
     });
@@ -532,7 +537,7 @@ describe('authorization and owner insights', () => {
         assert.equal(await prisma.pGMaintenanceTicket.count({ where: { title: 'Guest complaint' } }), 0);
     });
     it('reports occupancy consistent with the database', async () => {
-        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: ['9100000001'], propertyIds: [ids.prop.id], isSuperAdmin: false };
+        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: ['9100000001'], propertyIds: [ids.prop.id] };
         const report = await tools.toolCatalogue.get_occupancy_report.execute(actor, {});
         const [beds, tenants, pending] = await Promise.all([
             prisma.pGBed.findMany({ where: { room: { propertyId: ids.prop.id } } }),
@@ -550,17 +555,17 @@ describe('authorization and owner insights', () => {
         await assert.rejects(tools.toolCatalogue.check_bed_availability.execute(actor, { property_id: ids.other.id }), /FORBIDDEN/);
     });
     it('refuses occupancy outside the caller property scope', async () => {
-        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id], isSuperAdmin: false };
+        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id] };
         await assert.rejects(tools.toolCatalogue.get_occupancy_report.execute(actor, { property_id: ids.other.id }), /FORBIDDEN/);
     });
     it('totals outstanding rent for permitted properties', async () => {
-        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id], isSuperAdmin: false };
+        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id] };
         const report = await tools.toolCatalogue.get_pending_rent.execute(actor, {});
         assert.equal(report.outstanding_total, 7000);
         assert.equal(report.entries_due, 2);
     });
     it('audits staff ticket updates', async () => {
-        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id], isSuperAdmin: false };
+        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id] };
         const updated = await tools.toolCatalogue.update_maintenance_status.execute(actor, { ticket_id: ids.ticket.id, status: 'IN_PROGRESS' });
         assert.equal(updated.status, 'IN_PROGRESS');
         await new Promise((r) => setTimeout(r, 300));
@@ -568,9 +573,9 @@ describe('authorization and owner insights', () => {
         assert.ok(audit);
     });
     it('refuses ticket updates outside the caller scope', async () => {
-        const actor = { userId: ids.outsider.id, role: 'PG_OWNER', phones: [], propertyIds: [], isSuperAdmin: false };
+        const actor = { userId: ids.outsider.id, role: 'PG_OWNER', phones: [], propertyIds: [] };
         await assert.rejects(tools.toolCatalogue.update_maintenance_status.execute(actor, { ticket_id: ids.ticket.id, status: 'CLOSED' }), /FORBIDDEN/);
-        const ownerActor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id], isSuperAdmin: false };
+        const ownerActor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id] };
         await assert.rejects(tools.toolCatalogue.update_maintenance_status.execute(ownerActor, { ticket_id: ids.otherTicket.id, status: 'CLOSED' }), /FORBIDDEN/);
     });
 });
@@ -585,7 +590,7 @@ describe('maintenance and messaging tools', () => {
         assert.ok(ticket && ticket.status === 'OPEN' && ticket.category === 'PLUMBING');
     });
     it('skips notifications while the channel is disabled', async () => {
-        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id], isSuperAdmin: false };
+        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id] };
         const res = await tools.toolCatalogue.send_notification.execute(actor, { recipient_phone: '9400000001', template: 'rent_due' });
         assert.deepEqual(res, { sent: false, skipped: 'channel-disabled' });
     });
@@ -1023,6 +1028,10 @@ describe('Firebase phone verification (OTP_PROVIDER=firebase)', () => {
         assert.match(res.body.phoneToken, /^vrf_[0-9a-f]{32}$/);
         assert.equal(await auth.consumePhoneToken('919811100001', res.body.phoneToken), true);
         assert.equal(await auth.consumePhoneToken('919811100001', res.body.phoneToken), false, 'phone tokens stay single-use');
+        // Plus a guest session for "My requests", bound to the verified number.
+        const jwt = (await import('jsonwebtoken')).default;
+        const guest = jwt.verify(res.body.guestToken, process.env.JWT_SECRET, { audience: 'livingplus-guest' });
+        assert.equal(guest.phone, '9811100001');
     });
     it('refuses replayed, mismatched, stale, non-phone and forged tokens', async () => {
         assert.equal((await verify({ phone: '9811100002', purpose: 'BOOKING', firebaseIdToken: 'tok:919811100002:uid-b' })).statusCode, 200);
@@ -1155,7 +1164,6 @@ describe('Sign in with Google (ENABLE_GOOGLE_SIGN_IN=true)', () => {
         assert.equal((await link('g:asha.personal@gmail.com:uid-o', { userId: other.id, role: 'PG_OWNER' })).statusCode, 409);
         const resident = await prisma.user.findFirst({ where: { phone: '9400000005' } });
         assert.equal((await link('g:resident@gmail.com:uid-r2', { userId: resident.id, role: 'PG_TENANT' })).statusCode, 403);
-        assert.equal((await link('g:founder@example.com:uid-a', { userId: 'env-admin', role: 'SUPER_ADMIN' })).statusCode, 400);
         assert.equal((await link('g:x@gmail.com:uid-x', {})).statusCode, 401);
         assert.equal((await link('g:old@gmail.com:uid-z:900', { userId: other.id, role: 'PG_OWNER' })).statusCode, 401, 'stale token');
     });
@@ -1167,10 +1175,8 @@ describe('Sign in with Google (ENABLE_GOOGLE_SIGN_IN=true)', () => {
         assert.equal((await signIn('g:asha.personal@gmail.com:uid-o')).statusCode, 403);
         assert.equal((await link('g:asha.personal@gmail.com:uid-o', { userId: googleOwner.id, role: 'PG_OWNER' })).statusCode, 200, 'relink for later tests');
     });
-    it('signs listed admin emails in as super admin', async () => {
-        const res = await signIn('g:founder@example.com:uid-a');
-        assert.equal(res.statusCode, 200);
-        assert.equal(res.body.user.role, 'SUPER_ADMIN');
+    it('grants no platform admin through Google, even for emails in the retired ADMIN_GOOGLE_EMAILS', async () => {
+        assert.equal((await signIn('g:founder@example.com:uid-a')).statusCode, 403);
     });
     it('refuses unknown emails, residents and PGs the owner has no access to', async () => {
         assert.equal((await signIn('g:stranger@example.com:uid-s')).statusCode, 403);
@@ -1364,6 +1370,21 @@ describe('HTTP hardening', () => {
         assert.match(String(res.headers.get('content-type')), /application\/json/);
         assert.equal(typeof body.phoneVerification?.provider, 'string');
         assert.equal('data' in body, false);
+    });
+    it('serves the public PG site directory with name and place only', async () => {
+        const { prisma } = await import('../src/app.js');
+        await prisma.pGProperty.upsert({
+            where: { slug: 'site-directory-spec' },
+            update: {},
+            create: { slug: 'site-directory-spec', name: 'Site Directory Spec PG', address: '1 Test St', locality: 'Adyar', city: 'Chennai', genderPolicy: 'ANY' }
+        });
+        const list = await (await fetch(`${base}/api/pg/sites?search=directory spec`)).json();
+        assert.equal(list.length, 1);
+        assert.deepEqual(Object.keys(list[0]).sort(), ['city', 'locality', 'name', 'slug']);
+        const site = await fetch(`${base}/api/pg/sites/${list[0].slug}`);
+        assert.equal(site.status, 200);
+        assert.equal((await site.json()).slug, list[0].slug);
+        assert.equal((await fetch(`${base}/api/pg/sites/no-such-pg`)).status, 404);
     });
     it('sends security headers and hides the framework', async () => {
         const res = await fetch(`${base}/healthz`);
@@ -2001,7 +2022,8 @@ describe('S3 image access', () => {
             const crossPropertyKyc = await fetch(`http://127.0.0.1:${port}/api/view-image/uploads%2Fprivate-test.pdf`, {
                 headers: { Authorization: `Bearer ${outsiderToken}` }
             });
-            assert.equal(crossPropertyKyc.status, 403);
+            // Row-Level Security hides another PG's resident record, so the document does not even exist for them.
+            assert.equal(crossPropertyKyc.status, 404);
             const bulk = await fetch(`http://127.0.0.1:${port}/api/view-image/bulk`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
@@ -2078,7 +2100,8 @@ describe('local filesystem media storage', () => {
             const deniedKyc = await fetch(`http://127.0.0.1:${port}/api/view-image/${encodeURIComponent(kycKey)}`, {
                 headers: { Authorization: `Bearer ${outsiderToken}` }
             });
-            assert.equal(deniedKyc.status, 403);
+            // Row-Level Security hides another PG's resident record, so the document does not exist for them.
+            assert.equal(deniedKyc.status, 404);
             const tampered = await fetch(viewUrl.slice(0, -1) + (viewUrl.endsWith('a') ? 'b' : 'a'));
             assert.equal(tampered.status, 403);
         }
@@ -2208,10 +2231,10 @@ describe('property expenses', () => {
         assert.ok(row && row.category === 'MAINTENANCE');
     });
     it('refuses AI expense writes outside the caller scope', async () => {
-        await assert.rejects(tools.toolCatalogue.log_expense.execute({ userId: ids.outsider.id, role: 'PG_OWNER', phones: [], propertyIds: [], isSuperAdmin: false }, { property_id: ids.prop.id, amount: 50 }), /FORBIDDEN/);
+        await assert.rejects(tools.toolCatalogue.log_expense.execute({ userId: ids.outsider.id, role: 'PG_OWNER', phones: [], propertyIds: [] }, { property_id: ids.prop.id, amount: 50 }), /FORBIDDEN/);
     });
     it('summarizes expenses for owners without touching the ledger', async () => {
-        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id], isSuperAdmin: false };
+        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id] };
         const summary = await tools.toolCatalogue.get_expense_summary.execute(actor, { period: '2026-11' });
         assert.ok(summary.total >= 8200);
         assert.equal(summary.by_category.FOOD, 2000);
@@ -2289,7 +2312,7 @@ describe('electricity billing and food charges', () => {
     });
     it('approves a bill exactly once into ledger entries', async () => {
         const billing = await import('../src/services/pg-billing.js');
-        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id], isSuperAdmin: false };
+        const actor = { userId: ids.owner.id, role: 'PG_OWNER', phones: [], propertyIds: [ids.prop.id] };
         const bill = await billing.proposeElectricityBill(prisma, ids.owner.id, { propertyId: ids.prop.id, period: '2026-12', totalAmount: 2400 });
         assert.equal(bill.status, 'DRAFT');
         assert.ok(JSON.parse(bill.splitJson).length >= 1);
@@ -2375,6 +2398,174 @@ describe('electricity billing and food charges', () => {
         finally {
             server.close();
         }
+    });
+});
+describe('workspace isolation enforced by PostgreSQL (Row-Level Security)', () => {
+    // Every query here deliberately leaves out any PG filter: only the database stops it.
+    const asUser = (context, fn) => dbContext.runAsDbUser(context, fn);
+    // Fresh workspaces: earlier suites change access on the shared fixtures.
+    const iso = {};
+    before(async () => {
+        iso.ownerA = await prisma.user.create({ data: { phone: '9811100001', password: 'x', name: 'Iso Owner A', role: 'PG_OWNER' } });
+        iso.ownerB = await prisma.user.create({ data: { phone: '9811100002', password: 'x', name: 'Iso Owner B', role: 'PG_OWNER' } });
+        iso.residentUser = await prisma.user.create({ data: { phone: '9811100003', password: 'x', name: 'Iso Resident', role: 'PG_TENANT' } });
+        iso.prop = await prisma.pGProperty.create({ data: { name: 'Iso House A', address: '1 Iso Rd', locality: 'Adyar', city: 'Chennai', genderPolicy: 'ANY', status: 'ACTIVE' } });
+        iso.other = await prisma.pGProperty.create({ data: { name: 'Iso House B', address: '2 Iso Rd', locality: 'Guindy', city: 'Chennai', genderPolicy: 'ANY', status: 'ACTIVE' } });
+        await prisma.pGPropertyAccess.create({ data: { propertyId: iso.prop.id, userId: iso.ownerA.id, role: 'OWNER' } });
+        await prisma.pGPropertyAccess.create({ data: { propertyId: iso.other.id, userId: iso.ownerB.id, role: 'OWNER' } });
+        iso.roomA = await prisma.pGRoom.create({ data: { propertyId: iso.prop.id, roomNumber: '1', roomType: 'SHARED', monthlyRent: 5000, status: 'ACTIVE' } });
+        const roomB = await prisma.pGRoom.create({ data: { propertyId: iso.other.id, roomNumber: '1', roomType: 'SHARED', monthlyRent: 5000, status: 'ACTIVE' } });
+        const bedA = await prisma.pGBed.create({ data: { roomId: iso.roomA.id, label: 'Bed 1', status: 'OCCUPIED' } });
+        iso.otherBed = await prisma.pGBed.create({ data: { roomId: roomB.id, label: 'Bed 1', status: 'AVAILABLE' } });
+        iso.tenant = await prisma.pGTenant.create({ data: { propertyId: iso.prop.id, bedId: bedA.id, name: 'Iso Resident', phone: '9811100003', moveInDate: new Date('2026-10-01'), monthlyRent: 5000, status: 'ACTIVE' } });
+        iso.otherTenant = await prisma.pGTenant.create({ data: { propertyId: iso.other.id, name: 'Other Resident', phone: '9811100004', moveInDate: new Date('2026-10-01'), monthlyRent: 5000, status: 'ACTIVE' } });
+        await prisma.pGRentEntry.create({ data: { tenantId: iso.tenant.id, period: '2026-11', entryType: 'RENT', amount: 5000, dueDate: new Date('2026-11-05') } });
+        iso.otherTicket = await prisma.pGMaintenanceTicket.create({ data: { propertyId: iso.other.id, title: 'Other', description: 'x', category: 'OTHER', status: 'OPEN' } });
+        await prisma.pGExpense.create({ data: { propertyId: iso.prop.id, category: 'OTHER', amount: 100, spentOn: new Date('2026-11-02'), note: 'Iso expense' } });
+    });
+    const owner = () => ({ userId: iso.ownerA.id, role: 'PG_OWNER' });
+    const outsider = () => ({ userId: iso.ownerB.id, role: 'PG_OWNER' });
+    const resident = () => ({ userId: iso.residentUser.id, role: 'PG_TENANT', tokenPropertyId: iso.prop.id });
+    it('runs requests as a role that owns nothing and cannot bypass RLS', async () => {
+        const rows = await prisma.$queryRawUnsafe(`SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'livingplus_app'`);
+        assert.deepEqual(rows, [{ rolsuper: false, rolbypassrls: false }]);
+        const current = await asUser(owner(), () => prisma.$queryRawUnsafe('SELECT current_user AS role'));
+        assert.equal(current[0].role, 'livingplus_app');
+    });
+    it('shows an owner only their own PG, even with no WHERE clause', async () => {
+        const tenants = await asUser(owner(), () => prisma.pGTenant.findMany());
+        assert.ok(tenants.length > 0);
+        assert.ok(tenants.every((t) => t.propertyId === iso.prop.id));
+        const tickets = await asUser(owner(), () => prisma.pGMaintenanceTicket.findMany());
+        assert.ok(!tickets.some((t) => t.id === iso.otherTicket.id), 'another PG\'s ticket leaked');
+    });
+    it('shows an owner of another PG none of this PG\'s private data', async () => {
+        const [tenants, rent, tickets, access] = await asUser(outsider(), () => Promise.all([
+            prisma.pGTenant.findMany({ where: { propertyId: iso.prop.id } }),
+            prisma.pGRentEntry.findMany({ where: { propertyId: iso.prop.id } }),
+            prisma.pGMaintenanceTicket.findMany({ where: { propertyId: iso.prop.id } }),
+            prisma.pGPropertyAccess.findMany({ where: { propertyId: iso.prop.id } })
+        ]));
+        assert.deepEqual([tenants.length, rent.length, tickets.length, access.length], [0, 0, 0, 0]);
+    });
+    it('refuses writes into another PG', async () => {
+        const renamed = await asUser(outsider(), () => prisma.pGProperty.updateMany({ where: { id: iso.prop.id }, data: { name: 'Hijacked' } }));
+        assert.equal(renamed.count, 0);
+        await assert.rejects(asUser(outsider(), () => prisma.pGMaintenanceTicket.create({
+            data: { propertyId: iso.prop.id, title: 'Injected', description: 'x', category: 'OTHER', status: 'OPEN' }
+        })), /row-level security/i);
+        await assert.rejects(asUser(outsider(), () => prisma.pGPropertyAccess.create({
+            data: { propertyId: iso.prop.id, userId: iso.ownerB.id, role: 'OWNER' }
+        })), /row-level security/i, 'nobody can grant themselves access to a PG');
+    });
+    it('lets a resident see their PG but not its staff-only data or other PGs', async () => {
+        const stays = await asUser(resident(), () => prisma.pGTenant.findMany());
+        assert.ok(stays.length > 0 && stays.every((t) => t.propertyId === iso.prop.id));
+        const [bookings, expenses, tickets] = await asUser(resident(), () => Promise.all([
+            prisma.pGBooking.findMany(), prisma.pGExpense.findMany(), prisma.pGMaintenanceTicket.findMany({ where: { id: iso.otherTicket.id } })
+        ]));
+        assert.deepEqual([bookings.length, expenses.length, tickets.length], [0, 0, 0]);
+    });
+    it('limits a staff session to the PG the request is scoped to', async () => {
+        const tenants = await asUser({ ...owner(), hostPropertyId: iso.other.id }, () => prisma.pGTenant.findMany());
+        assert.equal(tenants.length, 0);
+    });
+    it('gives guests published listings only', async () => {
+        const hidden = await prisma.pGProperty.create({ data: { name: 'Unpublished House', address: '9 Test Rd', locality: 'Adyar', city: 'Chennai', genderPolicy: 'ANY', status: 'INACTIVE' } });
+        const [properties, rooms, tenants, rent] = await asUser({}, () => Promise.all([
+            prisma.pGProperty.findMany({ select: { id: true } }), prisma.pGRoom.findMany({ where: { propertyId: iso.prop.id } }),
+            prisma.pGTenant.findMany(), prisma.pGRentEntry.findMany()
+        ]));
+        assert.ok(properties.some((p) => p.id === iso.prop.id));
+        assert.ok(!properties.some((p) => p.id === hidden.id), 'unpublished PG visible to guests');
+        assert.ok(rooms.length > 0);
+        assert.deepEqual([tenants.length, rent.length], [0, 0]);
+    });
+    it('blocks rows that point at another PG, even for that PG\'s own owner', async () => {
+        await assert.rejects(asUser(owner(), () => prisma.pGTenant.create({
+            data: { propertyId: iso.prop.id, bedId: iso.otherBed.id, name: 'Cross Link', phone: '9333300000', moveInDate: new Date(), monthlyRent: 1000 }
+        })), /same PG/);
+    });
+    it('derives the workspace of beds and rent entries from their parent, ignoring the client', async () => {
+        const entry = await prisma.pGRentEntry.create({
+            data: { tenantId: iso.tenant.id, propertyId: iso.other.id, period: '2031-01', entryType: 'RENT', amount: 1, dueDate: new Date('2031-01-05') }
+        });
+        assert.equal(entry.propertyId, iso.prop.id);
+        const bed = await prisma.pGBed.create({ data: { roomId: iso.roomA.id, label: 'Derived', propertyId: iso.other.id } });
+        assert.equal(bed.propertyId, iso.prop.id);
+    });
+    it('protects every table that holds PG data (new tables must add a policy)', async () => {
+        const unprotected = await prisma.$queryRawUnsafe(`
+      SELECT c.relname FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'propertyId' AND NOT a.attisdropped
+      WHERE c.relkind = 'r' AND (NOT c.relrowsecurity OR NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid))
+      ORDER BY 1`);
+        assert.deepEqual(unprotected.map((r) => r.relname).filter((name) => name !== 'OtpCode'), []);
+    });
+    it('runs HTTP requests under RLS: an owner cannot read another PG\'s tenants through the API', async () => {
+        const { default: app } = await import('../src/app.js');
+        const jwt = (await import('jsonwebtoken')).default;
+        const { getJwtSecret } = await import('../src/utils/auth-config.js');
+        const server = app.listen(0);
+        await new Promise((r) => server.once('listening', () => r()));
+        try {
+            const token = jwt.sign({ userId: iso.ownerB.id, role: 'PG_OWNER' }, getJwtSecret());
+            const res = await fetch(`http://127.0.0.1:${server.address().port}/api/pg/owner/tenants?propertyId=${iso.prop.id}`, { headers: { authorization: `Bearer ${token}` } });
+            const body = await res.json().catch(() => null);
+            const rows = Array.isArray(body) ? body : Array.isArray(body?.tenants) ? body.tenants : [];
+            assert.ok(!rows.some((t) => t.propertyId === iso.prop.id), 'tenant rows leaked across PGs');
+        }
+        finally {
+            server.close();
+        }
+    });
+});
+describe('guest booking requests need a verified phone', () => {
+    let base = '';
+    let server;
+    let token;
+    const victim = '9822200001';
+    const attacker = '9822200002';
+    let ref = '';
+    before(async () => {
+        const { default: app } = await import('../src/app.js');
+        ({ issueGuestToken: token } = await import('../src/utils/guest-token.js'));
+        server = app.listen(0);
+        await new Promise((r) => server.once('listening', () => r()));
+        base = `http://127.0.0.1:${server.address().port}`;
+        ref = `PG-GUEST-${Date.now()}`;
+        await prisma.pGBooking.create({ data: { propertyId: ids.prop.id, bookingRef: ref, residentName: 'Victim Guest', phone: `91${victim}`, moveInDate: new Date('2026-12-20'), status: 'PENDING' } });
+    });
+    after(() => { server?.close(); });
+    const mine = (headers = {}, query = '') => fetch(`${base}/api/pg/bookings/mine${query}`, { headers });
+    const cancel = (headers = {}) => fetch(`${base}/api/pg/bookings/${ref}/cancel`, {
+        method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ phone: victim })
+    });
+    it('refuses to list requests for a typed phone number', async () => {
+        assert.equal((await mine({}, `?phone=${victim}`)).status, 401);
+    });
+    it('lists only the verified number\'s requests, ignoring ?phone=', async () => {
+        const theirs = await (await mine({ 'x-guest-token': token(attacker) }, `?phone=${victim}`)).json();
+        assert.ok(!theirs.some((b) => b.bookingRef === ref), 'another number\'s booking leaked');
+        const own = await (await mine({ 'x-guest-token': token(`91${victim}`) })).json();
+        assert.ok(own.some((b) => b.bookingRef === ref));
+    });
+    it('rejects staff tokens, forged tokens and expired sessions as guest proof', async () => {
+        const jwt = (await import('jsonwebtoken')).default;
+        const { getJwtSecret } = await import('../src/utils/auth-config.js');
+        const staff = jwt.sign({ userId: ids.owner.id, role: 'PG_OWNER', phone: victim, typ: 'guest' }, getJwtSecret());
+        const forged = jwt.sign({ typ: 'guest', phone: victim }, 'not-the-secret', { audience: 'livingplus-guest' });
+        const expired = jwt.sign({ typ: 'guest', phone: victim }, getJwtSecret(), { audience: 'livingplus-guest', expiresIn: -10 });
+        for (const bad of [staff, forged, expired])
+            assert.equal((await mine({ 'x-guest-token': bad })).status, 401);
+    });
+    it('lets only the verified owner of the number cancel', async () => {
+        assert.equal((await cancel()).status, 401, 'a typed phone number is not proof');
+        assert.equal((await cancel({ 'x-guest-token': token(attacker) })).status, 404, 'other numbers must not learn the request exists');
+        assert.equal((await prisma.pGBooking.findUnique({ where: { bookingRef: ref } })).status, 'PENDING');
+        assert.equal((await cancel({ 'x-guest-token': token(victim) })).status, 200);
+        assert.equal((await prisma.pGBooking.findUnique({ where: { bookingRef: ref } })).status, 'CANCELLED');
     });
 });
 //# sourceMappingURL=ai-scenarios.test.js.map

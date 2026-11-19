@@ -10,6 +10,7 @@
 //
 // Enabled with ENABLE_SEMANTIC_SEARCH=true and AI_EMBEDDING_MODEL.
 import { createHash } from 'crypto';
+import { asSystem } from '../db/context.js';
 import { prisma } from '../app.js';
 import { createEmbeddings, embeddingModelId } from './ai-embeddings.js';
 import { logger } from '../utils/logger.js';
@@ -121,7 +122,7 @@ export function scheduleSearchIndex(propertyId: string | null | undefined): void
   clearTimeout(scheduled.get(propertyId));
   const timer = setTimeout(() => {
     scheduled.delete(propertyId);
-    indexProperties({ ids: [propertyId] }).catch((error) => logger.warn({ err: error, propertyId }, '[search] re-index failed'));
+    asSystem('search indexing is a background job', () => indexProperties({ ids: [propertyId] })).catch((error) => logger.warn({ err: error, propertyId }, '[search] re-index failed'));
   }, 3000);
   timer.unref();
   scheduled.set(propertyId, timer);

@@ -19,8 +19,6 @@ const env = {
   PORT: String(apiPort),
   NODE_ENV: 'development',
   JWT_SECRET: 'e2e-secret-for-playwright-tests-32-bytes!',
-  ADMIN_USERNAME: 'e2e-admin',
-  ADMIN_PASSWORD: 'E2e@admin-pass1',
   LIVINGPLUS_ROOT_DOMAIN: 'livingplus.com',
   SCHEDULER_MODE: 'external',
   ENABLE_AI_ORCHESTRATOR: 'false',

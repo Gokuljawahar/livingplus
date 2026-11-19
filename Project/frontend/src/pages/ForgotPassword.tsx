@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { ROUTES } from '../utils/app-areas';
 import { ArrowLeft, ShieldCheck } from 'lucide-react';
 
 export default function ForgotPassword() {
@@ -18,7 +19,7 @@ export default function ForgotPassword() {
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8">
           <p className="text-sm leading-6 text-slate-600">Contact your PG administrator to verify your identity and reset your login.</p>
           <button
-            onClick={() => navigate('/login')}
+            onClick={() => navigate(ROUTES.ownerLogin)}
             className="w-full btn-primary justify-center py-3.5 mt-6"
           >
             <ArrowLeft className="w-4 h-4" />

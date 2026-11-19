@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
-import { Building2, ChevronDown, Menu, LogOut } from 'lucide-react';
+import { Building2, ChevronDown, Menu, LogOut, KeyRound } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/auth';
 import { useSidebar } from '../../context/sidebar';
 import { SecureImage } from '../SecureImage';
-import { resolveAppHost } from '../../utils/pg-host';
+import { ROUTES } from '../../utils/app-areas';
 
 export default function Header() {
   const { user, logout } = useAuth();
@@ -46,10 +46,10 @@ export default function Header() {
           >
             <div className="text-right hidden xs:block">
               <p className="text-sm font-semibold text-slate-900 leading-none truncate max-w-[100px] group-hover:text-[#02224B] transition-colors">
-                {user?.name?.split(' ')[0] || 'Admin'}
+                {user?.name?.split(' ')[0] || 'Owner'}
               </p>
               <p className="text-[10px] text-green-600 font-bold uppercase tracking-wider mt-1">
-                {user?.role === 'SUPER_ADMIN' ? 'Super Admin' : 'PG Operator'}
+                {user?.role === 'PG_WARDEN' ? 'Warden' : 'PG Owner'}
               </p>
             </div>
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg overflow-hidden border border-slate-200 group-hover:border-[#FEB109] transition-colors">
@@ -71,12 +71,21 @@ export default function Header() {
               </div>
 
               <Link
-                to={resolveAppHost().kind === 'property' ? '/owner/manage' : '/pg/manage'}
+                to={ROUTES.ownerHome}
                 onClick={() => setShowDropdown(false)}
                 className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 hover:bg-[#02224B]/5 hover:text-[#02224B] transition-colors"
               >
                 <Building2 className="w-4 h-4" />
                 <span className="font-medium">PG Operations</span>
+              </Link>
+
+              <Link
+                to={`${ROUTES.ownerHome}/account`}
+                onClick={() => setShowDropdown(false)}
+                className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 hover:bg-[#02224B]/5 hover:text-[#02224B] transition-colors"
+              >
+                <KeyRound className="w-4 h-4" />
+                <span className="font-medium">Account security</span>
               </Link>
 
               <div className="h-px bg-slate-50 my-1" />

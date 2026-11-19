@@ -13,7 +13,7 @@ const { logger } = await import('./utils/logger.js');
 
 getJwtSecret();
 
-const [{ default: app, prisma }, { startMonthlyRentScheduler }, { startRentReminderScheduler }, { assignMissingPgSlugs }] = await Promise.all([
+const [{ default: app, systemPrisma }, { startMonthlyRentScheduler }, { startRentReminderScheduler }, { assignMissingPgSlugs }] = await Promise.all([
   import('./app.js'),
   import('./services/pg-rent-scheduler.js'),
   import('./services/pg-rent-reminders.js'),
@@ -24,7 +24,9 @@ if (process.env.OTP_DEMO_MODE === 'true') {
   logger.warn('OTP_DEMO_MODE is on: verification codes are shown on screen. Use only for demos.');
 }
 
-const backfilledSlugs = await assignMissingPgSlugs(prisma);
+const { asSystem } = await import('./db/context.js');
+// Boot and in-process scheduled jobs span every PG: they run as the system (no RLS).
+const backfilledSlugs = await asSystem('boot: backfill PG slugs', () => assignMissingPgSlugs(systemPrisma));
 if (backfilledSlugs) logger.info(`[PG host routing] Assigned ${backfilledSlugs} property slugs`);
 
 const PORT = process.env.PORT || 4000;
@@ -36,11 +38,14 @@ const server = app.listen(PORT, async () => {
   if (process.env.SCHEDULER_MODE === 'external') {
     logger.info('[scheduler] External mode: jobs run via /internal/cron/*');
   } else {
-    startMonthlyRentScheduler(prisma);
-    startRentReminderScheduler(prisma);
+    // Timers keep the async context they were created in, so their runs stay system jobs.
+    void asSystem('in-process schedulers', async () => {
+      startMonthlyRentScheduler(systemPrisma);
+      startRentReminderScheduler(systemPrisma);
+    });
     // Embed any listings that are new or changed since the last run.
     void import('./services/semantic-search.js')
-      .then(({ indexProperties }) => indexProperties())
+      .then(({ indexProperties }) => asSystem('boot: search indexing', () => indexProperties()))
       .then((result) => { if (result.indexed) logger.info(`[search] Indexed ${result.indexed} listings`); })
       .catch((error) => logger.warn({ err: error }, '[search] Startup indexing failed'));
   }
@@ -58,7 +63,7 @@ const shutdown = (signal: string): void => {
       process.exitCode = 1;
     }
     void import('./services/ai-checkpointer.js').then(({ closeCheckpointer }) => closeCheckpointer());
-    void prisma.$disconnect().catch((disconnectError) => {
+    void systemPrisma.$disconnect().catch((disconnectError) => {
       logger.error({ err: disconnectError }, 'Prisma shutdown error');
       process.exitCode = 1;
     });

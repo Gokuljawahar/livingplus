@@ -56,9 +56,9 @@ describe('GoogleLinkSection', () => {
     expect(JSON.parse(localStorage.getItem('ownerUser')!).googleLinked).toBe(true);
   });
 
-  it('is not offered to the platform admin, who uses ADMIN_GOOGLE_EMAILS', async () => {
+  it('is not offered to residents, who sign in with a phone code', async () => {
     api.get.mockResolvedValue({ data: { googleSignIn: { firebase } } });
-    signedInAs({ ...owner, id: 'env-admin', role: 'SUPER_ADMIN' });
+    signedInAs({ ...owner, role: 'PG_TENANT' });
     renderWithProviders(<AuthProvider><GoogleLinkSection /></AuthProvider>);
     await waitFor(() => expect(api.get).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: /google account/i })).not.toBeInTheDocument();

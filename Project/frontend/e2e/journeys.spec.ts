@@ -7,37 +7,46 @@ async function demoCode(page: Page): Promise<string> {
   return (await toast.textContent())!.match(/\d{6}/)![0];
 }
 
-test('a guest verifies their phone, browses seeded PGs and searches', async ({ page }) => {
+test('a guest browses without signing in, then verifies once to request a bed', async ({ page }) => {
   await page.goto('/');
-  await page.getByPlaceholder('98765 43210').fill('9811122233');
-  await page.getByRole('button', { name: /send code/i }).click();
-  const code = await demoCode(page);
-  await page.getByLabel('6-digit verification code').fill(code);
-  await page.getByRole('button', { name: /verify & browse/i }).click();
-
   await expect(page.getByText("Harbour Point Men's PG").first()).toBeVisible();
   await expect(page.getByText('Northstar Student Living').first()).toBeVisible();
 
   await page.getByPlaceholder(/Search PG name, locality or landmark/).fill('Velachery');
   await expect(page.getByText('Northstar Student Living').first()).toBeVisible();
   await expect(page.getByText("Harbour Point Men's PG")).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Request a bed' }).first().click();
+  const form = page.locator('form', { has: page.getByRole('button', { name: 'Send request' }) });
+  await form.getByLabel('Available bed').selectOption({ index: 1 });
+  await form.getByLabel('Full name').fill('E2E Guest');
+  await form.getByLabel('Phone', { exact: true }).fill('9811122233');
+  await form.getByLabel('Move-in date').fill('2026-12-20');
+  await form.getByRole('button', { name: /send verification code/i }).click();
+  await form.getByLabel(/verification code/i).fill(await demoCode(page));
+  await form.getByRole('button', { name: 'Verify', exact: true }).click();
+  await expect(form.getByText('· verified')).toBeVisible();
+  await form.getByRole('button', { name: 'Send request' }).click();
+
+  // Verifying in the form signed the guest in: My requests opens without a second code.
+  await expect(page).toHaveURL(/\/requests$/);
+  await expect(page.getByText('Northstar Student Living').first()).toBeVisible();
+  await expect(page.getByText(/pending/i).first()).toBeVisible();
 });
 
-test('the platform admin signs in and sees every operator', async ({ page }) => {
-  await page.goto('/login');
-  await page.getByLabel('Mobile number').fill('e2e-admin');
-  await page.getByLabel('Password', { exact: true }).fill('E2e@admin-pass1');
-  await page.getByRole('button', { name: /sign in/i }).click();
-
-  await expect(page).toHaveURL(/\/pg\/operators/);
-  await expect(page.getByText('Palm Grove Women\'s Residence').first()).toBeVisible();
-  await page.getByRole('textbox', { name: /search operators/i }).fill('cedar');
-  await expect(page.getByText('Cedar House Co-Living').first()).toBeVisible();
-  await expect(page.getByText('Palm Grove Women\'s Residence')).toHaveCount(0);
+test('My requests asks a new visitor to verify their phone', async ({ page }) => {
+  await page.goto('/requests');
+  await expect(page.getByRole('heading', { name: 'My booking requests' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /send code/i })).toBeVisible();
 });
 
-test('a resident signs in with a code and opens their stay', async ({ page }) => {
-  await page.goto('/pg/resident');
+test('a resident finds their PG, signs in on its site and opens their stay', async ({ page }) => {
+  await page.goto('/stay');
+  await page.getByPlaceholder('PG name or locality').fill('palm');
+  await page.getByRole('link', { name: /Palm Grove Women's Residence/ }).click();
+  await expect(page).toHaveURL(/\/stay\/palm-grove-womens-residence$/);
+  await expect(page.getByRole('heading', { name: "Palm Grove Women's Residence" })).toBeVisible();
+
   await page.getByPlaceholder('Phone number').fill('9000000001');
   await page.getByRole('button', { name: /code/i }).first().click();
   const code = await demoCode(page);
@@ -45,4 +54,13 @@ test('a resident signs in with a code and opens their stay', async ({ page }) =>
   await page.getByRole('button', { name: /verify|sign in|continue/i }).first().click();
 
   await expect(page.getByText(/Ananya/).first()).toBeVisible();
+});
+
+test('old addresses land in the right area', async ({ page }) => {
+  await page.goto('/login');
+  await expect(page).toHaveURL(/\/owner\/login$/);
+  await page.goto('/pg/resident');
+  await expect(page).toHaveURL(/\/stay$/);
+  await page.goto('/stay/no-such-pg');
+  await expect(page.getByText('PG site not found')).toBeVisible();
 });

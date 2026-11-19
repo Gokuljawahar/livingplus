@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { areaOf } from '../utils/app-areas';
 import { ImagePlus, Loader2, MessageCircle, Mic, Send, Square, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -85,7 +86,7 @@ async function blobToWav16k(blob: Blob): Promise<Blob> {
   }
 }
 
-type AssistantPersona = 'guest' | 'resident' | 'warden' | 'owner' | 'superadmin';
+type AssistantPersona = 'guest' | 'resident' | 'warden' | 'owner';
 
 // Welcome text and input hint stay in one place per persona so the panel
 // always describes what that role's agent can actually see and do.
@@ -105,10 +106,6 @@ const PERSONA_COPY: Record<AssistantPersona, { welcome: string; placeholder: str
   owner: {
     welcome: 'Ask about occupancy, outstanding rent, expenses or operations across your properties. The assistant will ask before any action.',
     placeholder: 'Ask about occupancy, rent, or expenses…'
-  },
-  superadmin: {
-    welcome: 'Ask about occupancy, dues, expenses or operations across every property. The assistant will ask before any action.',
-    placeholder: 'Ask about anything across all properties…'
   }
 };
 
@@ -128,14 +125,13 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
   // while viewing the resident portal). Resolve the persona from the stored
   // session for this page instead, so residents never see owner wording.
   const path = window.location.pathname;
-  const isResidentPage = path === '/resident' || path.startsWith('/pg/resident');
+  const isResidentPage = areaOf(path) === 'resident';
   const residentRole = user?.role === 'PG_TENANT' ? user.role : readStoredRole(RESIDENT_USER_KEY);
   const ownerRole = user?.role && user.role !== 'PG_TENANT' ? user.role : readStoredRole(OWNER_USER_KEY);
 
   const staffPersona: AssistantPersona | null =
     ownerRole === 'PG_OWNER' ? 'owner'
     : ownerRole === 'PG_WARDEN' ? 'warden'
-    : ownerRole === 'SUPER_ADMIN' ? 'superadmin'
     : null;
 
   let persona: AssistantPersona = 'guest';

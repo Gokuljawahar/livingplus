@@ -19,9 +19,9 @@ beforeEach(() => {
 describe('MyRequests', () => {
   it('loads the guest’s booking requests', async () => {
     api.get.mockResolvedValue({ data: [pending] });
-    renderWithProviders(<MyRequests phone="9876543210" />);
+    renderWithProviders(<MyRequests guestToken="gst-token" />);
     expect(await screen.findByText('Sunrise PG')).toBeInTheDocument();
-    expect(api.get).toHaveBeenCalledWith('/pg/bookings/mine', { params: { phone: '9876543210' } });
+    expect(api.get).toHaveBeenCalledWith('/pg/bookings/mine', { headers: { 'X-Guest-Token': 'gst-token' } });
   });
 
   it('cancels a request and refreshes the list', async () => {
@@ -29,11 +29,18 @@ describe('MyRequests', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     api.get.mockResolvedValueOnce({ data: [pending] }).mockResolvedValueOnce({ data: [{ ...pending, status: 'CANCELLED' }] });
     api.post.mockResolvedValue({ data: {} });
-    renderWithProviders(<MyRequests phone="9876543210" />);
+    renderWithProviders(<MyRequests guestToken="gst-token" />);
 
     await user.click(await screen.findByRole('button', { name: /cancel/i }));
 
-    expect(api.post).toHaveBeenCalledWith('/pg/bookings/BK-1/cancel', { phone: '9876543210' });
+    expect(api.post).toHaveBeenCalledWith('/pg/bookings/BK-1/cancel', {}, { headers: { 'X-Guest-Token': 'gst-token' } });
     await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+  });
+
+  it('asks the guest to verify again when the session is refused', async () => {
+    const onSessionExpired = vi.fn();
+    api.get.mockRejectedValue({ isAxiosError: true, response: { status: 401, data: { code: 'GUEST_VERIFICATION_REQUIRED' } } });
+    renderWithProviders(<MyRequests guestToken="stale" onSessionExpired={onSessionExpired} />);
+    await waitFor(() => expect(onSessionExpired).toHaveBeenCalled());
   });
 });

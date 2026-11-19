@@ -10,8 +10,9 @@ import { useAuth } from '../context/auth';
 import { SidebarProvider } from '../context/SidebarContext';
 import { useSidebar } from '../context/sidebar';
 import Sidebar from '../components/layout/Sidebar';
-import { RESIDENT_TOKEN_KEY } from '../utils/session';
-import { resolveAppHost, isPathModeHost } from '../utils/pg-host';
+import { Link, useParams } from 'react-router-dom';
+import { RESIDENT_SITE_KEY, RESIDENT_TOKEN_KEY } from '../utils/session';
+import { ROUTES } from '../utils/app-areas';
 import { useOtpCooldown } from '../hooks/useOtpCooldown';
 import AIChatPanel from '../components/AIChatPanel';
 import RoomChange from '../components/RoomChange';
@@ -52,18 +53,42 @@ const EMPTY_TICKET: ResidentTicketForm = { tenantId: '', title: '', description:
 const EMPTY_PAYMENT: PaymentClaimForm = { tenantId: '', rentEntryId: '', amount: '', reference: '' };
 const EMPTY_PROFILE: ResidentProfileForm = { permanentAddress: '', bloodGroup: '', institutionOrEmployer: '', emergencyName: '', emergencyPhone: '', kycType: '', foodOptOut: false };
 
+type PgSite = { slug: string; name: string; locality: string | null; city: string | null };
+
+/** The resident site of one PG: /stay/<slug>. */
 export default function ResidentPortal() {
+  const slug = String(useParams().slug || '').toLowerCase();
+  const { data: site, isPending, isError } = useQuery({
+    queryKey: ['pg-site', slug],
+    queryFn: async (): Promise<PgSite> => (await api.get(`/pg/sites/${encodeURIComponent(slug)}`)).data,
+    retry: false
+  });
+  if (isPending) return <div className="flex min-h-screen items-center justify-center bg-[#F8FAFB]"><Loader2 className="h-8 w-8 animate-spin text-[#02224B]" /></div>;
+  if (isError || !site) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6 text-center">
+        <section>
+          <h1 className="text-2xl font-bold text-slate-900">PG site not found</h1>
+          <p className="mt-2 text-sm text-slate-600">This resident link doesn't match any PG. Check the link your PG shared, or find your PG.</p>
+          <Link to={ROUTES.residentFinder} className="mt-4 inline-block font-bold text-[#02224B] hover:underline">Find your PG →</Link>
+        </section>
+      </main>
+    );
+  }
   return (
     <SidebarProvider>
-      <ResidentPortalView />
+      <ResidentPortalView key={site.slug} site={site} />
     </SidebarProvider>
   );
 }
 
-function ResidentPortalView() {
+/** A saved resident session counts only on the PG site it was opened on. */
+const hasSessionFor = (slug: string) => Boolean(localStorage.getItem(RESIDENT_TOKEN_KEY)) && localStorage.getItem(RESIDENT_SITE_KEY) === slug;
+
+function ResidentPortalView({ site }: { site: PgSite }) {
   const { login, logout: clearSession } = useAuth();
   const { setSectionNav, toggle } = useSidebar();
-  const [step, setStep] = useState<'phone' | 'code' | 'portal'>(() => (localStorage.getItem(RESIDENT_TOKEN_KEY) ? 'portal' : 'phone'));
+  const [step, setStep] = useState<'phone' | 'code' | 'portal'>(() => (hasSessionFor(site.slug) ? 'portal' : 'phone'));
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const challenge = useRef<PhoneChallenge<'TENANT_LOGIN'> | null>(null);
@@ -110,7 +135,6 @@ function ResidentPortalView() {
   const profileFormApi = useForm<ResidentProfileForm>({ resolver: zodResolver(residentProfileSchema), defaultValues: EMPTY_PROFILE });
   const savingProfile = profileFormApi.formState.isSubmitting;
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
-  const canFindPg = isPathModeHost() || resolveAppHost().kind === 'public';
 
   const requestCode = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -138,6 +162,7 @@ function ResidentPortalView() {
     try {
       const data = await challenge.current.verify(code);
       login(data.token, data.user);
+      localStorage.setItem(RESIDENT_SITE_KEY, site.slug);
       setStep('portal');
       toast.success('Welcome back');
     } catch (error) {
@@ -264,6 +289,7 @@ function ResidentPortalView() {
 
   const logout = () => {
     clearSession('PG_TENANT');
+    localStorage.removeItem(RESIDENT_SITE_KEY);
     queryClient.removeQueries({ queryKey: ['resident'] });
     setStep('phone');
   };
@@ -295,12 +321,13 @@ function ResidentPortalView() {
           { icon: ReceiptIndianRupee, heading: 'Money clarity', text: 'Dues and verifications' },
           { icon: Wrench, heading: 'Get help fast', text: 'Maintenance and room changes' }
         ]}
-        mobileTitle="Resident login"
-        mobileSubtitle="Log in with the phone number on your stay."
+        mobileTitle={site.name}
+        mobileSubtitle="Resident login · use the phone number on your stay."
       >
         <div className="hidden lg:block">
-          <p className="text-xs font-bold uppercase text-amber-700">Resident access</p>
-          <h1 className="mt-1 text-2xl font-bold text-[#02224B]">Resident login</h1>
+          <p className="text-xs font-bold uppercase text-amber-700">Resident login</p>
+          <h1 className="mt-1 text-2xl font-bold text-[#02224B]">{site.name}</h1>
+          {site.locality && <p className="text-sm text-slate-500">{[site.locality, site.city].filter(Boolean).join(', ')}</p>}
           <p className="mt-2 text-sm text-slate-500">Log in with the phone number on your stay. No password needed.</p>
         </div>
           {step === 'phone' ? (<>
@@ -308,14 +335,12 @@ function ResidentPortalView() {
               <input required type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" className="w-full border border-slate-300 px-3 py-2.5 text-sm" />
               <button disabled={loading || cooldown > 0} className="flex w-full items-center justify-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{loading && <Loader2 className="h-4 w-4 animate-spin" />}{cooldown > 0 ? `Resend in ${cooldown}s` : 'Send code'}</button>
             </form>
-            {canFindPg && (
-              <p className="mt-5 border-t border-slate-100 pt-4 text-center text-sm text-slate-500">
-                Not onboarded yet?{' '}
-                <a href="/pg" className="font-bold text-[#02224B] hover:underline">
-                  Browse PGs as a guest
-                </a>
-              </p>
-            )}
+            <p className="mt-5 border-t border-slate-100 pt-4 text-center text-sm text-slate-500">
+              Not staying here yet?{' '}
+              <a href={ROUTES.guestHome} className="font-bold text-[#02224B] hover:underline">Browse PGs</a>
+              {' · '}
+              <Link to={ROUTES.residentFinder} className="font-bold text-[#02224B] hover:underline">Different PG</Link>
+            </p>
           </>) : (
             <form onSubmit={verifyCode} className="mt-5 space-y-3">
               <input required aria-label="6-digit verification code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="6-digit code" inputMode="numeric" className="w-full border border-slate-300 px-3 py-2.5 text-sm" />
@@ -336,12 +361,11 @@ function ResidentPortalView() {
         <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 md:px-8">
           <div className="flex items-center gap-3">
             <button onClick={toggle} aria-label="Open navigation" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden"><Menu className="h-6 w-6" /></button>
-            <span className="flex items-center gap-2 font-semibold text-[#02224B]"><Building2 className="h-5 w-5" /> My stays</span>
+            <span className="flex items-center gap-2 font-semibold text-[#02224B]"><Building2 className="h-5 w-5" /> {site.name}</span>
             {stays[0] && <span className="hidden items-center gap-1.5 text-sm font-medium text-slate-500 md:inline-flex"><UserRound className="h-4 w-4" />{stays[0].name}</span>}
           </div>
           <div className="flex items-center gap-2 text-sm md:gap-3">
             <span className="inline-flex items-center gap-1.5 font-semibold text-slate-500" aria-label={`${unreadCount} unread notifications`}><Bell className="h-4 w-4" />{unreadCount}</span>
-            {canFindPg ? <a href="/pg" className="hidden font-semibold text-[#02224B] hover:underline sm:inline">Find a PG</a> : null}
             <button onClick={logout} className="inline-flex items-center gap-1 font-semibold text-slate-500 hover:text-[#02224B]"><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Sign out</span></button>
           </div>
         </header>

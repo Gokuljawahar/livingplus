@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { registerSchema, type RegisterForm } from '../validation/forms';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { PhoneInput } from '../components/PhoneInput';
 import { Building2, BedDouble, ClipboardList, Loader2 } from 'lucide-react';
 import PasswordInput from '../components/PasswordInput';
@@ -11,11 +11,10 @@ import toast from 'react-hot-toast';
 import LogoLoader from '../components/LogoLoader';
 import logo from '../assets/logo_bg_white.png';
 import logoBlack from '../assets/logo_bg_black.png';
-import { pgHostUrl, resolveAppHost } from '../utils/pg-host';
+import { ROUTES } from '../utils/app-areas';
 import { apiErrorMessage } from '../utils/api-error';
 
 export default function RegisterPage() {
-  const navigate = useNavigate();
 
   const [step, setStep] = useState(1);
   const [showLoader, setShowLoader] = useState(false);
@@ -29,10 +28,6 @@ export default function RegisterPage() {
     }
   });
   const phone = useWatch({ control, name: 'phone' });
-
-  useEffect(() => {
-    if (resolveAppHost().kind !== 'public') navigate('/', { replace: true });
-  }, [navigate]);
 
   const handleContinue = async () => {
     if (await trigger('phone')) setStep(2);
@@ -58,7 +53,7 @@ export default function RegisterPage() {
 
       const response = await api.post('/auth/register', payload);
       if (!response.data.pgSlug) throw new Error('The property was created without a PG address');
-      setNextLoginUrl(`${pgHostUrl(response.data.pgSlug)}/login`);
+      setNextLoginUrl(ROUTES.ownerLogin);
 
       toast.success(
         <div>
@@ -310,7 +305,7 @@ export default function RegisterPage() {
 
             <div className="mt-8 text-center text-sm text-slate-500">
               Already have an account?{' '}
-              <Link to="/login" className="font-semibold text-[#02224B] hover:underline">
+              <Link to={ROUTES.ownerLogin} className="font-semibold text-[#02224B] hover:underline">
                 Sign in
               </Link>
             </div>

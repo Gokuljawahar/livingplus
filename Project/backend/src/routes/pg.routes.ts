@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createPgOperator, deletePgOperatorProperty, listPgOperators } from '../controllers/pg-admin.controller.js';
+import { systemRoute } from '../db/context.js';
 import {
   cancelBookingRequest,
   checkInTenant,
@@ -43,6 +43,8 @@ import {
   reviewPaymentClaim,
   markDepositRefunded,
   listProperties,
+  listPgSites,
+  getPgSite,
   searchPropertiesSemantic,
   listPropertyStaff,
   recordRentPayment,
@@ -78,9 +80,6 @@ const voiceUpload = multer({
 
 const router = Router();
 
-router.get('/admin/operators', authenticate, listPgOperators);
-router.post('/admin/operators', authenticate, createPgOperator);
-router.delete('/admin/operators/:propertyId', authenticate, deletePgOperatorProperty);
 
 router.get('/config', getPublicConfig);
 router.get('/ai/status', getAiStatus);
@@ -103,12 +102,16 @@ router.get('/tenant/vacant-beds', authenticate, listVacantBeds);
 router.post('/tenant/room-changes/:requestId/proposals', authenticate, proposeRoomSwap);
 router.post('/tenant/room-changes/:requestId/response', authenticate, respondRoomSwap);
 router.get('/owner/activity', authenticate, listAuditLogs);
+// Public endpoints that work across PGs by design run as the system; each
+// validates its own input (slug-only lookups, verified phone codes, booking refs).
+router.get('/sites', systemRoute('directory of PG resident sites (name and place only)', listPgSites));
+router.get('/sites/:slug', systemRoute('resident sites of unpublished PGs still resolve', getPgSite));
 router.get('/properties', optionalAuthenticate, listProperties);
 router.get('/search', optionalAuthenticate, semanticSearchLimiter, searchPropertiesSemantic);
-router.get('/bookings/mine', listGuestBookings);
-router.post('/bookings', optionalAuthenticate, createBookingRequest);
-router.post('/bookings/:bookingRef/cancel', cancelBookingRequest);
-router.get('/bookings/:bookingRef/status', getPublicBookingStatus);
+router.get('/bookings/mine', systemRoute('guest booking lookup by phone', listGuestBookings));
+router.post('/bookings', optionalAuthenticate, systemRoute('a verified guest holds a bed in any published PG', createBookingRequest));
+router.post('/bookings/:bookingRef/cancel', systemRoute('guest cancels their own booking', cancelBookingRequest));
+router.get('/bookings/:bookingRef/status', systemRoute('guest booking status by reference and phone', getPublicBookingStatus));
 
 router.get('/owner/properties', authenticate, listOwnerProperties);
 router.post('/owner/properties', authenticate, createProperty);

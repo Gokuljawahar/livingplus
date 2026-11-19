@@ -27,7 +27,7 @@ describe('GuestLoginGate', () => {
   it('sends a code, verifies it and stores the guest session', async () => {
     const user = userEvent.setup();
     otp.startPhoneVerification.mockResolvedValue({ devCode: '123456', verify: otp.verify });
-    otp.verify.mockResolvedValue({ phoneToken: 'vrf_test' });
+    otp.verify.mockResolvedValue({ phoneToken: 'vrf_test', guestToken: 'gst_test' });
     const onVerified = renderGate();
 
     await user.type(screen.getByPlaceholderText('98765 43210'), '9876543210');
@@ -35,10 +35,10 @@ describe('GuestLoginGate', () => {
     expect(otp.startPhoneVerification).toHaveBeenCalledWith(expect.stringMatching(/9876543210$/), 'BOOKING');
 
     await user.type(await screen.findByLabelText('6-digit verification code'), '123456');
-    await user.click(screen.getByRole('button', { name: /verify & browse/i }));
+    await user.click(screen.getByRole('button', { name: /verify & see requests/i }));
 
     expect(otp.verify).toHaveBeenCalledWith('123456');
-    expect(onVerified).toHaveBeenCalledWith(expect.objectContaining({ phoneToken: 'vrf_test' }));
+    expect(onVerified).toHaveBeenCalledWith(expect.objectContaining({ phoneToken: 'vrf_test', guestToken: 'gst_test' }));
   });
 
   it('stays on the phone step when sending fails', async () => {

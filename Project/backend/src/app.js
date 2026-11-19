@@ -2,7 +2,6 @@ import express from 'express';
 import multer from 'multer';
 import { access } from 'fs/promises';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
 import routes from './routes/index.js';
 import { authenticate } from './middleware/auth.middleware.js';
 import { getJwtSecret } from './utils/auth-config.js';
@@ -12,11 +11,16 @@ import { directUploadUrl, localUploadPath, newFileKey, putFile, storageKind, vie
 import { applyHttpHardening } from './middleware/http-hardening.js';
 import { logger } from './utils/logger.js';
 const app = express();
-// Search vectors are large and internal: never returned unless selected explicitly.
-export const prisma = new PrismaClient({ omit: { pGProperty: { searchEmbedding: true } } });
+// Every query runs for the request's caller under PostgreSQL Row-Level Security (db/client.ts).
+// Search vectors are large and internal: never returned unless selected explicitly (set on the client).
+export { prisma, systemPrisma } from './db/client.js';
+import { prisma, systemPrisma } from './db/client.js';
+import { asSystem, dbContextMiddleware, rebindDbContext } from './db/context.js';
 applyHttpHardening(app);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ limit: '100kb', extended: true }));
+// After the body parsers: their stream callbacks would otherwise drop the context.
+app.use(dbContextMiddleware);
 import path from 'path';
 import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -24,7 +28,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Liveness: Cloud Run reserves paths ending in "z" (/healthz never reaches the
 // app there), so /health is the public one; /healthz stays for local tooling.
 app.get(['/health', '/healthz'], (_req, res) => { res.json({ ok: true }); });
-app.use('/internal/cron', cronRoutes(prisma));
+app.use('/internal/cron', (_req, _res, next) => { void asSystem('scheduled jobs span every PG', async () => next()); }, cronRoutes(systemPrisma));
 app.use('/api', resolvePgHost(prisma));
 app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
 app.use('/api/uploads', express.static(path.resolve(__dirname, '../uploads')));
@@ -40,8 +44,6 @@ const allowedUploadTypes = new Set([
 ]);
 const authorizePropertyStaffUpload = async (req, res, next) => {
     const user = req.user;
-    if (user.role === 'SUPER_ADMIN')
-        return next();
     if (!user.userId) {
         res.status(403).json({ message: 'Property staff access is required' });
         return;
@@ -79,7 +81,7 @@ const authorizePropertyStaffUpload = async (req, res, next) => {
     }
     next();
 };
-app.post('/api/upload-s3', authenticate, authorizePropertyStaffUpload, s3Upload.single('image'), async (req, res) => {
+app.post('/api/upload-s3', authenticate, authorizePropertyStaffUpload, s3Upload.single('image'), rebindDbContext, async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ error: "No image file provided" });
@@ -171,7 +173,7 @@ app.get(/^\/api\/view-image\/(.+)$/, authenticate, async (req, res) => {
             const digits = String(account?.phone || '').replace(/\D/g, '');
             hasResidentAccess = [digits, digits.length === 10 ? `91${digits}` : digits, digits.length > 10 ? digits.slice(-10) : digits].includes(String(tenant.phone || '').replace(/\D/g, ''));
         }
-        const hasAccess = user.role === 'SUPER_ADMIN' || hasResidentAccess || Boolean(user.userId && await prisma.pGPropertyAccess.findFirst({
+        const hasAccess = hasResidentAccess || Boolean(user.userId && await prisma.pGPropertyAccess.findFirst({
             where: { propertyId: tenant.propertyId, userId: user.userId, role: { in: ['OWNER', 'WARDEN'] } },
             select: { id: true }
         }));

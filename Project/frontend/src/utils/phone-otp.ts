@@ -25,6 +25,8 @@ interface PhoneVerificationConfig {
 /** /auth/otp-verify for BOOKING: a single-use phone token (plus a resident session if one exists). */
 export interface BookingVerifyResult {
   phoneToken: string;
+  /** Guest session for "My requests" (X-Guest-Token). */
+  guestToken: string;
   resident?: { token: string; user: User };
 }
 

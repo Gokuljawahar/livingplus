@@ -4,7 +4,6 @@ export interface Actor {
     role: string;
     phones: string[];
     propertyIds: string[];
-    isSuperAdmin: boolean;
     propertyId?: string;
 }
 export declare function actorFromRequest(req: any): Promise<Actor>;

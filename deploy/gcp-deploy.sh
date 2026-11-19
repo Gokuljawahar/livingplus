@@ -17,12 +17,16 @@
 #   FIREBASE_PROJECT_ID, FIREBASE_WEB_API_KEY, FIREBASE_APP_ID
 #                        enable Firebase Phone Auth; without them, OTP demo mode
 #                        (codes shown on screen) is turned on.
-#   ENABLE_GOOGLE_SIGN_IN=true  "Sign in with Google" for owners, wardens and
-#                        admins (uses the same Firebase project).
-#   ADMIN_GOOGLE_EMAILS  comma-separated Google emails that sign in as platform admin
+#   ENABLE_GOOGLE_SIGN_IN=true  "Sign in with Google" for owners and wardens
+#                        (uses the same Firebase project).
 #   VITE_GOOGLE_MAPS_API_KEY  map picker in the owner workspace
 #   SQL_TIER             default: db-f1-micro (smallest; fine for a demo)
-#   SEED_DEMO_DATA=1     load the fictional demo PGs, rooms and residents once
+#   SEED_DEMO_DATA=1     load the fictional demo PGs, rooms and residents once,
+#                        owned by a demo owner (DEMO_OWNER_PHONE, default 9555500001;
+#                        password generated into Secret Manager)
+#
+# There is no platform super admin: every PG is its owner's workspace, isolated
+# by PostgreSQL Row-Level Security.
 #   LANGSMITH_API_KEY    trace the agent in LangSmith (project: livingplus)
 set -euo pipefail
 # Never wait for interactive answers (e.g. "enable this API?"): fail clearly instead.
@@ -39,7 +43,7 @@ DB_USER="${DB_USER:-livingplus}"
 BUCKET="${BUCKET:-${PROJECT_ID}-livingplus-uploads}"
 SA_NAME="${SA_NAME:-livingplus-run}"
 AI_MODEL="${AI_MODEL:-google:gemini-3.8-flash}"
-ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
+DEMO_OWNER_PHONE="${DEMO_OWNER_PHONE:-9555500001}"
 DRY_RUN="${DRY_RUN:-0}"
 
 [ -n "$PROJECT_ID" ] || { echo "Set PROJECT_ID or run: gcloud config set project <id>" >&2; exit 1; }
@@ -103,7 +107,7 @@ run gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" --member "ser
 
 step "Secrets"
 ensure_secret livingplus-jwt-secret "$(random_hex)"
-ensure_secret livingplus-admin-password "$(random_secret 20)"
+ensure_secret livingplus-demo-owner-password "$(random_secret 20)"
 ensure_secret livingplus-db-password "$(random_secret 32)"
 if [ -n "${GOOGLE_API_KEY:-}" ]; then ensure_secret livingplus-google-api-key "$GOOGLE_API_KEY"; fi
 if [ -n "${LANGSMITH_API_KEY:-}" ]; then ensure_secret livingplus-langsmith-api-key "$LANGSMITH_API_KEY"; fi
@@ -128,10 +132,9 @@ run gcloud builds submit --project "$PROJECT_ID" --region "$REGION" --config dep
   --substitutions "_IMAGE=${IMAGE},_VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY:-}" .
 
 step "Deploying Cloud Run service ${SERVICE}"
-ENV_VARS="APP_TIMEZONE=Asia/Kolkata,GCS_BUCKET=${BUCKET},ADMIN_USERNAME=${ADMIN_USERNAME},LOG_LEVEL=info"
+ENV_VARS="APP_TIMEZONE=Asia/Kolkata,GCS_BUCKET=${BUCKET},LOG_LEVEL=info"
 ENV_VARS+=",ENABLE_AI_ORCHESTRATOR=true,AI_MODEL=${AI_MODEL}"
 SECRETS="DATABASE_URL=livingplus-database-url:latest,JWT_SECRET=livingplus-jwt-secret:latest"
-SECRETS+=",ADMIN_PASSWORD=livingplus-admin-password:latest"
 if [ -n "${GOOGLE_API_KEY:-}" ]; then
   ENV_VARS+=",ENABLE_SEMANTIC_SEARCH=true,AI_EMBEDDING_MODEL=google-genai:gemini-embedding-001"
   SECRETS+=",GOOGLE_API_KEY=livingplus-google-api-key:latest"
@@ -144,8 +147,6 @@ if [ -n "${FIREBASE_PROJECT_ID:-}" ] && [ -n "${FIREBASE_WEB_API_KEY:-}" ]; then
   ENV_VARS+=",OTP_PROVIDER=firebase,FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID},FIREBASE_WEB_API_KEY=${FIREBASE_WEB_API_KEY},FIREBASE_APP_ID=${FIREBASE_APP_ID:-}"
   if [ "${ENABLE_GOOGLE_SIGN_IN:-false}" = "true" ]; then
     ENV_VARS+=",ENABLE_GOOGLE_SIGN_IN=true"
-    # gcloud splits --set-env-vars on commas: switch the delimiter for the email list.
-    if [ -n "${ADMIN_GOOGLE_EMAILS:-}" ]; then ENV_VARS="^|^${ENV_VARS//,/|}|ADMIN_GOOGLE_EMAILS=${ADMIN_GOOGLE_EMAILS}"; fi
   fi
 else
   echo "  No Firebase config: enabling OTP demo mode (codes shown on screen)."
@@ -180,7 +181,8 @@ if [ "${SEED_DEMO_DATA:-0}" = "1" ]; then
   step "Loading demo data (one-off Cloud Run job)"
   run gcloud run jobs deploy livingplus-seed --project "$PROJECT_ID" --region "$REGION" --image "$IMAGE" \
     --service-account "$SA_EMAIL" --set-cloudsql-instances "$SQL_CONNECTION" \
-    --set-secrets DATABASE_URL=livingplus-database-url:latest \
+    --set-secrets DATABASE_URL=livingplus-database-url:latest,DEMO_OWNER_PASSWORD=livingplus-demo-owner-password:latest \
+    --set-env-vars "DEMO_OWNER_PHONE=${DEMO_OWNER_PHONE}" \
     --command node --args prisma/seed-pg.js --max-retries 0 --task-timeout 600
   run gcloud run jobs execute livingplus-seed --project "$PROJECT_ID" --region "$REGION" --wait
   if [ -n "${GOOGLE_API_KEY:-}" ]; then
@@ -191,7 +193,9 @@ fi
 cat <<EOF
 
 LivingPlus is deployed: ${URL}
-  Owner/admin sign-in: ${URL}/login   (platform admin: ${ADMIN_USERNAME})
-  Admin password:      gcloud secrets versions access latest --secret livingplus-admin-password --project ${PROJECT_ID}
+  Guests:              ${URL}/
+  Residents:           ${URL}/stay
+  Owner sign-in:       ${URL}/owner/login   (demo owner, if seeded: ${DEMO_OWNER_PHONE})
+  Demo owner password: gcloud secrets versions access latest --secret livingplus-demo-owner-password --project ${PROJECT_ID}
   Logs:                gcloud run services logs read ${SERVICE} --project ${PROJECT_ID} --region ${REGION}
 EOF

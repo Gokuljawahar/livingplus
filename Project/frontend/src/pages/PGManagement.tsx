@@ -10,15 +10,15 @@ import { ArrowLeftRight, BedDouble, Building2, Check, ClipboardList, Clock, Down
 import type { LucideIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
+import ResidentSiteLink from '../components/ResidentSiteLink';
 import { SecureImage } from '../components/SecureImage';
 import { MapPicker } from '../components/MapPicker';
 import { downloadXlsx } from '../utils/xlsx';
-import { pgHostUrl, resolveAppHost } from '../utils/pg-host';
 import { useSidebar } from '../context/sidebar';
 import { apiErrorMessage } from '../utils/api-error';
 
 type Activity = { id: string; action: string; entityType?: string | null; entityId?: string | null; detail?: string | null; actorName?: string | null; createdAt: string; propertyId: string };
-type Property = { id: string; name: string; description?: string | null; address: string; locality: string; contactPhone?: string | null; upiId?: string | null; city: string; latitude?: number | null; longitude?: number | null; genderPolicy: string; status?: string; bookingLockMinutes?: number; rentDay?: number; rentDueDay?: number; amenities: string[]; houseRules: string[]; photoUrls: string[]; rooms: { id: string; roomNumber: string; monthlyRent: number; depositAmount: number; maintenanceFee: number; utilitiesSurcharge: number; foodCharge: number; roomType: string; beds: { id: string; label: string; status: string; maintenanceNote?: string | null }[] }[] };
+type Property = { id: string; slug?: string | null; name: string; description?: string | null; address: string; locality: string; contactPhone?: string | null; upiId?: string | null; city: string; latitude?: number | null; longitude?: number | null; genderPolicy: string; status?: string; bookingLockMinutes?: number; rentDay?: number; rentDueDay?: number; amenities: string[]; houseRules: string[]; photoUrls: string[]; rooms: { id: string; roomNumber: string; monthlyRent: number; depositAmount: number; maintenanceFee: number; utilitiesSurcharge: number; foodCharge: number; roomType: string; beds: { id: string; label: string; status: string; maintenanceNote?: string | null }[] }[] };
 type Booking = { id: string; bookingRef: string; residentName: string; phone: string; moveInDate: string; status: string; rejectionReason?: string | null; property: { name: string; locality: string }; bed: { label: string; room: { roomNumber: string } } | null; bedId: string | null; tenant?: { id: string; status: string } | null };
 type Ticket = { id: string; title: string; description: string; category: string; priority: string; status: string; imageUrl?: string | null; assignedName?: string | null; property: { name: string }; tenant?: { name: string } | null };
 type Tenant = { id: string; name: string; phone: string; email?: string | null; status: string; monthlyRent: number; depositAmount: number; depositReceived: number; kycVerified?: boolean; foodOptOut?: boolean; noticeDate?: string | null; depositDeductions?: number; depositRefundAmount?: number | null; depositRefundStatus?: string; depositRefundReference?: string | null; checkoutNote?: string | null; permanentAddress?: string | null; bloodGroup?: string | null; institutionOrEmployer?: string | null; emergencyName?: string | null; emergencyPhone?: string | null; kycType?: string | null; kycDocumentUrl?: string | null; checkedInAt?: string | null; property: { id: string; name: string; locality: string }; bed?: { label: string; room: { roomNumber: string } } | null };
@@ -168,10 +168,6 @@ export default function PGManagement() {
       setPropertyPhotoFiles([]);
       setExistingPhotoUrls([]);
       toast.success(editingPropertyId ? 'Property updated' : 'Property added');
-      if (creatingProperty && resolveAppHost().kind === 'property') {
-        window.location.assign(`${pgHostUrl(response.data.slug)}/login`);
-        return;
-      }
       refresh();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not add property'));
@@ -219,13 +215,6 @@ export default function PGManagement() {
         startNewProperty();
       }
       toast.success('Property deleted');
-      const host = resolveAppHost();
-      if (host.kind === 'property') {
-        const destination = new URL(window.location.origin);
-        destination.hostname = destination.hostname.slice(host.slug.length + 1);
-        window.location.assign(destination.href);
-        return;
-      }
       refresh();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not delete property'));
@@ -648,6 +637,7 @@ export default function PGManagement() {
                         <span className="flex items-start justify-between gap-4"><span><span className="block font-semibold text-[#02224B]">{property.name}</span><span className="mt-1 block text-sm text-slate-500">{property.locality}, {property.city} · {property.rooms.length} rooms</span></span><span className="text-sm text-slate-600">{occupied}/{beds.length} occupied</span></span>
                       </button>
                       {selectedPropertyId === property.id && <div className="space-y-3 bg-white px-3 pb-4">
+                        {property.slug && <ResidentSiteLink slug={property.slug} />}
                         {property.rooms.map((room) => <div key={room.id} className="border-t border-slate-100 pt-3">
                           <div className="flex flex-wrap items-center justify-between gap-2 text-sm"><span className="font-semibold">Room {room.roomNumber} · {room.roomType}</span><span className="text-slate-500">₹{room.monthlyRent.toLocaleString('en-IN')} / month</span></div>
                           <div className="mt-2 flex flex-wrap gap-2">{room.beds.map((bed) => <span key={bed.id} className="inline-flex items-center gap-2 border border-slate-200 px-2 py-1 text-xs"><span className={`h-2 w-2 rounded-full ${bed.status === 'AVAILABLE' ? 'bg-emerald-500' : bed.status === 'OCCUPIED' ? 'bg-blue-500' : bed.status === 'MAINTENANCE' ? 'bg-red-500' : 'bg-amber-500'}`} />{bed.label} · {bed.status.toLowerCase().replace('_', ' ')}{summary.canManageStaff && ['AVAILABLE', 'MAINTENANCE'].includes(bed.status) && <button type="button" title={bed.status === 'AVAILABLE' ? 'Mark bed for maintenance' : 'Mark bed available'} onClick={() => void updateBedStatus(bed.id, bed.status === 'AVAILABLE' ? 'MAINTENANCE' : 'AVAILABLE')} className="font-semibold text-[#02224B]">{bed.status === 'AVAILABLE' ? 'Repair' : 'Release'}</button>}</span>)}</div>

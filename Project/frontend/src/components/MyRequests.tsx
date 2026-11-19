@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, ClipboardList, Loader2, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
-import { apiErrorMessage } from '../utils/api-error';
+import { apiErrorMessage, apiErrorStatus } from '../utils/api-error';
 
 export interface GuestBooking {
   id: string;
@@ -17,8 +17,11 @@ export interface GuestBooking {
 }
 
 interface MyRequestsProps {
-  phone: string;
+  /** Proof of the verified phone: the API lists and cancels only that number's requests. */
+  guestToken: string;
   refreshKey?: number;
+  /** Called when the API no longer accepts the session (expired or revoked). */
+  onSessionExpired?: () => void;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -35,21 +38,37 @@ const STATUS_STYLES: Record<string, string> = {
  * Booking-request status list for the signed-in guest phone.
  * Replaces the old anonymous booking-ref + phone tracker.
  */
-export default function MyRequests({ phone, refreshKey = 0 }: MyRequestsProps) {
+export default function MyRequests({ guestToken, refreshKey = 0, onSessionExpired }: MyRequestsProps) {
   const queryClient = useQueryClient();
+  const headers = { 'X-Guest-Token': guestToken };
+  const expired = (error: unknown) => {
+    if (apiErrorStatus(error) !== 401) return false;
+    toast.error('Please verify your phone number again');
+    onSessionExpired?.();
+    return true;
+  };
   const { data: bookings = [], isPending: loading } = useQuery({
-    queryKey: ['bookings', 'mine', phone, refreshKey],
-    queryFn: async (): Promise<GuestBooking[]> => (await api.get('/pg/bookings/mine', { params: { phone } })).data || [],
+    queryKey: ['bookings', 'mine', guestToken, refreshKey],
+    queryFn: async (): Promise<GuestBooking[]> => {
+      try {
+        return (await api.get('/pg/bookings/mine', { headers })).data || [];
+      } catch (error) {
+        if (expired(error)) return [];
+        throw error;
+      }
+    },
     meta: { errorMessage: 'Could not load your requests' }
   });
 
   const cancelRequest = useMutation({
-    mutationFn: (booking: GuestBooking) => api.post(`/pg/bookings/${encodeURIComponent(booking.bookingRef)}/cancel`, { phone }),
+    mutationFn: (booking: GuestBooking) => api.post(`/pg/bookings/${encodeURIComponent(booking.bookingRef)}/cancel`, {}, { headers }),
     onSuccess: () => {
       toast.success('Booking request cancelled');
-      return queryClient.invalidateQueries({ queryKey: ['bookings', 'mine', phone] });
+      return queryClient.invalidateQueries({ queryKey: ['bookings', 'mine', guestToken] });
     },
-    onError: (error) => toast.error(apiErrorMessage(error, 'Could not cancel request'))
+    onError: (error) => {
+      if (!expired(error)) toast.error(apiErrorMessage(error, 'Could not cancel request'));
+    }
   });
   const cancelling = cancelRequest.isPending ? cancelRequest.variables?.bookingRef ?? '' : '';
 

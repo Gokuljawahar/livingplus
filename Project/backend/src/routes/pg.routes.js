@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { createPgOperator, deletePgOperatorProperty, listPgOperators } from '../controllers/pg-admin.controller.js';
-import { cancelBookingRequest, checkInTenant, checkOutTenant, createBookingRequest, createMaintenanceTicket, createProperty, createPropertyStaff, createRentEntry, createRoom, deleteProperty, getPublicConfig, listTenantStays, submitTenantNotice, cancelTenantNotice, listAuditLogs, getOwnerReport, getOwnerSummary, getPublicBookingStatus, listGuestBookings, listOwnerBookings, listOwnerProperties, listOwnerRentEntries, sendRentReminders, listOwnerExpenses, createOwnerExpense, deleteOwnerExpense, listElectricityBills, proposeElectricityBill, approveElectricityBill, listOwnerTenants, listOwnerTickets, listTenantTickets, createTenantTicket, updateResidentProfile, listResidentNotifications, markResidentNotificationRead, createResidentPaymentClaim, listResidentPaymentClaims, listOwnerPaymentClaims, reviewPaymentClaim, markDepositRefunded, listProperties, searchPropertiesSemantic, listPropertyStaff, recordRentPayment, removePropertyStaff, updateBedStatus, updateBookingStatus, updateMaintenanceStatus, updateProperty, updateTenantProfile } from '../controllers/pg.controller.js';
+import { systemRoute } from '../db/context.js';
+import { cancelBookingRequest, checkInTenant, checkOutTenant, createBookingRequest, createMaintenanceTicket, createProperty, createPropertyStaff, createRentEntry, createRoom, deleteProperty, getPublicConfig, listTenantStays, submitTenantNotice, cancelTenantNotice, listAuditLogs, getOwnerReport, getOwnerSummary, getPublicBookingStatus, listGuestBookings, listOwnerBookings, listOwnerProperties, listOwnerRentEntries, sendRentReminders, listOwnerExpenses, createOwnerExpense, deleteOwnerExpense, listElectricityBills, proposeElectricityBill, approveElectricityBill, listOwnerTenants, listOwnerTickets, listTenantTickets, createTenantTicket, updateResidentProfile, listResidentNotifications, markResidentNotificationRead, createResidentPaymentClaim, listResidentPaymentClaims, listOwnerPaymentClaims, reviewPaymentClaim, markDepositRefunded, listProperties, listPgSites, getPgSite, searchPropertiesSemantic, listPropertyStaff, recordRentPayment, removePropertyStaff, updateBedStatus, updateBookingStatus, updateMaintenanceStatus, updateProperty, updateTenantProfile } from '../controllers/pg.controller.js';
 import multer from 'multer';
 import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware.js';
 import { aiChatLimiter, aiVoiceLimiter, semanticSearchLimiter } from '../middleware/ai-rate-limit.js';
@@ -14,9 +14,6 @@ const voiceUpload = multer({
     }
 });
 const router = Router();
-router.get('/admin/operators', authenticate, listPgOperators);
-router.post('/admin/operators', authenticate, createPgOperator);
-router.delete('/admin/operators/:propertyId', authenticate, deletePgOperatorProperty);
 router.get('/config', getPublicConfig);
 router.get('/ai/status', getAiStatus);
 router.post('/ai/chat', optionalAuthenticate, aiChatLimiter, postChat);
@@ -38,12 +35,16 @@ router.get('/tenant/vacant-beds', authenticate, listVacantBeds);
 router.post('/tenant/room-changes/:requestId/proposals', authenticate, proposeRoomSwap);
 router.post('/tenant/room-changes/:requestId/response', authenticate, respondRoomSwap);
 router.get('/owner/activity', authenticate, listAuditLogs);
+// Public endpoints that work across PGs by design run as the system; each
+// validates its own input (slug-only lookups, verified phone codes, booking refs).
+router.get('/sites', systemRoute('directory of PG resident sites (name and place only)', listPgSites));
+router.get('/sites/:slug', systemRoute('resident sites of unpublished PGs still resolve', getPgSite));
 router.get('/properties', optionalAuthenticate, listProperties);
 router.get('/search', optionalAuthenticate, semanticSearchLimiter, searchPropertiesSemantic);
-router.get('/bookings/mine', listGuestBookings);
-router.post('/bookings', optionalAuthenticate, createBookingRequest);
-router.post('/bookings/:bookingRef/cancel', cancelBookingRequest);
-router.get('/bookings/:bookingRef/status', getPublicBookingStatus);
+router.get('/bookings/mine', systemRoute('guest booking lookup by phone', listGuestBookings));
+router.post('/bookings', optionalAuthenticate, systemRoute('a verified guest holds a bed in any published PG', createBookingRequest));
+router.post('/bookings/:bookingRef/cancel', systemRoute('guest cancels their own booking', cancelBookingRequest));
+router.get('/bookings/:bookingRef/status', systemRoute('guest booking status by reference and phone', getPublicBookingStatus));
 router.get('/owner/properties', authenticate, listOwnerProperties);
 router.post('/owner/properties', authenticate, createProperty);
 router.patch('/owner/properties/:propertyId', authenticate, updateProperty);

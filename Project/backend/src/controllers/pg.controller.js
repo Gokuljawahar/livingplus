@@ -16,6 +16,8 @@ import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
 import { minSemanticScore, scheduleSearchIndex, semanticScores, semanticSearchEnabled } from '../services/semantic-search.js';
 import { bookingRequestBody, paymentClaimBody, paymentClaimReviewBody, rentEntryBody, rentPaymentBody } from '../validation/pg.schemas.js';
 import { logger } from '../utils/logger.js';
+import { asSystem } from '../db/context.js';
+import { guestPhoneFrom } from '../utils/guest-token.js';
 import { isBloodGroup, isGenderPolicy, isKycType, isValidUpiId, LIMITS, MESSAGES } from '@livingplus/shared';
 import { cancelBookingBody, checkOutTenantBody, createMaintenanceTicketBody, createOwnerExpenseBody, createPropertyBody, createPropertyStaffBody, createRoomBody, createTenantTicketBody, markDepositRefundedBody, proposeElectricityBillBody, sendRentRemindersBody, updateBedStatusBody, updateBookingStatusBody, updateMaintenanceStatusBody, updatePropertyBody, updateResidentProfileBody, updateTenantProfileBody } from '../validation/request.schemas.js';
 function phoneVariants(phone) {
@@ -90,8 +92,6 @@ export async function canManageProperty(req, propertyId, roles = ['OWNER', 'WARD
     const scopedPropertyId = requestPropertyId(req);
     if ((scopedPropertyId && scopedPropertyId !== propertyId) || (user.propertyId && user.propertyId !== propertyId))
         return false;
-    if (user.role === 'SUPER_ADMIN')
-        return true;
     const access = await db.pGPropertyAccess.findFirst({
         where: { propertyId, userId: user.id, role: { in: roles } },
         select: { id: true }
@@ -105,12 +105,6 @@ async function accessiblePropertyIds(req, roles = ['OWNER', 'WARDEN']) {
     const scopedPropertyId = requestPropertyId(req);
     if (user.propertyId && scopedPropertyId && user.propertyId !== scopedPropertyId)
         return [];
-    if (user.role === 'SUPER_ADMIN') {
-        if (scopedPropertyId)
-            return [scopedPropertyId];
-        const properties = await db.pGProperty.findMany({ select: { id: true } });
-        return properties.map((property) => property.id);
-    }
     const access = await db.pGPropertyAccess.findMany({
         where: { userId: user.id, role: { in: roles } },
         select: { propertyId: true }
@@ -123,6 +117,9 @@ async function accessiblePropertyIds(req, roles = ['OWNER', 'WARDEN']) {
     return propertyIds;
 }
 async function releaseExpiredBookingHolds() {
+    return asSystem('expire stale bed holds in every PG', () => releaseExpiredBookingHoldsNow());
+}
+async function releaseExpiredBookingHoldsNow() {
     const expiredBookings = await db.pGBooking.findMany({
         where: { status: 'PENDING', lockExpiresAt: { lte: new Date() } },
         select: { id: true, bedId: true }
@@ -181,6 +178,46 @@ export const searchPropertiesSemantic = async (req, res) => {
     catch (error) {
         logger.warn({ err: error }, 'Semantic search failed; client falls back to keyword search');
         res.json({ semantic: false, results: [] });
+    }
+};
+const SITE_SELECT = { slug: true, name: true, locality: true, city: true };
+/** Public directory of PG resident sites (/stay/<slug>): name and place only. */
+export const listPgSites = async (req, res) => {
+    const search = String(req.query.search || '').trim().slice(0, 80);
+    try {
+        const sites = await db.pGProperty.findMany({
+            where: {
+                slug: { not: null },
+                ...(search ? {
+                    OR: [
+                        { name: { contains: search, mode: 'insensitive' } },
+                        { locality: { contains: search, mode: 'insensitive' } },
+                        { city: { contains: search, mode: 'insensitive' } }
+                    ]
+                } : {})
+            },
+            select: SITE_SELECT,
+            orderBy: { name: 'asc' },
+            take: 50
+        });
+        res.json(sites);
+    }
+    catch (error) {
+        logger.error({ err: error }, 'PG site list error');
+        res.status(500).json({ message: 'Failed to list PG sites' });
+    }
+};
+/** One PG resident site by slug, for the resident site header. */
+export const getPgSite = async (req, res) => {
+    try {
+        const site = await db.pGProperty.findFirst({ where: { slug: String(req.params.slug).toLowerCase() }, select: SITE_SELECT });
+        if (!site)
+            return res.status(404).json({ message: 'PG site not found' });
+        res.json(site);
+    }
+    catch (error) {
+        logger.error({ err: error }, 'PG site lookup error');
+        res.status(500).json({ message: 'Failed to load PG site' });
     }
 };
 export const listProperties = async (req, res) => {
@@ -252,7 +289,7 @@ export const createProperty = async (req, res) => {
     const { name, description, address, locality, contactPhone, upiId, landmark, city, pincode, latitude, longitude, genderPolicy, amenities, houseRules, photoUrls } = input;
     if (!user)
         return res.status(401).json({ message: 'Unauthorized' });
-    if (!['SUPER_ADMIN', 'PG_OWNER'].includes(user.role)) {
+    if (user.role !== 'PG_OWNER') {
         return res.status(403).json({ message: 'Only property owners can add properties' });
     }
     if (!name?.trim() || !address?.trim() || !locality?.trim()) {
@@ -262,7 +299,9 @@ export const createProperty = async (req, res) => {
         return res.status(400).json({ message: MESSAGES.upiId });
     }
     try {
-        const property = await db.pGProperty.create({
+        // Provisioning a new workspace: slugs are unique across every PG, and the
+        // creator becomes its owner (always the signed-in owner, never input).
+        const property = await asSystem('an owner provisions a new PG workspace', async () => db.pGProperty.create({
             data: {
                 slug: await createUniquePgSlug(db, name),
                 name: name.trim(),
@@ -282,7 +321,7 @@ export const createProperty = async (req, res) => {
                 photoUrls: Array.isArray(photoUrls) ? photoUrls : [],
                 access: { create: { userId: user.id, role: 'OWNER' } }
             }
-        });
+        }));
         logAudit(property.id, user.id, 'PROPERTY_CREATED', 'PGProperty', property.id, property.name);
         scheduleSearchIndex(property.id);
         res.status(201).json(property);
@@ -547,17 +586,19 @@ export const cancelBookingRequest = async (req, res) => {
     const input = parseBody(cancelBookingBody, req, res, INVALID_REQUEST);
     if (!input)
         return;
-    const phone = String(input.phone || '').replace(/\D/g, '');
+    // The phone comes from the verified guest session, never from the request body.
+    const phone = guestPhoneFrom(req);
     if (!phone)
-        return res.status(400).json({ message: 'Phone number is required' });
+        return res.status(401).json({ code: 'GUEST_VERIFICATION_REQUIRED', message: 'Verify your phone number to manage your requests' });
     try {
         const booking = await db.pGBooking.findUnique({ where: { bookingRef: String(req.params.bookingRef) } });
         if (!booking)
             return res.status(404).json({ message: 'Booking request not found' });
         if (requestPropertyId(req) && booking.propertyId !== requestPropertyId(req))
             return res.status(404).json({ message: 'Booking request not found' });
-        if (booking.phone.replace(/\D/g, '') !== phone)
-            return res.status(403).json({ message: 'Phone number does not match this booking' });
+        // Same answer as a missing booking: never reveal requests made from other numbers.
+        if (booking.phone.replace(/\D/g, '').slice(-10) !== phone)
+            return res.status(404).json({ message: 'Booking request not found' });
         if (booking.status !== 'PENDING')
             return res.status(409).json({ message: 'Only pending requests can be cancelled' });
         await db.$transaction(async (tx) => {
@@ -606,9 +647,13 @@ export const getPublicBookingStatus = async (req, res) => {
     }
 };
 export const listGuestBookings = async (req, res) => {
-    const where = buildGuestBookingWhere(req.query.phone, requestPropertyId(req));
+    // Only the number proven by the guest's code; any ?phone= parameter is ignored.
+    const phone = guestPhoneFrom(req);
+    if (!phone)
+        return res.status(401).json({ code: 'GUEST_VERIFICATION_REQUIRED', message: 'Verify your phone number to see your requests' });
+    const where = buildGuestBookingWhere(phone, requestPropertyId(req));
     if (!where)
-        return res.status(400).json({ message: 'A valid phone number is required' });
+        return res.status(401).json({ code: 'GUEST_VERIFICATION_REQUIRED', message: 'Verify your phone number to see your requests' });
     try {
         await releaseExpiredBookingHolds();
         const bookings = await db.pGBooking.findMany({
@@ -1481,7 +1526,7 @@ export const getOwnerSummary = async (req, res) => {
             return res.status(401).json({ message: 'Unauthorized' });
         const propertyIds = await accessiblePropertyIds(req);
         const ownerPropertyIds = await accessiblePropertyIds(req, ['OWNER']);
-        const canManageStaff = user.role === 'SUPER_ADMIN' || user.role === 'PG_OWNER' || ownerPropertyIds.length > 0;
+        const canManageStaff = user.role === 'PG_OWNER' || ownerPropertyIds.length > 0;
         const propertyId = req.query.propertyId ? String(req.query.propertyId) : undefined;
         if (propertyId && !propertyIds.includes(propertyId)) {
             return res.status(403).json({ message: 'You do not have access to this property' });

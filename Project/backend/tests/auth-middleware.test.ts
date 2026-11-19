@@ -59,9 +59,9 @@ describe('authenticate PG host scoping', () => {
     assert.equal(nextCalled, true);
   });
 
-  it('lets a super admin cross property hosts', () => {
+  it('lets no role cross property hosts (there is no platform super admin)', () => {
     const { nextCalled } = runMiddleware('property-b', signToken('SUPER_ADMIN', 'property-a'));
-    assert.equal(nextCalled, true);
+    assert.equal(nextCalled, false);
   });
 
   it('requires a bearer token', () => {

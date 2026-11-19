@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/auth';
 import api from '../api/axios';
 import { LogIn, Loader2, X, Phone, MessageCircle } from 'lucide-react';
 import PasswordInput from '../components/PasswordInput';
 import logo from '../assets/logo_bg_black.png';
-import { resolveAppHost } from '../utils/pg-host';
+import { areaOf, ROUTES } from '../utils/app-areas';
 import { apiErrorMessage } from '../utils/api-error';
 import { loginSchema, type LoginForm } from '../validation/forms';
 import type { User } from '../context/auth';
@@ -18,6 +18,13 @@ import {
   signInWithGoogle,
   type FirebaseWebConfig
 } from '../utils/google-sign-in';
+
+
+/** Only return to a page inside the area this account belongs to. */
+function safeRedirect(raw: string | null, home: string): string {
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return home;
+  return areaOf(raw) === areaOf(home) ? raw : home;
+}
 
 export default function LoginPage() {
   const { register, control, handleSubmit, setError, clearErrors, formState: { errors, isSubmitting: loading } } = useForm<LoginForm>({
@@ -44,18 +51,13 @@ export default function LoginPage() {
   }, []);
 
   const finishLogin = (token: string, loggedUser: User) => {
+    if (loggedUser?.role === 'PG_TENANT') {
+      setError('root.server', { message: 'Residents sign in on their PG\'s resident site with a phone code.' });
+      return;
+    }
     login(token, loggedUser);
-
-    const searchParams = new URLSearchParams(location.search);
-    const host = resolveAppHost();
-    const defaultUrl = loggedUser?.role === 'SUPER_ADMIN'
-      ? '/pg/operators'
-      : loggedUser?.role === 'PG_TENANT'
-        ? '/resident'
-        : host.kind === 'property' ? '/owner/manage' : '/pg/manage';
-    const redirectUrl = searchParams.get('redirect') || defaultUrl;
-
-    navigate(redirectUrl, { replace: true });
+    const home = ROUTES.ownerHome;
+    navigate(safeRedirect(new URLSearchParams(location.search).get('redirect'), home), { replace: true });
   };
 
   const onGoogleSignIn = async () => {
@@ -86,8 +88,8 @@ export default function LoginPage() {
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <img src={logo} alt="Living Plus" className="h-36 sm:h-24 w-auto mx-auto mb-4 object-contain" />
-          <h1 className="text-2xl font-bold text-slate-900">Welcome Back</h1>
-          <p className="text-slate-500 mt-2">Sign in to your PG operations workspace</p>
+          <h1 className="text-2xl font-bold text-slate-900">Owner sign in</h1>
+          <p className="text-slate-500 mt-2">Sign in to run your PG: bookings, residents, rent and more</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8">
@@ -190,8 +192,15 @@ export default function LoginPage() {
           )}
 
           <div className="mt-8 pt-6 border-t border-slate-100 text-center">
+              <p className="mb-3 text-sm text-slate-600">
+                New to LivingPlus? <Link to={ROUTES.ownerRegister} className="text-[#02224B] font-bold hover:underline">Register your PG</Link>
+              </p>
             <p className="text-xs text-slate-500 font-medium">
               Need help? <button onClick={() => setShowSupportModal(true)} className="text-[#02224B] font-bold hover:underline">Contact Support</button>
+            </p>
+            <p className="mt-3 text-xs text-slate-500">
+              Looking for a PG? <a href={ROUTES.guestHome} className="font-bold text-[#02224B] hover:underline">Browse PGs</a>
+              {' · '}Resident? <a href={ROUTES.residentFinder} className="font-bold text-[#02224B] hover:underline">Sign in on your PG's site</a>
             </p>
           </div>
         </div>
