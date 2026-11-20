@@ -7,7 +7,7 @@ import { featureFlags, notifyWhatsAppSafely } from '../../services/pg-notificati
 import { consumePhoneToken } from '../pg-auth.controller.js';
 import { logAudit } from '../../services/pg-audit.js';
 import { firebaseWebConfig, googleSignInEnabled, otpProvider } from '../../services/phone-verification.js';
-import { minSemanticScore, semanticScores, semanticSearchEnabled } from '../../services/semantic-search.js';
+import { minSemanticScore, semanticScores, semanticSearchEnabled, type SemanticSearchDeps } from '../../services/semantic-search.js';
 import { buildGuestBookingWhere, isPlaceholderResidentName } from '../../utils/guest-bookings.js';
 import { guestPhoneFrom } from '../../utils/guest-token.js';
 import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../../utils/resident-search.js';
@@ -36,28 +36,32 @@ export const getPublicConfig = async (_req: Request, res: Response): Promise<any
  * semantic: false (and no results) when semantic search is off or failing,
  * so the client simply keeps its keyword search.
  */
-export const searchPropertiesSemantic = async (req: Request, res: Response): Promise<any> => {
-  const query = String(req.query.q || '').trim().slice(0, 200);
-  if (query.length < 2 || !semanticSearchEnabled()) return res.json({ semantic: false, results: [] });
-  try {
-    const hiddenPropertyIds = await ownStayPropertyIds(req);
-    const where = {
-      ...ownPropertyExclusionWhere(hiddenPropertyIds),
-      ...(requestPropertyId(req) ? { id: requestPropertyId(req) } : {})
-    };
-    const scores = await semanticScores(query, where);
-    const minimum = minSemanticScore();
-    const results = [...scores.entries()]
-      .filter(([, score]) => score >= minimum)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 50)
-      .map(([propertyId, score]) => ({ propertyId, score: Math.round(score * 1000) / 1000 }));
-    res.json({ semantic: true, results });
-  } catch (error) {
-    logger.warn({ err: error }, 'Semantic search failed; client falls back to keyword search');
-    res.json({ semantic: false, results: [] });
-  }
-};
+export function createSearchPropertiesSemanticHandler(deps: SemanticSearchDeps = {}) {
+  return async (req: Request, res: Response): Promise<any> => {
+    const query = String(req.query.q || '').trim().slice(0, 200);
+    if (query.length < 2 || !semanticSearchEnabled()) return res.json({ semantic: false, results: [] });
+    try {
+      const hiddenPropertyIds = await ownStayPropertyIds(req);
+      const where = {
+        ...ownPropertyExclusionWhere(hiddenPropertyIds),
+        ...(requestPropertyId(req) ? { id: requestPropertyId(req) } : {})
+      };
+      const scores = await semanticScores(query, where, deps);
+      const minimum = minSemanticScore();
+      const results = [...scores.entries()]
+        .filter(([, score]) => score >= minimum)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 50)
+        .map(([propertyId, score]) => ({ propertyId, score: Math.round(score * 1000) / 1000 }));
+      res.json({ semantic: true, results });
+    } catch (error) {
+      logger.warn({ err: error }, 'Semantic search failed; client falls back to keyword search');
+      res.json({ semantic: false, results: [] });
+    }
+  };
+}
+
+export const searchPropertiesSemantic = createSearchPropertiesSemanticHandler();
 
 /** Public directory of PG resident sites (/stay/<slug>): name and place only. */
 export const listPgSites = async (req: Request, res: Response): Promise<any> => {

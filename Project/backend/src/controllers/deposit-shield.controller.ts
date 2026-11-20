@@ -25,10 +25,8 @@ const reviewSchema = z.object({
 });
 export type DepositReview = { changes: z.infer<typeof reviewSchema>['changes']; summary: string; suggestedTotal: number; photos: { moveIn: number; moveOut: number } };
 
-let reviewOverride: ((input: { moveInNotes: string; moveOutNotes: string; photos: number }) => Promise<unknown>) | null = null;
-/** Test hook: replace the Gemini call (null restores). */
-export function setDepositReviewerForTests(run: typeof reviewOverride): void {
-  reviewOverride = run;
+export interface DepositReviewDeps {
+  review?: (input: { moveInNotes: string; moveOutNotes: string; photos: number }) => Promise<unknown>;
 }
 
 /** Cleans the model's list: wear is never charged, charges are whole rupees within the deposit. */
@@ -61,44 +59,48 @@ async function photoParts(keys: string[]): Promise<Array<Record<string, unknown>
 }
 
 /** Owner: compare the latest move-in and move-out records for one resident. */
-export const reviewDeposit = async (req: Request, res: Response): Promise<any> => {
-  try {
-    const tenant = await db.pGTenant.findUnique({ where: { id: String(req.params.tenantId) }, select: { id: true, propertyId: true, depositReceived: true } });
-    if (!tenant || !await canManageProperty(req, tenant.propertyId, [...MONEY_ROLES])) return res.status(404).json({ message: 'Resident not found' });
-    const [moveIn, moveOut] = await Promise.all(['MOVE_IN', 'MOVE_OUT'].map((kind) => db.pGConditionReport.findFirst({ where: { tenantId: tenant.id, kind }, orderBy: { createdAt: 'desc' } })));
-    if (!moveIn || !moveOut) {
-      return res.status(409).json({ code: 'NEED_BOTH_RECORDS', message: `Add a ${!moveIn ? 'move-in' : 'move-out'} condition record with photos first, then compare.` });
+export function createDepositReviewer(deps: DepositReviewDeps = {}) {
+  return async (req: Request, res: Response): Promise<any> => {
+    try {
+      const tenant = await db.pGTenant.findUnique({ where: { id: String(req.params.tenantId) }, select: { id: true, propertyId: true, depositReceived: true } });
+      if (!tenant || !await canManageProperty(req, tenant.propertyId, [...MONEY_ROLES])) return res.status(404).json({ message: 'Resident not found' });
+      const [moveIn, moveOut] = await Promise.all(['MOVE_IN', 'MOVE_OUT'].map((kind) => db.pGConditionReport.findFirst({ where: { tenantId: tenant.id, kind }, orderBy: { createdAt: 'desc' } })));
+      if (!moveIn || !moveOut) {
+        return res.status(409).json({ code: 'NEED_BOTH_RECORDS', message: `Add a ${!moveIn ? 'move-in' : 'move-out'} condition record with photos first, then compare.` });
+      }
+      const moveInPhotos = (moveIn.photoUrls ?? []).slice(0, MAX_PHOTOS_PER_SIDE);
+      const moveOutPhotos = (moveOut.photoUrls ?? []).slice(0, MAX_PHOTOS_PER_SIDE);
+      if (!deps.review && !aiEnabled()) return res.status(503).json({ code: 'AI_UNAVAILABLE', message: 'Photo comparison is not available right now. Enter deductions yourself.' });
+      let raw: unknown;
+      if (deps.review) {
+        raw = await deps.review({ moveInNotes: moveIn.notes || '', moveOutNotes: moveOut.notes || '', photos: moveInPhotos.length + moveOutPhotos.length });
+      } else {
+        const [beforeParts, afterParts] = await Promise.all([photoParts(moveInPhotos), photoParts(moveOutPhotos)]);
+        raw = await generateStructured({
+          system: [
+            'You help a paying-guest (PG) owner in India settle a resident\'s security deposit fairly at move-out.',
+            'Compare the move-in photos and notes with the move-out photos and notes of the same room. List only real differences.',
+            'Normal wear and tear (faded paint, small scuffs, worn mattress, loose fittings from age) is kind WEAR and costs 0.',
+            'For damage, missing items or cleaning beyond normal, suggest a modest, typical Chennai repair or cleaning cost in rupees.',
+            'If the photos are unclear or do not show the same area, say so in the summary and do not guess.',
+            'Never mention or judge the resident as a person.'
+          ].join(' '),
+          parts: [
+            { text: `Move-in notes: ${moveIn.notes || 'none'}\nMove-in photos follow (${beforeParts.length}).` },
+            ...beforeParts,
+            { text: `Move-out notes: ${moveOut.notes || 'none'}\nMove-out photos follow (${afterParts.length}).` },
+            ...afterParts
+          ],
+          schema: reviewSchema
+        });
+      }
+      const review: DepositReview = { ...settleReview(reviewSchema.parse(raw), tenant.depositReceived), photos: { moveIn: moveInPhotos.length, moveOut: moveOutPhotos.length } };
+      res.json(review);
+    } catch (error) {
+      logger.warn({ err: error }, 'Deposit review failed');
+      res.status(502).json({ code: 'AI_FAILED', message: 'Could not compare the photos just now. Try again, or enter deductions yourself.' });
     }
-    const moveInPhotos = (moveIn.photoUrls ?? []).slice(0, MAX_PHOTOS_PER_SIDE);
-    const moveOutPhotos = (moveOut.photoUrls ?? []).slice(0, MAX_PHOTOS_PER_SIDE);
-    if (!reviewOverride && !aiEnabled()) return res.status(503).json({ code: 'AI_UNAVAILABLE', message: 'Photo comparison is not available right now. Enter deductions yourself.' });
-    let raw: unknown;
-    if (reviewOverride) {
-      raw = await reviewOverride({ moveInNotes: moveIn.notes || '', moveOutNotes: moveOut.notes || '', photos: moveInPhotos.length + moveOutPhotos.length });
-    } else {
-      const [beforeParts, afterParts] = await Promise.all([photoParts(moveInPhotos), photoParts(moveOutPhotos)]);
-      raw = await generateStructured({
-        system: [
-          'You help a paying-guest (PG) owner in India settle a resident\'s security deposit fairly at move-out.',
-          'Compare the move-in photos and notes with the move-out photos and notes of the same room. List only real differences.',
-          'Normal wear and tear (faded paint, small scuffs, worn mattress, loose fittings from age) is kind WEAR and costs 0.',
-          'For damage, missing items or cleaning beyond normal, suggest a modest, typical Chennai repair or cleaning cost in rupees.',
-          'If the photos are unclear or do not show the same area, say so in the summary and do not guess.',
-          'Never mention or judge the resident as a person.'
-        ].join(' '),
-        parts: [
-          { text: `Move-in notes: ${moveIn.notes || 'none'}\nMove-in photos follow (${beforeParts.length}).` },
-          ...beforeParts,
-          { text: `Move-out notes: ${moveOut.notes || 'none'}\nMove-out photos follow (${afterParts.length}).` },
-          ...afterParts
-        ],
-        schema: reviewSchema
-      });
-    }
-    const review: DepositReview = { ...settleReview(reviewSchema.parse(raw), tenant.depositReceived), photos: { moveIn: moveInPhotos.length, moveOut: moveOutPhotos.length } };
-    res.json(review);
-  } catch (error) {
-    logger.warn({ err: error }, 'Deposit review failed');
-    res.status(502).json({ code: 'AI_FAILED', message: 'Could not compare the photos just now. Try again, or enter deductions yourself.' });
-  }
-};
+  };
+}
+
+export const reviewDeposit = createDepositReviewer();

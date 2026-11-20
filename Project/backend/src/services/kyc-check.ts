@@ -37,14 +37,11 @@ export interface KycCheck {
   flags: string[];
 }
 
-let override: ((data: Buffer, contentType: string) => Promise<KycExtraction>) | null = null;
-/** Test hook: replace the model call (null restores). */
-export function setKycReaderForTests(reader: typeof override): void {
-  override = reader;
+export interface KycCheckDeps {
+  readDocument?: (data: Buffer, contentType: string) => Promise<KycExtraction>;
 }
 
-async function readDocument(data: Buffer, contentType: string): Promise<KycExtraction> {
-  if (override) return override(data, contentType);
+async function defaultReadDocument(data: Buffer, contentType: string): Promise<KycExtraction> {
   if (!aiEnabled()) throw new Error('AI_ORCHESTRATOR_NOT_CONFIGURED');
   return generateStructured({
     system: 'You read identity documents for a paying-guest housing platform. Answer with one JSON object only.',
@@ -65,10 +62,14 @@ export function compareNames(declared: string, printed: string): KycCheck['nameM
   return shared > 0 ? 'partial' : 'mismatch';
 }
 
-export async function checkKycDocument(input: { fileKey: string; declaredType: string | null; residentName: string }): Promise<KycCheck> {
+export async function checkKycDocument(
+  input: { fileKey: string; declaredType: string | null; residentName: string },
+  deps: KycCheckDeps = {}
+): Promise<KycCheck> {
   const { data, contentType } = await readStoredFile(input.fileKey);
   if (!data.length || data.length > MAX_KYC_BYTES) throw new Error('KYC_FILE_INVALID');
-  const found = await readDocument(data, contentType);
+  const read = deps.readDocument ?? defaultReadDocument;
+  const found = await read(data, contentType);
   const nameMatch = compareNames(input.residentName, found.nameOnDocument || '');
   const typeMatch = input.declaredType ? found.documentType === input.declaredType : null;
   const flags = [

@@ -931,26 +931,27 @@ describe('owner insights: PG pulse and kitchen forecast', () => {
     assert.ok(rules.BREAKFAST.plates < 6, 'late risers skip breakfast');
     assert.ok(rules.LUNCH.plates >= 2, 'booked lunch orders are always made');
 
-    insights.setKitchenForecasterForTests(async () => ({
-      BREAKFAST: { plates: 99, why: 'too many' }, LUNCH: { plates: -3, why: 'too few' }, DINNER: { plates: 1, why: 'ok' }, tip: 'Cook in batches.'
-    }));
+    const getForecast = insights.createKitchenForecastHandler({
+      forecast: async () => ({
+        BREAKFAST: { plates: 99, why: 'too many' }, LUNCH: { plates: -3, why: 'too few' }, DINNER: { plates: 1, why: 'ok' }, tip: 'Cook in batches.'
+      })
+    });
+    const resident = await prisma.pGTenant.findFirst({ where: { propertyId: ids.prop.id, status: 'ACTIVE' } });
+    const roomA = await prisma.pGRoom.update({ where: { id: ids.roomB.id }, data: { foodCharge: 1500 } });
+    const date = '2026-12-07';
+    await prisma.pGServiceOrder.create({ data: { propertyId: ids.prop.id, tenantId: resident!.id, type: 'MEAL', forDate: new Date(`${date}T00:00:00.000Z`), slot: 'LUNCH', quantity: 2, unitPrice: 90 } });
     try {
-      const resident = await prisma.pGTenant.findFirst({ where: { propertyId: ids.prop.id, status: 'ACTIVE' } });
-      const roomA = await prisma.pGRoom.update({ where: { id: ids.roomB.id }, data: { foodCharge: 1500 } });
-      const date = '2026-12-07';
-      await prisma.pGServiceOrder.create({ data: { propertyId: ids.prop.id, tenantId: resident!.id, type: 'MEAL', forDate: new Date(`${date}T00:00:00.000Z`), slot: 'LUNCH', quantity: 2, unitPrice: 90 } });
       const res: any = { statusCode: 200, status(code: number) { this.statusCode = code; return this; }, json(body: unknown) { this.body = body; return this; } };
-      await insights.getKitchenForecast({ ...userReq(ids.owner), query: { propertyId: ids.prop.id, date } } as any, res);
+      await getForecast({ ...userReq(ids.owner), query: { propertyId: ids.prop.id, date } } as any, res);
       assert.equal(res.statusCode, 200);
       const byMeal = Object.fromEntries(res.body.meals.map((meal: any) => [meal.meal, meal]));
       assert.equal(byMeal.BREAKFAST.plates, byMeal.BREAKFAST.cookingForAll, 'never above everyone on the plan');
       assert.equal(byMeal.LUNCH.plates, 2, 'never below the booked orders');
       assert.equal(res.body.ai, true);
       assert.ok(!JSON.stringify(res.body).includes('Spec Tenant'), 'plate counts only, no names');
+    } finally {
       await prisma.pGServiceOrder.deleteMany({ where: { propertyId: ids.prop.id, forDate: new Date(`${date}T00:00:00.000Z`) } });
       await prisma.pGRoom.update({ where: { id: roomA.id }, data: { foodCharge: 0 } });
-    } finally {
-      insights.setKitchenForecasterForTests(null);
     }
   });
 });
@@ -973,26 +974,27 @@ describe('Deposit Shield: settle deposits from condition photos', () => {
 
     const respond = () => ({ statusCode: 200, body: undefined as any, status(code: number) { this.statusCode = code; return this; }, json(body: unknown) { this.body = body; return this; } });
     await prisma.pGTenant.update({ where: { id: ids.tenant.id }, data: { depositReceived: 3000 } });
-    shield.setDepositReviewerForTests(async () => ({ changes: [{ item: 'Desk lamp', change: 'Missing', kind: 'MISSING', suggested: 350 }], summary: 'The desk lamp is missing.' }));
+    const reviewDeposit = shield.createDepositReviewer({
+      review: async () => ({ changes: [{ item: 'Desk lamp', change: 'Missing', kind: 'MISSING', suggested: 350 }], summary: 'The desk lamp is missing.' })
+    });
     try {
       const early = respond();
-      await shield.reviewDeposit({ ...userReq(ids.owner), params: { tenantId: ids.tenant.id } } as any, early as any);
+      await reviewDeposit({ ...userReq(ids.owner), params: { tenantId: ids.tenant.id } } as any, early as any);
       assert.equal(early.statusCode, 409);
       assert.match(early.body.message, /move-in/);
 
       const moveIn = await prisma.pGConditionReport.create({ data: { propertyId: ids.prop.id, tenantId: ids.tenant.id, kind: 'MOVE_IN', notes: 'Lamp on the desk', photoUrls: [] } });
       const moveOut = await prisma.pGConditionReport.create({ data: { propertyId: ids.prop.id, tenantId: ids.tenant.id, kind: 'MOVE_OUT', notes: 'No lamp', photoUrls: [] } });
       const res = respond();
-      await shield.reviewDeposit({ ...userReq(ids.owner), params: { tenantId: ids.tenant.id } } as any, res as any);
+      await reviewDeposit({ ...userReq(ids.owner), params: { tenantId: ids.tenant.id } } as any, res as any);
       assert.equal(res.statusCode, 200);
       assert.equal(res.body.suggestedTotal, 350);
 
       const outsider = respond();
-      await shield.reviewDeposit({ ...userReq(ids.tenantUser), params: { tenantId: ids.tenant.id } } as any, outsider as any);
+      await reviewDeposit({ ...userReq(ids.tenantUser), params: { tenantId: ids.tenant.id } } as any, outsider as any);
       assert.equal(outsider.statusCode, 404, 'residents cannot run it on themselves');
       await prisma.pGConditionReport.deleteMany({ where: { id: { in: [moveIn.id, moveOut.id] } } });
     } finally {
-      shield.setDepositReviewerForTests(null);
       await prisma.pGTenant.update({ where: { id: ids.tenant.id }, data: { depositReceived: 0 } });
     }
   });
@@ -1166,15 +1168,17 @@ describe('file storage drivers', () => {
     const storage = await import('../src/services/storage.js');
     const saved: Record<string, { size: number; contentType: string }> = {};
     const signed: string[] = [];
-    storage.setGcsBucketForTests({
-      file(name: string) {
-        return {
-          async save(data: Buffer, options: { contentType: string }) { saved[name] = { size: data.length, contentType: options.contentType }; },
-          async getSignedUrl(options: { action: string; contentType?: string }) {
-            signed.push(`${options.action}:${name}`);
-            return [`https://storage.googleapis.com/test-bucket/${name}?sig=${signed.length}`] as [string];
-          }
-        };
+    const gcs = storage.createStorageService({
+      gcsBucket: {
+        file(name: string) {
+          return {
+            async save(data: Buffer, options: { contentType: string }) { saved[name] = { size: data.length, contentType: options.contentType }; },
+            async getSignedUrl(options: { action: string; contentType?: string }) {
+              signed.push(`${options.action}:${name}`);
+              return [`https://storage.googleapis.com/test-bucket/${name}?sig=${signed.length}`] as [string];
+            }
+          };
+        }
       }
     });
     const keep = process.env.UPLOAD_STORAGE;
@@ -1182,21 +1186,20 @@ describe('file storage drivers', () => {
     try {
       const key = storage.newFileKey('webp');
       assert.match(key, /^uploads\/\d+-[0-9a-f-]{36}\.webp$/);
-      await storage.putFile(key, Buffer.from('img'), 'image/webp');
+      await gcs.putFile(key, Buffer.from('img'), 'image/webp');
       assert.deepEqual(saved[key], { size: 3, contentType: 'image/webp' });
 
       const req = { protocol: 'http', get: () => 'localhost' } as any;
-      const first = await storage.viewUrl(req, key);
-      const second = await storage.viewUrl(req, key);
+      const first = await gcs.viewUrl(req, key);
+      const second = await gcs.viewUrl(req, key);
       assert.equal(first, second, 'signed URLs are reused while fresh');
       assert.deepEqual(signed, [`read:${key}`]);
 
-      const uploadUrl = await storage.directUploadUrl('uploads/direct.pdf', 'application/pdf');
+      const uploadUrl = await gcs.directUploadUrl('uploads/direct.pdf', 'application/pdf');
       assert.match(uploadUrl, /storage\.googleapis\.com/);
       assert.equal(signed[1], 'write:uploads/direct.pdf');
     } finally {
       process.env.UPLOAD_STORAGE = keep;
-      storage.setGcsBucketForTests(null);
     }
   });
 
@@ -1364,16 +1367,15 @@ describe('Firebase phone verification (OTP_PROVIDER=firebase)', () => {
     auth = await import('../src/controllers/pg-auth.controller.js');
     phoneVerification = await import('../src/services/phone-verification.js');
     process.env.OTP_PROVIDER = 'firebase';
-    phoneVerification.setFirebaseVerifierForTests(fakeVerifier);
   });
   after(() => {
     delete process.env.OTP_PROVIDER;
-    phoneVerification.setFirebaseVerifierForTests(null);
   });
 
-  const verify = async (body: any, propertyId?: string) => {
+  const verify = async (body: any, propertyId?: string, useDefaultVerifier = false) => {
     const res = respond();
-    await auth.verifyOtp({ body, ...(propertyId ? { pgPropertyId: propertyId } : {}) } as any, res as any);
+    const handler = useDefaultVerifier ? auth.verifyOtp : auth.createVerifyOtpHandler({ verifyToken: fakeVerifier });
+    await handler({ body, ...(propertyId ? { pgPropertyId: propertyId } : {}) } as any, res as any);
     return res;
   };
 
@@ -1420,14 +1422,12 @@ describe('Firebase phone verification (OTP_PROVIDER=firebase)', () => {
   });
 
   it('reports a missing Firebase project as unavailable, not as a bad code', async () => {
-    phoneVerification.setFirebaseVerifierForTests(null);
     const keep = process.env.FIREBASE_PROJECT_ID;
     delete process.env.FIREBASE_PROJECT_ID;
     try {
-      assert.equal((await verify({ phone: '9811100008', purpose: 'BOOKING', firebaseIdToken: 'tok:919811100008:uid-f' })).statusCode, 503);
+      assert.equal((await verify({ phone: '9811100008', purpose: 'BOOKING', firebaseIdToken: 'tok:919811100008:uid-f' }, undefined, true)).statusCode, 503);
     } finally {
       if (keep !== undefined) process.env.FIREBASE_PROJECT_ID = keep;
-      phoneVerification.setFirebaseVerifierForTests(fakeVerifier);
     }
   });
 
@@ -1471,7 +1471,7 @@ describe('Sign in with Google (ENABLE_GOOGLE_SIGN_IN=true)', () => {
   };
   const signIn = async (firebaseIdToken: string, propertyId?: string) => {
     const res = respond();
-    await auth.googleLogin({ body: { firebaseIdToken }, ...(propertyId ? { pgPropertyId: propertyId } : {}) } as any, res as any);
+    await auth.createGoogleLoginHandler({ verifyToken: fakeVerifier })({ body: { firebaseIdToken }, ...(propertyId ? { pgPropertyId: propertyId } : {}) } as any, res as any);
     return res;
   };
 
@@ -1483,12 +1483,10 @@ describe('Sign in with Google (ENABLE_GOOGLE_SIGN_IN=true)', () => {
     process.env.ADMIN_GOOGLE_EMAILS = ' Founder@Example.com , ops@example.com';
     auth = await import('../src/controllers/pg-auth.controller.js');
     phoneVerification = await import('../src/services/phone-verification.js');
-    phoneVerification.setFirebaseVerifierForTests(fakeVerifier);
     googleOwner = await prisma.user.create({ data: { phone: '9400000004', email: 'Owner.Google@Example.com', password: 'x', name: 'Google Owner', role: 'PG_OWNER' } });
     await prisma.user.create({ data: { phone: '9400000005', email: 'resident.google@example.com', password: 'x', name: 'Google Resident', role: 'PG_TENANT' } });
   });
   after(() => {
-    phoneVerification.setFirebaseVerifierForTests(null);
     for (const key of envKeys) {
       if (keep[key] === undefined) delete process.env[key]; else process.env[key] = keep[key];
     }
@@ -1496,7 +1494,7 @@ describe('Sign in with Google (ENABLE_GOOGLE_SIGN_IN=true)', () => {
 
   const link = async (firebaseIdToken: string, user: any) => {
     const res = respond();
-    await auth.linkGoogle({ body: { firebaseIdToken }, user } as any, res as any);
+    await auth.createLinkGoogleHandler({ verifyToken: fakeVerifier })({ body: { firebaseIdToken }, user } as any, res as any);
     return res;
   };
 
@@ -1596,13 +1594,14 @@ describe('semantic PG search', () => {
     async embedDocuments(texts: string[]) { embedCalls.push(`${purpose}:docs:${texts.length}`); return texts.map(fakeVector); }
   });
 
+  const semanticDeps = { createEmbeddings: async (purpose: any) => fakeEmbeddings(purpose) };
+
   before(async () => {
     search = await import('../src/services/semantic-search.js');
     embeddingsMod = await import('../src/services/ai-embeddings.js');
     process.env.ENABLE_SEMANTIC_SEARCH = 'true';
     process.env.AI_EMBEDDING_MODEL = 'fake:bag-of-words';
     process.env.SEMANTIC_SEARCH_MIN_SCORE = '0.3';
-    embeddingsMod.setEmbeddingsForTests(fakeEmbeddings);
     quietPg = await prisma.pGProperty.create({
       data: {
         name: 'Lotus Nest', address: '9, Rajiv Gandhi Salai', locality: 'Thoraipakkam', city: 'Chennai', genderPolicy: 'ANY',
@@ -1615,7 +1614,6 @@ describe('semantic PG search', () => {
   });
   after(async () => {
     await prisma.pGProperty.update({ where: { id: quietPg.id }, data: { status: 'INACTIVE' } });
-    embeddingsMod.setEmbeddingsForTests(null);
     search.clearSemanticQueryCache();
     for (const key of ['ENABLE_SEMANTIC_SEARCH', 'AI_EMBEDDING_MODEL', 'SEMANTIC_SEARCH_MIN_SCORE']) delete process.env[key];
   });
@@ -1631,11 +1629,11 @@ describe('semantic PG search', () => {
   });
 
   it('indexes listings once and re-embeds only what changed', async () => {
-    const first = await search.indexProperties();
+    const first = await search.indexProperties({}, semanticDeps);
     assert.ok(first.indexed >= 3);
-    assert.deepEqual(await search.indexProperties(), { indexed: 0, skipped: first.indexed + first.skipped });
+    assert.deepEqual(await search.indexProperties({}, semanticDeps), { indexed: 0, skipped: first.indexed + first.skipped });
     await prisma.pGProperty.update({ where: { id: quietPg.id }, data: { description: 'Quiet calm PG near the OMR tech park, pure veg food, study friendly, rooftop garden.' } });
-    const again = await search.indexProperties();
+    const again = await search.indexProperties({}, semanticDeps);
     assert.equal(again.indexed, 1);
   });
 
@@ -1647,9 +1645,10 @@ describe('semantic PG search', () => {
   });
 
   it('ranks listings by meaning through the search endpoint', async () => {
-    const { searchPropertiesSemantic } = await import('../src/controllers/pg.controller.js');
+    const { createSearchPropertiesSemanticHandler } = await import('../src/controllers/pg.controller.js');
+    const searchSemantic = createSearchPropertiesSemanticHandler(semanticDeps);
     const res: any = { status(c: number) { this.statusCode = c; return this; }, json(b: unknown) { this.body = b; return this; } };
-    await searchPropertiesSemantic({ query: { q: 'quiet place near OMR tech park with veg food' }, headers: {}, user: {} } as any, res);
+    await searchSemantic({ query: { q: 'quiet place near OMR tech park with veg food' }, headers: {}, user: {} } as any, res);
     assert.equal(res.body.semantic, true);
     assert.equal(res.body.results[0].propertyId, quietPg.id);
     for (let i = 1; i < res.body.results.length; i += 1) assert.ok(res.body.results[i - 1].score >= res.body.results[i].score);
@@ -1659,7 +1658,7 @@ describe('semantic PG search', () => {
     const backend = await search.searchBackend();
     if (process.env.EXPECT_PGVECTOR === 'true') assert.equal(backend, 'pgvector', 'CI provides pgvector');
     const query = 'quiet calm veg food near OMR tech park';
-    const scores = await search.semanticScores(query);
+    const scores = await search.semanticScores(query, {}, semanticDeps);
     const queryVector = fakeVector(query);
     const stored = await prisma.pGProperty.findMany({ where: { id: { in: [...scores.keys()] } }, select: { id: true, searchEmbedding: true } });
     assert.ok(stored.length >= 3);
@@ -1672,13 +1671,13 @@ describe('semantic PG search', () => {
   it('caches query vectors', async () => {
     search.clearSemanticQueryCache();
     embedCalls.length = 0;
-    await search.semanticScores('veg food near OMR');
-    await search.semanticScores('veg food near OMR');
+    await search.semanticScores('veg food near OMR', {}, semanticDeps);
+    await search.semanticScores('veg food near OMR', {}, semanticDeps);
     assert.deepEqual(embedCalls, ['query:query']);
   });
 
   it('lets the assistant rank structured results by a free-text wish', async () => {
-    const results = await tools.toolCatalogue.search_properties.execute(guestActor, { query: 'calm study friendly PG near OMR tech park, veg food' });
+    const results = await tools.toolCatalogue.search_properties.execute(guestActor, { query: 'calm study friendly PG near OMR tech park, veg food' }, semanticDeps);
     assert.equal(results[0].property_id, quietPg.id);
     assert.ok(results.every((r: any) => typeof r.match_score === 'number'));
   });
@@ -1690,7 +1689,7 @@ describe('semantic PG search', () => {
       const res: any = { status(c: number) { this.statusCode = c; return this; }, json(b: unknown) { this.body = b; return this; } };
       await searchPropertiesSemantic({ query: { q: 'veg food' }, headers: {}, user: {} } as any, res);
       assert.deepEqual(res.body, { semantic: false, results: [] });
-      const results = await tools.toolCatalogue.search_properties.execute(guestActor, { query: 'veg food' });
+      const results = await tools.toolCatalogue.search_properties.execute(guestActor, { query: 'veg food' }, semanticDeps);
       assert.ok(results.length > 0);
       assert.ok(results.every((r: any) => r.match_score === undefined));
     } finally {
@@ -1699,7 +1698,6 @@ describe('semantic PG search', () => {
   });
 
   it('builds Vertex AI embeddings (service account, no key) at the stored vector size', async () => {
-    embeddingsMod.setEmbeddingsForTests(null);
     const keep = { model: process.env.AI_EMBEDDING_MODEL, location: process.env.GOOGLE_CLOUD_LOCATION };
     try {
       process.env.AI_EMBEDDING_MODEL = 'google-vertexai:gemini-embedding-001';
@@ -1715,7 +1713,6 @@ describe('semantic PG search', () => {
   });
 
   it('configures Gemini embeddings per purpose and reports missing providers', async () => {
-    embeddingsMod.setEmbeddingsForTests(null);
     const keep = process.env.AI_EMBEDDING_MODEL;
     try {
       process.env.AI_EMBEDDING_MODEL = 'google-genai:gemini-embedding-001';
@@ -1737,7 +1734,6 @@ describe('semantic PG search', () => {
       await assert.rejects(embeddingsMod.createEmbeddings('query'), /unsupported provider "acme"/);
     } finally {
       process.env.AI_EMBEDDING_MODEL = keep;
-      embeddingsMod.setEmbeddingsForTests(fakeEmbeddings);
     }
   });
 });
@@ -3107,50 +3103,42 @@ describe('VibeCheck roommate matching', () => {
   });
 
   it('judges rooms with the ADK agent when it answers, keeping residents anonymous', async () => {
-    const agent = await import('../src/services/vibe-agent.js');
     let seen = '';
-    agent.setVibeAgentForTests(async (prompt: string) => {
-      seen = prompt;
-      return JSON.stringify({ rooms: { [vibe.room.id]: { score: 92, reasons: ['You both sleep before 11 pm'], differences: [], headline: 'Nearly identical routines' } } });
+    const vibeCheck = vibe.pg.createVibeCheckPropertyHandler({
+      runMatcherText: async (prompt: string) => {
+        seen = prompt;
+        return JSON.stringify({ rooms: { [vibe.room.id]: { score: 92, reasons: ['You both sleep before 11 pm'], differences: [], headline: 'Nearly identical routines' } } });
+      }
     });
-    try {
-      const res = respond();
-      await vibe.pg.vibeCheckProperty({ params: { propertyId: vibe.prop.id }, body: { answers: early } } as any, res as any);
-      assert.equal(res.statusCode, 200);
-      const bed = (res.body.beds as any[]).find((item) => item.bedId === vibe.freeBed.id);
-      assert.equal(bed.score, 92);
-      assert.equal(bed.compared, 1);
-      assert.equal(bed.ai, true);
-      assert.equal(bed.headline, 'Nearly identical routines');
-      const empty = (res.body.beds as any[]).find((item) => item.bedId === vibe.emptyBed.id);
-      assert.equal(empty.score, null, 'empty rooms never reach the agent');
-      assert.equal(empty.ai, false);
-      assert.ok(seen.length > 0, 'the agent saw the prompt');
-      assert.ok(!seen.includes('Kavya') && !seen.includes('9877700001'), 'the prompt carries habits, never names or phones');
-    } finally {
-      agent.setVibeAgentForTests(null);
-    }
+    const res = respond();
+    await vibeCheck({ params: { propertyId: vibe.prop.id }, body: { answers: early } } as any, res as any);
+    assert.equal(res.statusCode, 200);
+    const bed = (res.body.beds as any[]).find((item) => item.bedId === vibe.freeBed.id);
+    assert.equal(bed.score, 92);
+    assert.equal(bed.compared, 1);
+    assert.equal(bed.ai, true);
+    assert.equal(bed.headline, 'Nearly identical routines');
+    const empty = (res.body.beds as any[]).find((item) => item.bedId === vibe.emptyBed.id);
+    assert.equal(empty.score, null, 'empty rooms never reach the agent');
+    assert.equal(empty.ai, false);
+    assert.ok(seen.length > 0, 'the agent saw the prompt');
+    assert.ok(!seen.includes('Kavya') && !seen.includes('9877700001'), 'the prompt carries habits, never names or phones');
   });
 
   it('falls back to deterministic scoring when the AI agent fails or rambles', async () => {
-    const agent = await import('../src/services/vibe-agent.js');
     const stubs: Array<() => Promise<string>> = [
       async () => { throw new Error('MODEL_API_FAILED: boom'); },
       async () => 'sorry, I cannot answer as JSON {{{'
     ];
     for (const stub of stubs) {
-      agent.setVibeAgentForTests(stub);
-      try {
-        const res = respond();
-        await vibe.pg.vibeCheckProperty({ params: { propertyId: vibe.prop.id }, body: { answers: early } } as any, res as any);
-        assert.equal(res.statusCode, 200);
-        const bed = (res.body.beds as any[]).find((item) => item.bedId === vibe.freeBed.id);
-        assert.equal(bed.score, 100);
-        assert.equal(bed.ai, false);
-        assert.deepEqual(bed.reasons, ['You both sleep before 11 pm', 'You both keep things spotless']);
-      } finally {
-        agent.setVibeAgentForTests(null);
-      }
+      const vibeCheck = vibe.pg.createVibeCheckPropertyHandler({ runMatcherText: stub });
+      const res = respond();
+      await vibeCheck({ params: { propertyId: vibe.prop.id }, body: { answers: early } } as any, res as any);
+      assert.equal(res.statusCode, 200);
+      const bed = (res.body.beds as any[]).find((item) => item.bedId === vibe.freeBed.id);
+      assert.equal(bed.score, 100);
+      assert.equal(bed.ai, false);
+      assert.deepEqual(bed.reasons, ['You both sleep before 11 pm', 'You both keep things spotless']);
     }
   });
 
@@ -3191,7 +3179,6 @@ describe('AI-assisted KYC reading', () => {
     k.user = await prisma.user.create({ data: { phone: '9866600001', password: 'x', name: 'Priya Sharma', role: 'PG_TENANT' } });
     k.tenant = await prisma.pGTenant.create({ data: { propertyId: ids.prop.id, name: 'Priya Sharma', phone: '9866600001', moveInDate: new Date(), monthlyRent: 7000, status: 'ACTIVE', kycType: 'AADHAAR', kycDocumentUrl: k.fileKey } });
   });
-  after(() => k.kyc?.setKycReaderForTests(null));
   const req = (userId: string) => ({ user: { userId, role: 'PG_TENANT' }, params: { tenantId: k.tenant.id }, body: {} }) as any;
 
   it('compares printed and declared names tolerantly', () => {
@@ -3204,12 +3191,14 @@ describe('AI-assisted KYC reading', () => {
 
   it('flags a mismatched ID for the owner and keeps only the last 4 digits', async () => {
     let seenBytes = 0;
-    k.kyc.setKycReaderForTests(async (data: Buffer) => {
-      seenBytes = data.length;
-      return { documentType: 'PAN', nameOnDocument: 'MEERA IYER', idNumberLast4: 'ABCDE1234F', legible: true, notes: [] };
+    const checkMyKyc = k.pg.createCheckMyKycHandler({
+      readDocument: async (data: Buffer) => {
+        seenBytes = data.length;
+        return { documentType: 'PAN', nameOnDocument: 'MEERA IYER', idNumberLast4: 'ABCDE1234F', legible: true, notes: [] };
+      }
     });
     const res = respond();
-    await k.pg.checkMyKyc(req(k.user.id), res as any);
+    await checkMyKyc(req(k.user.id), res as any);
     assert.equal(res.statusCode, 200);
     assert.equal(seenBytes, 'fake-image-bytes'.length, 'reads the stored file');
     assert.equal(res.body.nameMatch, 'mismatch');
@@ -3515,7 +3504,7 @@ describe('WhatsApp inbound assistant', () => {
   });
 
   it('answers residents as residents and strangers as guests, with YES to confirm', async () => {
-    w.wa.resetWhatsAppStateForTests();
+    const handleInbound = w.wa.createWhatsAppInboundHandler();
     const calls: any[] = [];
     const sent: string[] = [];
     const chat = async (req: any, input: any) => {
@@ -3527,14 +3516,14 @@ describe('WhatsApp inbound assistant', () => {
     const send = async (_to: string, body: string) => { sent.push(body); };
     const resident = await prisma.pGTenant.findFirst({ where: { status: 'ACTIVE', phone: { endsWith: '9000000001' } } }).catch(() => null);
     const residentPhone = resident ? '919000000001' : '919200000002';
-    await w.wa.handleInboundText({ id: 'm1', from: residentPhone, text: 'Tap is leaking in my room' }, { chat, send });
+    await handleInbound({ id: 'm1', from: residentPhone, text: 'Tap is leaking in my room' }, { chat, send });
     assert.equal(calls[0].role, 'PG_TENANT', 'a number with an active stay talks to the resident assistant');
     assert.match(sent[0] ?? "", /Reply YES to confirm/);
-    await w.wa.handleInboundText({ id: 'm2', from: residentPhone, text: 'yes' }, { chat, send });
+    await handleInbound({ id: 'm2', from: residentPhone, text: 'yes' }, { chat, send });
     assert.equal(calls[1].input.confirmationId, 'cfm.s1.n1');
     assert.equal(calls[1].input.sessionId, 's1', 'the same conversation continues');
-    assert.equal(await w.wa.handleInboundText({ id: 'm2', from: residentPhone, text: 'yes' }, { chat, send }), null, 'Meta retries are ignored');
-    await w.wa.handleInboundText({ id: 'm3', from: '919999988888', text: 'PGs near OMR?' }, { chat, send });
+    assert.equal(await handleInbound({ id: 'm2', from: residentPhone, text: 'yes' }, { chat, send }), null, 'Meta retries are ignored');
+    await handleInbound({ id: 'm3', from: '919999988888', text: 'PGs near OMR?' }, { chat, send });
     assert.equal(calls[2].role, 'GUEST');
   });
 });
@@ -3550,8 +3539,6 @@ describe('VibeCheck agents on Google ADK', () => {
     process.env.AI_MODEL = 'google:gemini-3.8-flash';
   });
   after(() => {
-    v.agent.setVibeProfilerForTests(null);
-    v.agent.setVibeAgentForTests(null);
     if (keep.enabled === undefined) delete process.env.ENABLE_AI_ORCHESTRATOR; else process.env.ENABLE_AI_ORCHESTRATOR = keep.enabled;
     if (keep.model === undefined) delete process.env.AI_MODEL; else process.env.AI_MODEL = keep.model;
   });
@@ -3563,61 +3550,61 @@ describe('VibeCheck agents on Google ADK', () => {
   });
 
   it('turns a free-text routine into habits, drops identity details and asks one follow-up', async () => {
-    v.agent.setVibeProfilerForTests(async () => ({
-      answers: { sleep: 2, wake: 2, tidiness: null, noise: 1, guests: 0, kitchen: null, schedule: 2, cooling: 9 },
-      summary: 'Night owl who studies late, plays guitar softly on weekends.',
-      followUp: 'How tidy do you keep your space?'
-    }));
+    const buildProfile = v.pg.createBuildVibeProfileHandler({
+      runProfiler: async () => ({
+        answers: { sleep: 2, wake: 2, tidiness: null, noise: 1, guests: 0, kitchen: null, schedule: 2, cooling: 9 },
+        summary: 'Night owl who studies late, plays guitar softly on weekends.',
+        followUp: 'How tidy do you keep your space?'
+      })
+    });
     const res = respond();
-    await v.pg.buildVibeProfileFromText({ body: { text: 'Naan 2 mani varaikkum padippen, weekends guitar vaasippen', answers: { kitchen: 1 } } } as any, res as any);
+    await buildProfile({ body: { text: 'Naan 2 mani varaikkum padippen, weekends guitar vaasippen', answers: { kitchen: 1 } } } as any, res as any);
     assert.equal(res.statusCode, 200);
     assert.deepEqual(res.body.answers, { kitchen: 1, sleep: 2, wake: 2, noise: 1, guests: 0, schedule: 2 }, 'null and invalid values dropped; earlier answers kept');
     assert.equal(res.body.followUp, 'How tidy do you keep your space?');
     assert.deepEqual(res.body.missing, ['tidiness', 'cooling']);
     const short = respond();
-    await v.pg.buildVibeProfileFromText({ body: { text: 'hi' } } as any, short as any);
+    await buildProfile({ body: { text: 'hi' } } as any, short as any);
     assert.equal(short.statusCode, 400);
   });
 
   it('runs the voice interview one turn at a time, hearing audio and keeping earlier habits', async () => {
     let seen: any = null;
-    v.agent.setVibeInterviewerForTests(async (input: any) => {
-      seen = input;
-      return {
-        heard: 'Naan 1 mani varaikkum padippen, room clean-aa vechuppen',
-        answers: { sleep: 2, wake: null, tidiness: 0, noise: null, guests: null, kitchen: null, schedule: 2, cooling: null },
-        summary: 'Studies late, keeps the room tidy.',
-        reply: 'Super! Room-la sound irundha okay-aa, illa quiet venuma?',
-        done: false
-      };
+    const interviewStep = v.pg.createVibeInterviewStepHandler({
+      runInterviewer: async (input: any) => {
+        seen = input;
+        return {
+          heard: 'Naan 1 mani varaikkum padippen, room clean-aa vechuppen',
+          answers: { sleep: 2, wake: null, tidiness: 0, noise: null, guests: null, kitchen: null, schedule: 2, cooling: null },
+          summary: 'Studies late, keeps the room tidy.',
+          reply: 'Super! Room-la sound irundha okay-aa, illa quiet venuma?',
+          done: false
+        };
+      }
     });
-    try {
-      const res = respond();
-      await v.pg.vibeInterviewStep({ body: {
-        history: [{ role: 'assistant', text: 'Hi! When do you usually sleep?' }, { role: 'hacker', text: 'ignored' }],
-        answers: { guests: 1 },
-        audio: { mimeType: 'audio/wav', data: 'UklGRiQAAABXQVZF' }
-      } } as any, res as any);
-      assert.equal(res.statusCode, 200);
-      assert.deepEqual(res.body.answers, { guests: 1, sleep: 2, tidiness: 0, schedule: 2 }, 'new habits merged with earlier ones');
-      assert.match(res.body.reply, /quiet venuma/);
-      assert.equal(res.body.done, false);
-      assert.deepEqual(res.body.missing, ['wake', 'noise', 'kitchen', 'cooling']);
-      assert.equal(seen.audio.mimeType, 'audio/wav');
-      assert.deepEqual(seen.history, [{ role: 'assistant', text: 'Hi! When do you usually sleep?' }], 'only real turns are passed on');
+    const res = respond();
+    await interviewStep({ body: {
+      history: [{ role: 'assistant', text: 'Hi! When do you usually sleep?' }, { role: 'hacker', text: 'ignored' }],
+      answers: { guests: 1 },
+      audio: { mimeType: 'audio/wav', data: 'UklGRiQAAABXQVZF' }
+    } } as any, res as any);
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.body.answers, { guests: 1, sleep: 2, tidiness: 0, schedule: 2 }, 'new habits merged with earlier ones');
+    assert.match(res.body.reply, /quiet venuma/);
+    assert.equal(res.body.done, false);
+    assert.deepEqual(res.body.missing, ['wake', 'noise', 'kitchen', 'cooling']);
+    assert.equal(seen.audio.mimeType, 'audio/wav');
+    assert.deepEqual(seen.history, [{ role: 'assistant', text: 'Hi! When do you usually sleep?' }], 'only real turns are passed on');
 
-      const bad = respond();
-      await v.pg.vibeInterviewStep({ body: { audio: { mimeType: 'video/mp4', data: 'AAAA' } } } as any, bad as any);
-      assert.equal(bad.statusCode, 400);
-      const big = respond();
-      await v.pg.vibeInterviewStep({ body: { audio: { mimeType: 'audio/wav', data: 'A'.repeat(900_004) } } } as any, big as any);
-      assert.equal(big.statusCode, 413);
-      const empty = respond();
-      await v.pg.vibeInterviewStep({ body: { history: [] } } as any, empty as any);
-      assert.equal(empty.statusCode, 400);
-    } finally {
-      v.agent.setVibeInterviewerForTests(null);
-    }
+    const bad = respond();
+    await interviewStep({ body: { audio: { mimeType: 'video/mp4', data: 'AAAA' } } } as any, bad as any);
+    assert.equal(bad.statusCode, 400);
+    const big = respond();
+    await interviewStep({ body: { audio: { mimeType: 'audio/wav', data: 'A'.repeat(900_004) } } } as any, big as any);
+    assert.equal(big.statusCode, 413);
+    const empty = respond();
+    await interviewStep({ body: { history: [] } } as any, empty as any);
+    assert.equal(empty.statusCode, 400);
   });
 
   it('only talks about what applies at the PG: no kitchen or AC questions where there is none', async () => {
@@ -3632,24 +3619,22 @@ describe('VibeCheck agents on Google ADK', () => {
     assert.ok(!result.missing.includes('kitchen') && !result.missing.includes('cooling'));
 
     let seen: any = null;
-    v.agent.setVibeInterviewerForTests(async (input: any) => {
-      seen = input;
-      return { heard: 'Working', answers: { sleep: 1, wake: null, tidiness: null, noise: null, guests: null, kitchen: 2, schedule: null, cooling: null }, summary: 'Works days.', reply: 'Nice!', done: false };
-    });
-    try {
-      const prop = await prisma.pGProperty.create({ data: { name: 'No Kitchen House', address: '9, Test Road', locality: 'Adyar', city: 'Chennai', genderPolicy: 'ANY', amenities: ['Wi-Fi'], houseRules: [], status: 'ACTIVE' } });
-      try {
-        const res = respond();
-        await v.pg.vibeInterviewStep({ body: { propertyId: prop.id, text: 'Working at a bank' } } as any, res as any);
-        assert.equal(res.statusCode, 200);
-        assert.deepEqual(res.body.answers, { sleep: 1 }, 'kitchen answer dropped for a PG without a kitchen');
-        assert.ok(seen.topics.skip.includes('kitchen'));
-        assert.ok(seen.topics.facts.some((fact: string) => fact.includes('No Kitchen House')));
-      } finally {
-        await prisma.pGProperty.delete({ where: { id: prop.id } });
+    const interviewStep = v.pg.createVibeInterviewStepHandler({
+      runInterviewer: async (input: any) => {
+        seen = input;
+        return { heard: 'Working', answers: { sleep: 1, wake: null, tidiness: null, noise: null, guests: null, kitchen: 2, schedule: null, cooling: null }, summary: 'Works days.', reply: 'Nice!', done: false };
       }
+    });
+    const prop = await prisma.pGProperty.create({ data: { name: 'No Kitchen House', address: '9, Test Road', locality: 'Adyar', city: 'Chennai', genderPolicy: 'ANY', amenities: ['Wi-Fi'], houseRules: [], status: 'ACTIVE' } });
+    try {
+      const res = respond();
+      await interviewStep({ body: { propertyId: prop.id, text: 'Working at a bank' } } as any, res as any);
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(res.body.answers, { sleep: 1 }, 'kitchen answer dropped for a PG without a kitchen');
+      assert.ok(seen.topics.skip.includes('kitchen'));
+      assert.ok(seen.topics.facts.some((fact: string) => fact.includes('No Kitchen House')));
     } finally {
-      v.agent.setVibeInterviewerForTests(null);
+      await prisma.pGProperty.delete({ where: { id: prop.id } });
     }
   });
 
@@ -3672,7 +3657,6 @@ describe('VibeCheck agents on Google ADK', () => {
   });
 
   it('offers the quiz instead when the profile agent is unavailable', async () => {
-    v.agent.setVibeProfilerForTests(null);
     process.env.ENABLE_AI_ORCHESTRATOR = 'false';
     const res = respond();
     await v.pg.buildVibeProfileFromText({ body: { text: 'I sleep early and keep my room tidy.' } } as any, res as any);
@@ -3683,14 +3667,20 @@ describe('VibeCheck agents on Google ADK', () => {
 
   it('keeps the AI score within 15 points of the calculated one and passes habit summaries, never names', async () => {
     let prompt = '';
-    v.agent.setVibeAgentForTests(async (text: string) => {
-      prompt = text;
-      return JSON.stringify({ rooms: { r1: { score: 99, reasons: ['You both sleep before 11 pm'], differences: [], headline: 'Calm, early room' } } });
-    });
     const early = { sleep: 0, wake: 0, tidiness: 0, noise: 0, guests: 0, kitchen: 1, schedule: 0, cooling: 1 };
     const night = { sleep: 2, wake: 2, tidiness: 2, noise: 2, guests: 2, kitchen: 1, schedule: 2, cooling: 1 };
     const baseline = (await import('@livingplus/shared')).vibeMatch(early, [night]).score!;
-    const matches = await v.agent.scoreVibeRooms(early, [{ roomId: 'r1', roomNumber: '101', roommates: [night], summaries: ['Plays drums most evenings.'] }], 'Early riser who needs quiet.');
+    const matches = await v.agent.scoreVibeRooms(
+      early,
+      [{ roomId: 'r1', roomNumber: '101', roommates: [night], summaries: ['Plays drums most evenings.'] }],
+      'Early riser who needs quiet.',
+      {
+        runMatcherText: async (text: string) => {
+          prompt = text;
+          return JSON.stringify({ rooms: { r1: { score: 99, reasons: ['You both sleep before 11 pm'], differences: [], headline: 'Calm, early room' } } });
+        }
+      }
+    );
     const r1 = matches.get('r1');
     assert.equal(r1.ai, true);
     assert.equal(r1.score, baseline + 15, 'a 99 from the AI is held to baseline + 15');

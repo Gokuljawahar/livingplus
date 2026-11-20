@@ -11,7 +11,11 @@
 // Enabled with ENABLE_SEMANTIC_SEARCH=true and AI_EMBEDDING_MODEL.
 import { createHash } from 'crypto';
 import { asSystem, db } from '../db/index.js';
-import { createEmbeddings, embeddingModelId } from './ai-embeddings.js';
+import { createEmbeddings, embeddingModelId, type EmbeddingPurpose, type EmbeddingsModel } from './ai-embeddings.js';
+
+export interface SemanticSearchDeps {
+  createEmbeddings?: (purpose: EmbeddingPurpose) => Promise<EmbeddingsModel>;
+}
 import { logger } from '../utils/logger.js';
 
 export const semanticSearchEnabled = (): boolean => process.env.ENABLE_SEMANTIC_SEARCH === 'true' && embeddingModelId().includes(':');
@@ -76,7 +80,10 @@ const textHash = (model: string, text: string) => createHash('sha256').update(`$
  * Embeds published properties whose description (or the embedding model)
  * changed since they were last indexed. Pass ids to limit the scope.
  */
-export async function indexProperties(options: { ids?: string[]; force?: boolean } = {}): Promise<{ indexed: number; skipped: number }> {
+export async function indexProperties(
+  options: { ids?: string[]; force?: boolean } = {},
+  deps: SemanticSearchDeps = {}
+): Promise<{ indexed: number; skipped: number }> {
   if (!semanticSearchEnabled()) return { indexed: 0, skipped: 0 };
   const model = embeddingModelId();
   const properties = await db.pGProperty.findMany({
@@ -89,7 +96,7 @@ export async function indexProperties(options: { ids?: string[]; force?: boolean
     .filter((p: any) => options.force || p.hash !== p.previousHash);
   if (!pending.length) return { indexed: 0, skipped: properties.length };
 
-  const embeddings = await createEmbeddings('document');
+  const embeddings = await (deps.createEmbeddings ?? createEmbeddings)('document');
   const BATCH = 32;
   for (let i = 0; i < pending.length; i += BATCH) {
     const batch = pending.slice(i, i + BATCH);
@@ -142,11 +149,11 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 const queryCache = new Map<string, number[]>();
 const QUERY_CACHE_MAX = 500;
 
-async function embedQuery(query: string): Promise<number[]> {
+async function embedQuery(query: string, deps: SemanticSearchDeps = {}): Promise<number[]> {
   const key = `${embeddingModelId()}|${query.toLowerCase()}`;
   const hit = queryCache.get(key);
   if (hit) return hit;
-  const embeddings = await createEmbeddings('query');
+  const embeddings = await (deps.createEmbeddings ?? createEmbeddings)('query');
   const timeoutMs = Math.max(1000, Number(process.env.MODEL_API_TIMEOUT_MS) || 30000);
   let timer: NodeJS.Timeout | undefined;
   const vector = await Promise.race([
@@ -162,8 +169,12 @@ async function embedQuery(query: string): Promise<number[]> {
  * Similarity of each published property (matching `where`) to the query, by
  * meaning. Properties not yet indexed with the current model are left out.
  */
-export async function semanticScores(query: string, where: Record<string, unknown> = {}): Promise<Map<string, number>> {
-  const vector = await embedQuery(query);
+export async function semanticScores(
+  query: string,
+  where: Record<string, unknown> = {},
+  deps: SemanticSearchDeps = {}
+): Promise<Map<string, number>> {
+  const vector = await embedQuery(query, deps);
   const model = embeddingModelId();
   const scores = new Map<string, number>();
   if (await hasVectorColumn()) {

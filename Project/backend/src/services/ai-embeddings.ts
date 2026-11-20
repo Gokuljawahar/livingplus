@@ -23,18 +23,10 @@ export function embeddingModelId(): string {
   return (process.env.AI_EMBEDDING_MODEL || '').trim();
 }
 
-let override: ((purpose: EmbeddingPurpose) => EmbeddingsModel) | null = null;
-
-/** Test hook: replace the embeddings provider (null restores). */
-export function setEmbeddingsForTests(factory: ((purpose: EmbeddingPurpose) => EmbeddingsModel) | null): void {
-  override = factory;
-}
-
 const cache = new Map<string, EmbeddingsModel>();
 
 /** Builds the configured embeddings model, or throws EMBEDDINGS_NOT_CONFIGURED / EMBEDDINGS_INIT_FAILED. */
 export async function createEmbeddings(purpose: EmbeddingPurpose): Promise<EmbeddingsModel> {
-  if (override) return override(purpose);
   const id = embeddingModelId();
   const at = id.indexOf(':');
   if (at <= 0) throw new Error('EMBEDDINGS_NOT_CONFIGURED');

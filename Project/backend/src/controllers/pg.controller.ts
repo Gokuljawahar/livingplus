@@ -8,6 +8,9 @@ export {
 } from './pg/access.js';
 export {
   buildVibeProfileFromText,
+  createBuildVibeProfileHandler,
+  createVibeCheckPropertyHandler,
+  createVibeInterviewStepHandler,
   getTenantVibeMatch,
   saveTenantVibe,
   vibeCheckProperty,
@@ -33,6 +36,7 @@ export {
 export {
   cancelBookingRequest,
   createBookingRequest,
+  createSearchPropertiesSemanticHandler,
   getPgSite,
   getPublicBookingStatus,
   getPublicConfig,
@@ -49,6 +53,8 @@ export {
   checkMyKyc,
   checkOutTenant,
   checkTenantKyc,
+  createCheckMyKycHandler,
+  createCheckTenantKycHandler,
   listOwnerTenants,
   listResidentNotifications,
   listTenantStays,

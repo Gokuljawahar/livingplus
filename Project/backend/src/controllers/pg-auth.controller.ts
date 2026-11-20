@@ -10,7 +10,7 @@ import { logger } from '../utils/logger.js';
 import { isGenderPolicy, isStrongPassword, MESSAGES, normalizeIndianPhone as normalizePhone } from '@livingplus/shared';
 import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
 import { changePasswordBody, googleLoginBody, verifyPhoneBody, loginBody, otpRequestBody, otpVerifyBody, registerBody, updateProfileBody } from '../validation/request.schemas.js';
-import { googleSignInEnabled, otpProvider, verifyFirebaseGoogleToken, verifyFirebasePhoneToken } from '../services/phone-verification.js';
+import { googleSignInEnabled, otpProvider, verifyFirebaseGoogleToken, verifyFirebasePhoneToken, type FirebaseVerificationDeps } from '../services/phone-verification.js';
 
 function toUserResponse(user: any) {
   return {
@@ -179,42 +179,46 @@ export const register = async (req: Request, res: Response): Promise<any> => {
  * Google uid, never by the unverified email typed at registration).
  * Residents keep using phone OTP.
  */
-export const googleLogin = async (req: Request, res: Response): Promise<any> => {
-  const input: any = parseBody(googleLoginBody, req, res, INVALID_REQUEST);
-  if (!input) return;
-  const idToken = typeof input.firebaseIdToken === 'string' ? input.firebaseIdToken.trim() : '';
-  const propertyId = (req as any).pgPropertyId as string | undefined;
-  if (!googleSignInEnabled()) return res.status(404).json({ message: 'Google sign-in is not enabled' });
-  if (!idToken) return res.status(400).json({ message: 'Google sign-in is required' });
+export function createGoogleLoginHandler(deps: FirebaseVerificationDeps = {}) {
+  return async (req: Request, res: Response): Promise<any> => {
+    const input: any = parseBody(googleLoginBody, req, res, INVALID_REQUEST);
+    if (!input) return;
+    const idToken = typeof input.firebaseIdToken === 'string' ? input.firebaseIdToken.trim() : '';
+    const propertyId = (req as any).pgPropertyId as string | undefined;
+    if (!googleSignInEnabled()) return res.status(404).json({ message: 'Google sign-in is not enabled' });
+    if (!idToken) return res.status(400).json({ message: 'Google sign-in is required' });
 
-  let account;
-  try {
-    account = await verifyFirebaseGoogleToken(idToken);
-  } catch (error: any) {
-    if (error?.message === 'FIREBASE_NOT_CONFIGURED') {
-      logger.error('ENABLE_GOOGLE_SIGN_IN=true but FIREBASE_PROJECT_ID is not set');
-      return res.status(503).json({ message: 'Google sign-in is not available right now' });
+    let account;
+    try {
+      account = await verifyFirebaseGoogleToken(idToken, Date.now(), deps);
+    } catch (error: any) {
+      if (error?.message === 'FIREBASE_NOT_CONFIGURED') {
+        logger.error('ENABLE_GOOGLE_SIGN_IN=true but FIREBASE_PROJECT_ID is not set');
+        return res.status(503).json({ message: 'Google sign-in is not available right now' });
+      }
+      return res.status(401).json({ message: 'Google sign-in failed. Please try again.' });
     }
-    return res.status(401).json({ message: 'Google sign-in failed. Please try again.' });
-  }
 
-  try {
-    const user = await prisma.user.findUnique({ where: { googleUid: account.uid } });
-    if (!user) {
-      return res.status(403).json({
-        code: 'GOOGLE_NOT_LINKED',
-        message: 'This Google account is not linked yet. Sign in with your mobile number and password, then link Google under Account security.'
-      });
+    try {
+      const user = await prisma.user.findUnique({ where: { googleUid: account.uid } });
+      if (!user) {
+        return res.status(403).json({
+          code: 'GOOGLE_NOT_LINKED',
+          message: 'This Google account is not linked yet. Sign in with your mobile number and password, then link Google under Account security.'
+        });
+      }
+      if (user.role === 'PG_TENANT') return res.status(403).json({ message: 'Residents sign in with their phone number on the resident portal.' });
+      if (!await hasPropertyAccess(user, propertyId)) return res.status(403).json({ message: 'This account does not have access to this PG' });
+
+      res.json({ token: createToken(user, propertyId), user: toUserResponse(user) });
+    } catch (error) {
+      logger.error({ err: error }, 'Google sign-in error');
+      res.status(500).json({ message: 'Internal server error' });
     }
-    if (user.role === 'PG_TENANT') return res.status(403).json({ message: 'Residents sign in with their phone number on the resident portal.' });
-    if (!await hasPropertyAccess(user, propertyId)) return res.status(403).json({ message: 'This account does not have access to this PG' });
+  };
+}
 
-    res.json({ token: createToken(user, propertyId), user: toUserResponse(user) });
-  } catch (error) {
-    logger.error({ err: error }, 'Google sign-in error');
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
+export const googleLogin = createGoogleLoginHandler();
 
 const STAFF_ROLES = ['PG_OWNER', 'PG_WARDEN'];
 
@@ -223,36 +227,40 @@ const STAFF_ROLES = ['PG_OWNER', 'PG_WARDEN'];
  * account. Doing this while signed in with the password proves the person
  * controls both, so later Google sign-ins can trust the link.
  */
-export const linkGoogle = async (req: Request, res: Response): Promise<any> => {
-  const input: any = parseBody(googleLoginBody, req, res, INVALID_REQUEST);
-  if (!input) return;
-  const { userId } = (req as any).user || {};
-  if (!googleSignInEnabled()) return res.status(404).json({ message: 'Google sign-in is not enabled' });
-  if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-  const idToken = typeof input.firebaseIdToken === 'string' ? input.firebaseIdToken.trim() : '';
-  if (!idToken) return res.status(400).json({ message: 'Google sign-in is required' });
+export function createLinkGoogleHandler(deps: FirebaseVerificationDeps = {}) {
+  return async (req: Request, res: Response): Promise<any> => {
+    const input: any = parseBody(googleLoginBody, req, res, INVALID_REQUEST);
+    if (!input) return;
+    const { userId } = (req as any).user || {};
+    if (!googleSignInEnabled()) return res.status(404).json({ message: 'Google sign-in is not enabled' });
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+    const idToken = typeof input.firebaseIdToken === 'string' ? input.firebaseIdToken.trim() : '';
+    if (!idToken) return res.status(400).json({ message: 'Google sign-in is required' });
 
-  let account;
-  try {
-    account = await verifyFirebaseGoogleToken(idToken);
-  } catch (error: any) {
-    if (error?.message === 'FIREBASE_NOT_CONFIGURED') return res.status(503).json({ message: 'Google sign-in is not available right now' });
-    return res.status(401).json({ message: 'Google sign-in failed. Please try again.' });
-  }
+    let account;
+    try {
+      account = await verifyFirebaseGoogleToken(idToken, Date.now(), deps);
+    } catch (error: any) {
+      if (error?.message === 'FIREBASE_NOT_CONFIGURED') return res.status(503).json({ message: 'Google sign-in is not available right now' });
+      return res.status(401).json({ message: 'Google sign-in failed. Please try again.' });
+    }
 
-  try {
-    const user = await prisma.user.findUnique({ where: { id: String(userId) } });
-    if (!user) return res.status(404).json({ message: 'User not found' });
-    if (!STAFF_ROLES.includes(user.role)) return res.status(403).json({ message: 'Only owners, wardens and admins can link Google.' });
-    const holder = await prisma.user.findUnique({ where: { googleUid: account.uid }, select: { id: true } });
-    if (holder && holder.id !== user.id) return res.status(409).json({ message: 'This Google account is already linked to another LivingPlus account.' });
-    const updated = await prisma.user.update({ where: { id: user.id }, data: { googleUid: account.uid, googleLinkedAt: new Date() } });
-    res.json(toUserResponse(updated));
-  } catch (error) {
-    logger.error({ err: error }, 'Google link error');
-    res.status(500).json({ message: 'Could not link Google account' });
-  }
-};
+    try {
+      const user = await prisma.user.findUnique({ where: { id: String(userId) } });
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      if (!STAFF_ROLES.includes(user.role)) return res.status(403).json({ message: 'Only owners, wardens and admins can link Google.' });
+      const holder = await prisma.user.findUnique({ where: { googleUid: account.uid }, select: { id: true } });
+      if (holder && holder.id !== user.id) return res.status(409).json({ message: 'This Google account is already linked to another LivingPlus account.' });
+      const updated = await prisma.user.update({ where: { id: user.id }, data: { googleUid: account.uid, googleLinkedAt: new Date() } });
+      res.json(toUserResponse(updated));
+    } catch (error) {
+      logger.error({ err: error }, 'Google link error');
+      res.status(500).json({ message: 'Could not link Google account' });
+    }
+  };
+}
+
+export const linkGoogle = createLinkGoogleHandler();
 
 /** Removes the Google link; the account signs in with its password again. */
 export const unlinkGoogle = async (req: Request, res: Response): Promise<any> => {
@@ -328,85 +336,89 @@ export const requestOtp = async (req: Request, res: Response): Promise<any> => {
   }
 };
 
-export const verifyOtp = async (req: Request, res: Response): Promise<any> => {
-  // Shape check only; the rules below still validate values.
-  const input: any = parseBody(otpVerifyBody, req, res, INVALID_REQUEST);
-  if (!input) return;
-  const phone = normalizePhone(String(input.phone || ''));
-  const purpose = ['BOOKING', 'TENANT_LOGIN'].includes(String(input.purpose)) ? String(input.purpose) : 'BOOKING';
-  const propertyId = (req as any).pgPropertyId as string | undefined;
-  if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production' && process.env.SINGLE_HOST_MODE !== 'true') {
-    return res.status(400).json({ message: 'Open your PG-specific resident portal to sign in' });
-  }
+export function createVerifyOtpHandler(deps: FirebaseVerificationDeps = {}) {
+  return async (req: Request, res: Response): Promise<any> => {
+    // Shape check only; the rules below still validate values.
+    const input: any = parseBody(otpVerifyBody, req, res, INVALID_REQUEST);
+    if (!input) return;
+    const phone = normalizePhone(String(input.phone || ''));
+    const purpose = ['BOOKING', 'TENANT_LOGIN'].includes(String(input.purpose)) ? String(input.purpose) : 'BOOKING';
+    const propertyId = (req as any).pgPropertyId as string | undefined;
+    if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production' && process.env.SINGLE_HOST_MODE !== 'true') {
+      return res.status(400).json({ message: 'Open your PG-specific resident portal to sign in' });
+    }
 
-  try {
-    let recordId: string;
-    if (otpProvider() === 'firebase') {
-      const idToken = typeof input.firebaseIdToken === 'string' ? input.firebaseIdToken.trim() : '';
-      if (!idToken) return res.status(400).json({ message: 'Phone verification is required' });
-      let verified;
-      try {
-        verified = await verifyFirebasePhoneToken(idToken);
-      } catch (error: any) {
-        if (error?.message === 'FIREBASE_NOT_CONFIGURED') {
-          logger.error('OTP_PROVIDER=firebase but FIREBASE_PROJECT_ID is not set');
-          return res.status(503).json({ message: 'Phone verification is not available right now' });
+    try {
+      let recordId: string;
+      if (otpProvider() === 'firebase') {
+        const idToken = typeof input.firebaseIdToken === 'string' ? input.firebaseIdToken.trim() : '';
+        if (!idToken) return res.status(400).json({ message: 'Phone verification is required' });
+        let verified;
+        try {
+          verified = await verifyFirebasePhoneToken(idToken, Date.now(), deps);
+        } catch (error: any) {
+          if (error?.message === 'FIREBASE_NOT_CONFIGURED') {
+            logger.error('OTP_PROVIDER=firebase but FIREBASE_PROJECT_ID is not set');
+            return res.status(503).json({ message: 'Phone verification is not available right now' });
+          }
+          return res.status(400).json({ message: 'Phone verification failed. Request a new code.' });
         }
-        return res.status(400).json({ message: 'Phone verification failed. Request a new code.' });
+        if (verified.phone !== phone) return res.status(400).json({ message: 'The verified number does not match the phone you entered' });
+        // One phone token per Firebase sign-in: a replayed ID token is refused.
+        const proofHash = hashOtp(`firebase:${verified.uid}:${verified.authTime}`);
+        if (await prisma.otpCode.findFirst({ where: { codeHash: proofHash }, select: { id: true } })) {
+          return res.status(400).json({ message: 'This verification was already used. Request a new code.' });
+        }
+        const record = await prisma.otpCode.create({
+          data: { phone, propertyId: propertyId || null, purpose, codeHash: proofHash, expiresAt: new Date(Date.now() + 5 * 60 * 1000) }
+        });
+        recordId = record.id;
+      } else {
+        const code = String(input.code || '').trim();
+        if (!code) return res.status(400).json({ message: 'Verification code is required' });
+        const record = await prisma.otpCode.findFirst({
+          where: { phone, purpose, propertyId: propertyId || null, consumedAt: null },
+          orderBy: { createdAt: 'desc' }
+        });
+        if (!record || record.expiresAt < new Date()) return res.status(400).json({ message: 'Code expired. Request a new one.' });
+        if (record.attempts >= 5) return res.status(429).json({ message: 'Too many attempts. Request a new code.' });
+
+        const expected = Buffer.from(record.codeHash, 'hex');
+        const actual = Buffer.from(hashOtp(code), 'hex');
+        if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+          await prisma.otpCode.update({ where: { id: record.id }, data: { attempts: { increment: 1 } } });
+          return res.status(400).json({ message: 'Invalid verification code' });
+        }
+        recordId = record.id;
       }
-      if (verified.phone !== phone) return res.status(400).json({ message: 'The verified number does not match the phone you entered' });
-      // One phone token per Firebase sign-in: a replayed ID token is refused.
-      const proofHash = hashOtp(`firebase:${verified.uid}:${verified.authTime}`);
-      if (await prisma.otpCode.findFirst({ where: { codeHash: proofHash }, select: { id: true } })) {
-        return res.status(400).json({ message: 'This verification was already used. Request a new code.' });
-      }
-      const record = await prisma.otpCode.create({
-        data: { phone, propertyId: propertyId || null, purpose, codeHash: proofHash, expiresAt: new Date(Date.now() + 5 * 60 * 1000) }
+
+      const verifiedToken = `vrf_${randomUUID().replace(/-/g, '')}`;
+      await prisma.otpCode.update({
+        where: { id: recordId },
+        data: { verifiedToken, tokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000) }
       });
-      recordId = record.id;
-    } else {
-      const code = String(input.code || '').trim();
-      if (!code) return res.status(400).json({ message: 'Verification code is required' });
-      const record = await prisma.otpCode.findFirst({
-        where: { phone, purpose, propertyId: propertyId || null, consumedAt: null },
-        orderBy: { createdAt: 'desc' }
-      });
-      if (!record || record.expiresAt < new Date()) return res.status(400).json({ message: 'Code expired. Request a new one.' });
-      if (record.attempts >= 5) return res.status(429).json({ message: 'Too many attempts. Request a new code.' });
 
-      const expected = Buffer.from(record.codeHash, 'hex');
-      const actual = Buffer.from(hashOtp(code), 'hex');
-      if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
-        await prisma.otpCode.update({ where: { id: record.id }, data: { attempts: { increment: 1 } } });
-        return res.status(400).json({ message: 'Invalid verification code' });
+      if (purpose === 'TENANT_LOGIN') {
+        const resident = await residentSessionForPhone(phone, propertyId);
+        if (!resident) return res.status(404).json({ message: 'No active stay found for this phone number' });
+        if ('forbidden' in resident) return res.status(403).json({ message: 'This account cannot sign in as a resident' });
+        return res.json({ token: resident.token, user: resident.user });
       }
-      recordId = record.id;
-    }
-
-    const verifiedToken = `vrf_${randomUUID().replace(/-/g, '')}`;
-    await prisma.otpCode.update({
-      where: { id: recordId },
-      data: { verifiedToken, tokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000) }
-    });
-
-    if (purpose === 'TENANT_LOGIN') {
       const resident = await residentSessionForPhone(phone, propertyId);
-      if (!resident) return res.status(404).json({ message: 'No active stay found for this phone number' });
-      if ('forbidden' in resident) return res.status(403).json({ message: 'This account cannot sign in as a resident' });
-      return res.json({ token: resident.token, user: resident.user });
+      res.json({
+        phoneToken: verifiedToken,
+        // Lets this visitor see and cancel their own booking requests (and only theirs).
+        guestToken: issueGuestToken(phone),
+        ...(!resident || 'forbidden' in resident ? {} : { resident })
+      });
+    } catch (error) {
+      logger.error({ err: error }, 'PG OTP verify error');
+      res.status(500).json({ message: 'Failed to verify code' });
     }
-    const resident = await residentSessionForPhone(phone, propertyId);
-    res.json({
-      phoneToken: verifiedToken,
-      // Lets this visitor see and cancel their own booking requests (and only theirs).
-      guestToken: issueGuestToken(phone),
-      ...(!resident || 'forbidden' in resident ? {} : { resident })
-    });
-  } catch (error) {
-    logger.error({ err: error }, 'PG OTP verify error');
-    res.status(500).json({ message: 'Failed to verify code' });
-  }
-};
+  };
+}
+
+export const verifyOtp = createVerifyOtpHandler();
 
 export async function consumePhoneToken(phone: string, token: string | undefined, purpose = 'BOOKING', propertyId?: string): Promise<boolean> {
   if (!token) return false;

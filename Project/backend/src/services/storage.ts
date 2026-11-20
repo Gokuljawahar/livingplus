@@ -43,9 +43,8 @@ export function newFileKey(extension: 'webp' | 'pdf'): string {
 }
 
 const VIEW_URL_TTL_MS = 60 * 60 * 1000;
-const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
 
-// Minimal shapes of the cloud SDK objects we use, so tests can inject fakes.
+// Minimal shapes of the cloud SDK objects we use, so callers/tests can inject a bucket.
 export interface GcsFileLike {
   save(data: Buffer, options: { contentType: string; resumable: boolean }): Promise<unknown>;
   getSignedUrl(options: { version: 'v4'; action: 'read' | 'write'; expires: number; contentType?: string }): Promise<[string]>;
@@ -55,24 +54,8 @@ export interface GcsBucketLike {
   file(name: string): GcsFileLike;
 }
 
-let gcsBucketOverride: GcsBucketLike | null = null;
-let gcsBucketCache: GcsBucketLike | null = null;
-
-/** Test hook: replace the Cloud Storage bucket with a fake (null restores). */
-export function setGcsBucketForTests(bucket: GcsBucketLike | null): void {
-  gcsBucketOverride = bucket;
-  signedUrlCache.clear();
-}
-
-async function gcsBucket(): Promise<GcsBucketLike> {
-  if (gcsBucketOverride) return gcsBucketOverride;
-  if (!gcsBucketCache) {
-    const bucketName = process.env.GCS_BUCKET;
-    if (!bucketName) throw new Error('GCS_BUCKET is not configured');
-    const { Storage } = await import('@google-cloud/storage');
-    gcsBucketCache = new Storage().bucket(bucketName) as unknown as GcsBucketLike;
-  }
-  return gcsBucketCache;
+export interface StorageServiceDeps {
+  gcsBucket?: GcsBucketLike;
 }
 
 let s3ClientCache: any = null;
@@ -83,94 +66,119 @@ async function s3() {
   return { sdk, presigner, client: s3ClientCache, bucket: process.env.S3_BUCKET_NAME || 'livingplus-dev-uploads' };
 }
 
-/** Stores a validated file under fileKey. Local writes never overwrite. */
-export async function putFile(fileKey: string, data: Buffer, contentType: string): Promise<void> {
-  const kind = storageKind();
-  if (kind === 'local') {
-    const filePath = localUploadPath(fileKey);
-    if (!filePath) throw new Error('INVALID_FILE_KEY');
-    await mkdir(localUploadDir(), { recursive: true });
-    await writeFile(filePath, data, { flag: 'wx', mode: 0o600 });
-    return;
-  }
-  if (kind === 'gcs') {
-    await (await gcsBucket()).file(fileKey).save(data, { contentType, resumable: false });
-    return;
-  }
-  const { sdk, client, bucket } = await s3();
-  await client.send(new sdk.PutObjectCommand({ Bucket: bucket, Key: fileKey, Body: data, ContentType: contentType }));
-}
-
-/** Reads a stored file back (for server-side checks such as AI KYC reading). */
-export async function readStoredFile(fileKey: string): Promise<{ data: Buffer; contentType: string }> {
-  const contentType = /\.pdf$/i.test(fileKey) ? 'application/pdf' : /\.png$/i.test(fileKey) ? 'image/png' : /\.jpe?g$/i.test(fileKey) ? 'image/jpeg' : 'image/webp';
-  const kind = storageKind();
-  if (kind === 'local') {
-    const filePath = localUploadPath(fileKey);
-    if (!filePath) throw new Error('INVALID_FILE_KEY');
-    return { data: await readLocalFile(filePath), contentType };
-  }
-  if (kind === 'gcs') {
-    const file = (await gcsBucket()).file(fileKey);
-    if (!file.download) throw new Error('DOWNLOAD_UNSUPPORTED');
-    const [data] = await file.download();
-    return { data, contentType };
-  }
-  const { sdk, client, bucket } = await s3();
-  const object = await client.send(new sdk.GetObjectCommand({ Bucket: bucket, Key: fileKey }));
-  return { data: Buffer.from(await object.Body.transformToByteArray()), contentType: object.ContentType || contentType };
-}
-
 function localMediaUrl(req: Request, fileKey: string): string {
   const token = jwt.sign({ purpose: 'LOCAL_MEDIA', fileKey }, getJwtSecret(), { expiresIn: '1h' });
   const apiOrigin = process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}`;
   return `${apiOrigin.replace(/\/$/, '')}/api/local-media/${token}`;
 }
 
-/**
- * A short-lived URL to view an already-authorized file, or null when the file
- * does not exist (local storage) or cannot be signed.
- */
-export async function viewUrl(req: Request, fileKey: string): Promise<string | null> {
-  const kind = storageKind();
-  if (kind === 'local') {
-    const filePath = localUploadPath(fileKey);
-    if (!filePath) return null;
-    try {
-      await access(filePath);
-    } catch {
-      return null;
+/** Creates a file storage service with an optional injected GCS bucket and isolated signed-URL cache. */
+export function createStorageService(deps: StorageServiceDeps = {}) {
+  const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
+  let gcsBucketCache: GcsBucketLike | null = null;
+
+  async function gcsBucket(): Promise<GcsBucketLike> {
+    if (deps.gcsBucket) return deps.gcsBucket;
+    if (!gcsBucketCache) {
+      const bucketName = process.env.GCS_BUCKET;
+      if (!bucketName) throw new Error('GCS_BUCKET is not configured');
+      const { Storage } = await import('@google-cloud/storage');
+      gcsBucketCache = new Storage().bucket(bucketName) as unknown as GcsBucketLike;
     }
-    return localMediaUrl(req, fileKey);
+    return gcsBucketCache;
   }
 
-  const now = Date.now();
-  const cacheKey = `${kind}:${fileKey}`;
-  const cached = signedUrlCache.get(cacheKey);
-  if (cached && cached.expiresAt > now) return cached.url;
-
-  let url: string;
-  if (kind === 'gcs') {
-    [url] = await (await gcsBucket()).file(fileKey).getSignedUrl({ version: 'v4', action: 'read', expires: now + VIEW_URL_TTL_MS });
-  } else {
-    const { sdk, presigner, client, bucket } = await s3();
-    url = await presigner.getSignedUrl(client, new sdk.GetObjectCommand({ Bucket: bucket, Key: fileKey }), { expiresIn: VIEW_URL_TTL_MS / 1000 });
+  /** Stores a validated file under fileKey. Local writes never overwrite. */
+  async function putFile(fileKey: string, data: Buffer, contentType: string): Promise<void> {
+    const kind = storageKind();
+    if (kind === 'local') {
+      const filePath = localUploadPath(fileKey);
+      if (!filePath) throw new Error('INVALID_FILE_KEY');
+      await mkdir(localUploadDir(), { recursive: true });
+      await writeFile(filePath, data, { flag: 'wx', mode: 0o600 });
+      return;
+    }
+    if (kind === 'gcs') {
+      await (await gcsBucket()).file(fileKey).save(data, { contentType, resumable: false });
+      return;
+    }
+    const { sdk, client, bucket } = await s3();
+    await client.send(new sdk.PutObjectCommand({ Bucket: bucket, Key: fileKey, Body: data, ContentType: contentType }));
   }
-  // Reuse for 50 of the 60 minutes so clients never get an almost-expired URL.
-  signedUrlCache.set(cacheKey, { url, expiresAt: now + 50 * 60 * 1000 });
-  return url;
-}
 
-/** A signed direct-upload URL (cloud storage only; local uses the proxy upload). */
-export async function directUploadUrl(fileKey: string, contentType: string): Promise<string> {
-  const kind = storageKind();
-  if (kind === 'gcs') {
-    const [url] = await (await gcsBucket()).file(fileKey).getSignedUrl({ version: 'v4', action: 'write', expires: Date.now() + 15 * 60 * 1000, contentType });
+  /** Reads a stored file back (for server-side checks such as AI KYC reading). */
+  async function readStoredFile(fileKey: string): Promise<{ data: Buffer; contentType: string }> {
+    const contentType = /\.pdf$/i.test(fileKey) ? 'application/pdf' : /\.png$/i.test(fileKey) ? 'image/png' : /\.jpe?g$/i.test(fileKey) ? 'image/jpeg' : 'image/webp';
+    const kind = storageKind();
+    if (kind === 'local') {
+      const filePath = localUploadPath(fileKey);
+      if (!filePath) throw new Error('INVALID_FILE_KEY');
+      return { data: await readLocalFile(filePath), contentType };
+    }
+    if (kind === 'gcs') {
+      const file = (await gcsBucket()).file(fileKey);
+      if (!file.download) throw new Error('DOWNLOAD_UNSUPPORTED');
+      const [data] = await file.download();
+      return { data, contentType };
+    }
+    const { sdk, client, bucket } = await s3();
+    const object = await client.send(new sdk.GetObjectCommand({ Bucket: bucket, Key: fileKey }));
+    return { data: Buffer.from(await object.Body.transformToByteArray()), contentType: object.ContentType || contentType };
+  }
+
+  /**
+   * A short-lived URL to view an already-authorized file, or null when the file
+   * does not exist (local storage) or cannot be signed.
+   */
+  async function viewUrl(req: Request, fileKey: string): Promise<string | null> {
+    const kind = storageKind();
+    if (kind === 'local') {
+      const filePath = localUploadPath(fileKey);
+      if (!filePath) return null;
+      try {
+        await access(filePath);
+      } catch {
+        return null;
+      }
+      return localMediaUrl(req, fileKey);
+    }
+
+    const now = Date.now();
+    const cacheKey = `${kind}:${fileKey}`;
+    const cached = signedUrlCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) return cached.url;
+
+    let url: string;
+    if (kind === 'gcs') {
+      [url] = await (await gcsBucket()).file(fileKey).getSignedUrl({ version: 'v4', action: 'read', expires: now + VIEW_URL_TTL_MS });
+    } else {
+      const { sdk, presigner, client, bucket } = await s3();
+      url = await presigner.getSignedUrl(client, new sdk.GetObjectCommand({ Bucket: bucket, Key: fileKey }), { expiresIn: VIEW_URL_TTL_MS / 1000 });
+    }
+    // Reuse for 50 of the 60 minutes so clients never get an almost-expired URL.
+    signedUrlCache.set(cacheKey, { url, expiresAt: now + 50 * 60 * 1000 });
     return url;
   }
-  if (kind === 's3') {
-    const { sdk, presigner, client, bucket } = await s3();
-    return presigner.getSignedUrl(client, new sdk.PutObjectCommand({ Bucket: bucket, Key: fileKey, ContentType: contentType }), { expiresIn: 900 });
+
+  /** A signed direct-upload URL (cloud storage only; local uses the proxy upload). */
+  async function directUploadUrl(fileKey: string, contentType: string): Promise<string> {
+    const kind = storageKind();
+    if (kind === 'gcs') {
+      const [url] = await (await gcsBucket()).file(fileKey).getSignedUrl({ version: 'v4', action: 'write', expires: Date.now() + 15 * 60 * 1000, contentType });
+      return url;
+    }
+    if (kind === 's3') {
+      const { sdk, presigner, client, bucket } = await s3();
+      return presigner.getSignedUrl(client, new sdk.PutObjectCommand({ Bucket: bucket, Key: fileKey, ContentType: contentType }), { expiresIn: 900 });
+    }
+    throw new Error('DIRECT_UPLOAD_UNSUPPORTED');
   }
-  throw new Error('DIRECT_UPLOAD_UNSUPPORTED');
+
+  return { putFile, readStoredFile, viewUrl, directUploadUrl };
 }
+
+const defaultStorage = createStorageService();
+export const putFile = defaultStorage.putFile;
+export const readStoredFile = defaultStorage.readStoredFile;
+export const viewUrl = defaultStorage.viewUrl;
+export const directUploadUrl = defaultStorage.directUploadUrl;

@@ -37,7 +37,7 @@ export interface VerifiedPhone {
   uid: string;
 }
 
-type Verifier = (idToken: string) => Promise<{
+export type FirebaseTokenVerifier = (idToken: string) => Promise<{
   phone_number?: string;
   email?: string;
   email_verified?: boolean;
@@ -47,15 +47,11 @@ type Verifier = (idToken: string) => Promise<{
   firebase?: { sign_in_provider?: string };
 }>;
 
-let verifierOverride: Verifier | null = null;
-
-/** Test hook: replace Firebase token verification (null restores). */
-export function setFirebaseVerifierForTests(verifier: Verifier | null): void {
-  verifierOverride = verifier;
+export interface FirebaseVerificationDeps {
+  verifyToken?: FirebaseTokenVerifier;
 }
 
-function firebaseVerifier(): Verifier {
-  if (verifierOverride) return verifierOverride;
+function defaultFirebaseVerifier(): FirebaseTokenVerifier {
   const projectId = process.env.FIREBASE_PROJECT_ID;
   if (!projectId) throw new Error('FIREBASE_NOT_CONFIGURED');
   // Verifying ID tokens needs only the project id: Google's public signing
@@ -72,10 +68,15 @@ const MAX_TOKEN_AGE_SECONDS = 10 * 60;
  * Verifies a Firebase ID token from a phone sign-in and returns the phone
  * number it proves. Throws PHONE_TOKEN_INVALID for anything else.
  */
-export async function verifyFirebasePhoneToken(idToken: string, now = Date.now()): Promise<VerifiedPhone> {
+export async function verifyFirebasePhoneToken(
+  idToken: string,
+  now = Date.now(),
+  deps: FirebaseVerificationDeps = {}
+): Promise<VerifiedPhone> {
   let decoded;
   try {
-    decoded = await firebaseVerifier()(idToken);
+    const verify = deps.verifyToken ?? defaultFirebaseVerifier();
+    decoded = await verify(idToken);
   } catch (error: any) {
     if (error?.message === 'FIREBASE_NOT_CONFIGURED') throw error;
     throw new Error('PHONE_TOKEN_INVALID');
@@ -97,10 +98,15 @@ export interface VerifiedGoogleAccount {
  * Verifies a Firebase ID token from a Google sign-in and returns the Google
  * account's verified email. Throws GOOGLE_TOKEN_INVALID for anything else.
  */
-export async function verifyFirebaseGoogleToken(idToken: string, now = Date.now()): Promise<VerifiedGoogleAccount> {
+export async function verifyFirebaseGoogleToken(
+  idToken: string,
+  now = Date.now(),
+  deps: FirebaseVerificationDeps = {}
+): Promise<VerifiedGoogleAccount> {
   let decoded;
   try {
-    decoded = await firebaseVerifier()(idToken);
+    const verify = deps.verifyToken ?? defaultFirebaseVerifier();
+    decoded = await verify(idToken);
   } catch (error: any) {
     if (error?.message === 'FIREBASE_NOT_CONFIGURED') throw error;
     throw new Error('GOOGLE_TOKEN_INVALID');

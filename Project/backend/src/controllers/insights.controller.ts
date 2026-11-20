@@ -162,41 +162,43 @@ export function plainBrief(stats: PulseStats): WeeklyBrief {
   return { headline: occupancy >= 80 ? 'A full and steady week' : 'Here is your week at a glance', points: points.slice(0, 4), suggestion, ai: false };
 }
 
-let briefOverride: ((stats: PulseStats) => Promise<unknown>) | null = null;
-/** Test hook: replace the Gemini call (null restores). */
-export function setBriefWriterForTests(run: typeof briefOverride): void {
-  briefOverride = run;
+export interface WeeklyBriefDeps {
+  writeBrief?: (stats: PulseStats) => Promise<unknown>;
 }
 
 /** Gemini's weekly brief for the owner, from this week's numbers only. */
-export const postWeeklyBrief = async (req: Request, res: Response): Promise<any> => {
-  try {
-    const scope = await scopeFor(req);
-    if (!scope.length) return res.status(404).json({ message: 'No PG to summarise' });
-    const seesMoney = (await accessiblePropertyIds(req, [...MONEY_ROLES])).some((id) => scope.includes(id));
-    const stats = await pulseStats(scope, seesMoney);
-    if (!briefOverride && !aiEnabled()) return res.json({ brief: plainBrief(stats), stats });
+export function createWeeklyBriefHandler(deps: WeeklyBriefDeps = {}) {
+  return async (req: Request, res: Response): Promise<any> => {
     try {
-      const raw = briefOverride ? await briefOverride(stats) : await generateStructured({
-        system: [
-          'You write a short weekly brief for the owner of a paying-guest (PG) housing business in India.',
-          'Use only the numbers given. Be warm, plain and specific, like a good manager talking to the owner; no jargon, no emojis, no invented facts.',
-          'Write money with the rupee sign and Indian grouping, e.g. ₹21,100, and occupancy as "9 of 20 beds". The headline and each point must say different things; never repeat a fact.',
-          'Pick the single most useful next step. Never mention residents by name.'
-        ].join(' '),
-        parts: [{ text: `This week's numbers (null means not available to this person):\n${JSON.stringify(stats, null, 2)}` }],
-        schema: briefSchema
-      });
-      res.json({ brief: { ...briefSchema.parse(raw), ai: true }, stats });
+      const scope = await scopeFor(req);
+      if (!scope.length) return res.status(404).json({ message: 'No PG to summarise' });
+      const seesMoney = (await accessiblePropertyIds(req, [...MONEY_ROLES])).some((id) => scope.includes(id));
+      const stats = await pulseStats(scope, seesMoney);
+      if (!deps.writeBrief && !aiEnabled()) return res.json({ brief: plainBrief(stats), stats });
+      try {
+        const raw = deps.writeBrief ? await deps.writeBrief(stats) : await generateStructured({
+          system: [
+            'You write a short weekly brief for the owner of a paying-guest (PG) housing business in India.',
+            'Use only the numbers given. Be warm, plain and specific, like a good manager talking to the owner; no jargon, no emojis, no invented facts.',
+            'Write money with the rupee sign and Indian grouping, e.g. ₹21,100, and occupancy as "9 of 20 beds". The headline and each point must say different things; never repeat a fact.',
+            'Pick the single most useful next step. Never mention residents by name.'
+          ].join(' '),
+          parts: [{ text: `This week's numbers (null means not available to this person):\n${JSON.stringify(stats, null, 2)}` }],
+          schema: briefSchema
+        });
+        res.json({ brief: { ...briefSchema.parse(raw), ai: true }, stats });
+      } catch (error) {
+        logger.warn({ err: error }, 'Weekly brief fell back to plain numbers');
+        res.json({ brief: plainBrief(stats), stats });
+      }
     } catch (error) {
-      logger.warn({ err: error }, 'Weekly brief fell back to plain numbers');
-      res.json({ brief: plainBrief(stats), stats });
+      logger.error({ err: error }, 'Weekly brief error');
+      res.status(500).json({ message: 'Could not write the weekly brief' });
     }
-  } catch (error) {
-    logger.error({ err: error }, 'Weekly brief error');
-    res.status(500).json({ message: 'Could not write the weekly brief' });
-  }
-};
+  };
+}
+
+export const postWeeklyBrief = createWeeklyBriefHandler();
 
 // ---------------------------------------------------------------- kitchen forecast
 
@@ -237,84 +239,86 @@ export function ruleForecast(signals: KitchenSignals): z.infer<typeof forecastSc
   };
 }
 
-let forecastOverride: ((signals: KitchenSignals) => Promise<unknown>) | null = null;
-/** Test hook: replace the Gemini call (null restores). */
-export function setKitchenForecasterForTests(run: typeof forecastOverride): void {
-  forecastOverride = run;
+export interface KitchenForecastDeps {
+  forecast?: (signals: KitchenSignals) => Promise<unknown>;
 }
 
 /** Plates per meal for one PG and day, with the reason and the food saved. */
-export const getKitchenForecast = async (req: Request, res: Response): Promise<any> => {
-  try {
-    const allowed = await accessiblePropertyIds(req, ['OWNER', 'WARDEN', 'COOK']);
-    const propertyId = String(req.query.propertyId || allowed[0] || '');
-    if (!propertyId || !allowed.includes(propertyId)) return res.status(404).json({ message: 'PG not found' });
-    const dateText = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? String(req.query.date) : new Date(Date.now() + DAY).toISOString().slice(0, 10);
-    const date = new Date(`${dateText}T00:00:00.000Z`);
-    const weekday = date.toLocaleDateString('en-IN', { weekday: 'long', timeZone: 'UTC' });
+export function createKitchenForecastHandler(deps: KitchenForecastDeps = {}) {
+  return async (req: Request, res: Response): Promise<any> => {
+    try {
+      const allowed = await accessiblePropertyIds(req, ['OWNER', 'WARDEN', 'COOK']);
+      const propertyId = String(req.query.propertyId || allowed[0] || '');
+      if (!propertyId || !allowed.includes(propertyId)) return res.status(404).json({ message: 'PG not found' });
+      const dateText = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? String(req.query.date) : new Date(Date.now() + DAY).toISOString().slice(0, 10);
+      const date = new Date(`${dateText}T00:00:00.000Z`);
+      const weekday = date.toLocaleDateString('en-IN', { weekday: 'long', timeZone: 'UTC' });
 
-    const residents = await db.pGTenant.findMany({
-      where: { propertyId, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] }, foodOptOut: false },
-      select: { vibeAnswers: true, bed: { select: { room: { select: { foodIncluded: true, foodCharge: true } } } } }
-    });
-    const onPlan = residents.filter((resident: any) => resident.bed?.room && (resident.bed.room.foodIncluded || (resident.bed.room.foodCharge ?? 0) > 0));
-    const habits = onPlan.map((resident: any) => cleanVibeAnswers(resident.vibeAnswers) ?? {});
-    const orders = await db.pGServiceOrder.groupBy({
-      by: ['slot'], where: { propertyId, type: 'MEAL', forDate: date, status: { not: 'CANCELLED' } }, _sum: { quantity: true }
-    });
-    const ordered = Object.fromEntries(MEALS.map((meal) => [meal, 0])) as Record<Meal, number>;
-    for (const row of orders) if ((MEALS as readonly string[]).includes(row.slot)) ordered[row.slot as Meal] = row._sum.quantity ?? 0;
-    const past = await Promise.all([1, 2, 3, 4].map((weeks) => db.pGServiceOrder.count({
-      where: { propertyId, type: 'MEAL', forDate: new Date(date.getTime() - weeks * 7 * DAY), status: { not: 'CANCELLED' } }
-    })));
-    const signals: KitchenSignals = {
-      date: dateText, weekday,
-      planResidents: onPlan.length,
-      orders: ordered,
-      lateRisers: habits.filter((answers: any) => answers.wake === 2).length,
-      dayWorkers: habits.filter((answers: any) => answers.schedule === 0).length,
-      nightWorkers: habits.filter((answers: any) => answers.schedule === 2).length,
-      sameWeekdayOrders: past
-    };
+      const residents = await db.pGTenant.findMany({
+        where: { propertyId, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] }, foodOptOut: false },
+        select: { vibeAnswers: true, bed: { select: { room: { select: { foodIncluded: true, foodCharge: true } } } } }
+      });
+      const onPlan = residents.filter((resident: any) => resident.bed?.room && (resident.bed.room.foodIncluded || (resident.bed.room.foodCharge ?? 0) > 0));
+      const habits = onPlan.map((resident: any) => cleanVibeAnswers(resident.vibeAnswers) ?? {});
+      const orders = await db.pGServiceOrder.groupBy({
+        by: ['slot'], where: { propertyId, type: 'MEAL', forDate: date, status: { not: 'CANCELLED' } }, _sum: { quantity: true }
+      });
+      const ordered = Object.fromEntries(MEALS.map((meal) => [meal, 0])) as Record<Meal, number>;
+      for (const row of orders) if ((MEALS as readonly string[]).includes(row.slot)) ordered[row.slot as Meal] = row._sum.quantity ?? 0;
+      const past = await Promise.all([1, 2, 3, 4].map((weeks) => db.pGServiceOrder.count({
+        where: { propertyId, type: 'MEAL', forDate: new Date(date.getTime() - weeks * 7 * DAY), status: { not: 'CANCELLED' } }
+      })));
+      const signals: KitchenSignals = {
+        date: dateText, weekday,
+        planResidents: onPlan.length,
+        orders: ordered,
+        lateRisers: habits.filter((answers: any) => answers.wake === 2).length,
+        dayWorkers: habits.filter((answers: any) => answers.schedule === 0).length,
+        nightWorkers: habits.filter((answers: any) => answers.schedule === 2).length,
+        sameWeekdayOrders: past
+      };
 
-    let forecast = ruleForecast(signals);
-    let ai = false;
-    if (forecastOverride || aiEnabled()) {
-      try {
-        const raw = forecastOverride ? await forecastOverride(signals) : await generateStructured({
-          system: [
-            'You help the cook of an Indian paying-guest (PG) kitchen decide how many plates to make for each meal tomorrow, to cut food waste without anyone going hungry.',
-            'Residents on the food plan eat by default; orders are extra plates already booked. Use the routine counts: late risers often skip breakfast, day workers or students often miss lunch on weekdays, evening workers may miss dinner, weekends are lighter.',
-            'Give whole plates per meal with a short reason (under 12 words) and one practical tip. Never go below the booked orders.'
-          ].join(' '),
-          parts: [{ text: JSON.stringify(signals) }],
-          schema: forecastSchema
-        });
-        forecast = forecastSchema.parse(raw);
-        ai = true;
-      } catch (error) {
-        logger.warn({ err: error }, 'Kitchen forecast fell back to rules');
+      let forecast = ruleForecast(signals);
+      let ai = false;
+      if (deps.forecast || aiEnabled()) {
+        try {
+          const raw = deps.forecast ? await deps.forecast(signals) : await generateStructured({
+            system: [
+              'You help the cook of an Indian paying-guest (PG) kitchen decide how many plates to make for each meal tomorrow, to cut food waste without anyone going hungry.',
+              'Residents on the food plan eat by default; orders are extra plates already booked. Use the routine counts: late risers often skip breakfast, day workers or students often miss lunch on weekdays, evening workers may miss dinner, weekends are lighter.',
+              'Give whole plates per meal with a short reason (under 12 words) and one practical tip. Never go below the booked orders.'
+            ].join(' '),
+            parts: [{ text: JSON.stringify(signals) }],
+            schema: forecastSchema
+          });
+          forecast = forecastSchema.parse(raw);
+          ai = true;
+        } catch (error) {
+          logger.warn({ err: error }, 'Kitchen forecast fell back to rules');
+        }
       }
-    }
 
-    const meals = MEALS.map((meal) => {
-      const cookingForAll = signals.planResidents + ordered[meal];
-      const plates = Math.max(ordered[meal], Math.min(cookingForAll, Math.round(forecast[meal].plates)));
-      return { meal, plates, cookingForAll, orders: ordered[meal], why: forecast[meal].why.slice(0, 120) };
-    });
-    const platesSaved = meals.reduce((sum, meal) => sum + (meal.cookingForAll - meal.plates), 0);
-    res.json({
-      propertyId, date: dateText, weekday, ai,
-      planResidents: signals.planResidents,
-      meals,
-      tip: forecast.tip.slice(0, 160),
-      saved: { plates: platesSaved, rupees: platesSaved * plateCost(), perMonth: platesSaved * plateCost() * 30, plateCost: plateCost() }
-    });
-  } catch (error) {
-    logger.error({ err: error }, 'Kitchen forecast error');
-    res.status(500).json({ message: 'Could not forecast the kitchen' });
-  }
-};
+      const meals = MEALS.map((meal) => {
+        const cookingForAll = signals.planResidents + ordered[meal];
+        const plates = Math.max(ordered[meal], Math.min(cookingForAll, Math.round(forecast[meal].plates)));
+        return { meal, plates, cookingForAll, orders: ordered[meal], why: forecast[meal].why.slice(0, 120) };
+      });
+      const platesSaved = meals.reduce((sum, meal) => sum + (meal.cookingForAll - meal.plates), 0);
+      res.json({
+        propertyId, date: dateText, weekday, ai,
+        planResidents: signals.planResidents,
+        meals,
+        tip: forecast.tip.slice(0, 160),
+        saved: { plates: platesSaved, rupees: platesSaved * plateCost(), perMonth: platesSaved * plateCost() * 30, plateCost: plateCost() }
+      });
+    } catch (error) {
+      logger.error({ err: error }, 'Kitchen forecast error');
+      res.status(500).json({ message: 'Could not forecast the kitchen' });
+    }
+  };
+}
+
+export const getKitchenForecast = createKitchenForecastHandler();
 
 /** A one-minute pass for the owner's live voice briefing. */
 export const postBriefingPass = async (req: Request, res: Response): Promise<any> => {

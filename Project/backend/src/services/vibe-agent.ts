@@ -109,10 +109,8 @@ function profilerInstruction(): string {
   ].join('\n');
 }
 
-let profilerOverride: ((text: string) => Promise<unknown>) | null = null;
-/** Test hook: replace the profiler agent with a canned answer (null restores). */
-export function setVibeProfilerForTests(run: typeof profilerOverride): void {
-  profilerOverride = run;
+export interface VibeProfilerDeps {
+  runProfiler?: (text: string) => Promise<unknown>;
 }
 
 /**
@@ -120,14 +118,14 @@ export function setVibeProfilerForTests(run: typeof profilerOverride): void {
  * `current` (earlier answers) fills habits the new text does not mention.
  * Throws VIBE_AI_UNAVAILABLE when no model is configured, so callers can offer the quiz.
  */
-export async function buildVibeProfile(text: string, current: VibeAnswers = {}): Promise<VibeProfile> {
+export async function buildVibeProfile(text: string, current: VibeAnswers = {}, deps: VibeProfilerDeps = {}): Promise<VibeProfile> {
   const description = text.trim().slice(0, 2000);
   if (!description) throw new Error('VIBE_TEXT_EMPTY');
   const model = vibeModelName();
-  if (!profilerOverride && (!aiEnabled() || !model)) throw new Error('VIBE_AI_UNAVAILABLE');
+  if (!deps.runProfiler && (!aiEnabled() || !model)) throw new Error('VIBE_AI_UNAVAILABLE');
   let raw: unknown;
-  if (profilerOverride) {
-    raw = await profilerOverride(description);
+  if (deps.runProfiler) {
+    raw = await deps.runProfiler(description);
   } else {
     raw = await generateStructured({ system: profilerInstruction(), parts: [{ text: description }], schema: vibeProfileSchema, model: model! });
   }
@@ -185,10 +183,8 @@ function interviewInstruction(topics: { skip: string[]; facts: string[] } = { sk
   ].join('\n');
 }
 
-let interviewerOverride: ((input: { history: VibeTurn[]; known: VibeAnswers; text?: string; audio?: { mimeType: string; data: string } }) => Promise<unknown>) | null = null;
-/** Test hook: replace the interview model call (null restores). */
-export function setVibeInterviewerForTests(run: typeof interviewerOverride): void {
-  interviewerOverride = run;
+export interface VibeInterviewerDeps {
+  runInterviewer?: (input: { history: VibeTurn[]; known: VibeAnswers; text?: string; audio?: { mimeType: string; data: string }; topics?: { skip: string[]; facts: string[] } }) => Promise<unknown>;
 }
 
 /**
@@ -196,17 +192,20 @@ export function setVibeInterviewerForTests(run: typeof interviewerOverride): voi
  * text), updates their habits, and says the next question. Throws
  * VIBE_AI_UNAVAILABLE / VIBE_TURN_EMPTY.
  */
-export async function vibeInterviewTurn(input: { history: VibeTurn[]; known: VibeAnswers; text?: string; audio?: { mimeType: string; data: string }; topics?: { skip: string[]; facts: string[] } }): Promise<VibeInterviewTurn> {
+export async function vibeInterviewTurn(
+  input: { history: VibeTurn[]; known: VibeAnswers; text?: string; audio?: { mimeType: string; data: string }; topics?: { skip: string[]; facts: string[] } },
+  deps: VibeInterviewerDeps = {}
+): Promise<VibeInterviewTurn> {
   const topics = input.topics ?? { skip: [], facts: [] };
   const text = (input.text || '').trim().slice(0, 1000);
   if (!text && !input.audio) throw new Error('VIBE_TURN_EMPTY');
   const model = vibeModelName();
-  if (!interviewerOverride && (!aiEnabled() || !model)) throw new Error('VIBE_AI_UNAVAILABLE');
+  if (!deps.runInterviewer && (!aiEnabled() || !model)) throw new Error('VIBE_AI_UNAVAILABLE');
   const history = input.history.slice(-12).map((turn) => `${turn.role === 'assistant' ? 'VibeCheck' : 'Person'}: ${turn.text.slice(0, 500)}`).join('\n');
   const known = Object.entries(input.known).map(([id, value]) => `${id}=${value}`).join(', ') || 'none yet';
   let raw: unknown;
-  if (interviewerOverride) {
-    raw = await interviewerOverride({ ...input, ...(text ? { text } : {}) });
+  if (deps.runInterviewer) {
+    raw = await deps.runInterviewer({ ...input, ...(text ? { text } : {}) });
   } else {
     const parts: Array<Record<string, unknown>> = [
       { text: `Conversation so far:\n${history || '(just started)'}\n\nHabits already known: ${known}\n\nThe person's new answer${input.audio ? ' is in the audio clip' : `: ${text}`}.` }
@@ -284,15 +283,13 @@ function judgePrompt(person: VibeAnswers, personSummary: string | null, judged: 
   ].join('\n');
 }
 
-let agentTextOverride: ((prompt: string) => Promise<string>) | null = null;
-/** Test hook: replace the matcher agent run with canned model text (null restores). */
-export function setVibeAgentForTests(run: typeof agentTextOverride): void {
-  agentTextOverride = run;
+export interface VibeMatcherDeps {
+  runMatcherText?: (prompt: string) => Promise<string>;
 }
 
-async function runVibeMatcher(prompt: string, model: string): Promise<z.infer<typeof vibeJudgments>> {
-  if (agentTextOverride) {
-    const text = await agentTextOverride(prompt);
+async function runVibeMatcher(prompt: string, model: string, deps: VibeMatcherDeps = {}): Promise<z.infer<typeof vibeJudgments>> {
+  if (deps.runMatcherText) {
+    const text = await deps.runMatcherText(prompt);
     return vibeJudgments.parse(JSON.parse(text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()));
   }
   return generateStructured({
@@ -323,7 +320,12 @@ export function anchoredScore(aiScore: number, baseline: number): number {
  * answers, else the deterministic baseline. Rooms nobody answered stay
  * scoreless and never reach the agent.
  */
-export async function scoreVibeRooms(person: VibeAnswers, rooms: VibeRoomInput[], personSummary: string | null = null): Promise<Map<string, AiVibeMatch>> {
+export async function scoreVibeRooms(
+  person: VibeAnswers,
+  rooms: VibeRoomInput[],
+  personSummary: string | null = null,
+  deps: VibeMatcherDeps = {}
+): Promise<Map<string, AiVibeMatch>> {
   const matches = new Map<string, AiVibeMatch>();
   const judged: { room: VibeRoomInput; baseline: VibeMatch }[] = [];
   for (const room of rooms) {
@@ -332,9 +334,9 @@ export async function scoreVibeRooms(person: VibeAnswers, rooms: VibeRoomInput[]
     if (baseline.score !== null) judged.push({ room, baseline });
   }
   const model = vibeModelName();
-  if (!judged.length || (!agentTextOverride && (!aiEnabled() || !model))) return matches;
+  if (!judged.length || (!deps.runMatcherText && (!aiEnabled() || !model))) return matches;
   try {
-    const { rooms: judgments } = await runVibeMatcher(judgePrompt(person, personSummary, judged), model ?? 'test');
+    const { rooms: judgments } = await runVibeMatcher(judgePrompt(person, personSummary, judged), model ?? 'test', deps);
     for (const { room, baseline } of judged) {
       const judgment = judgments[room.roomId];
       if (!judgment) continue;

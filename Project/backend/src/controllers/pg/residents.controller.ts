@@ -6,7 +6,7 @@ import { cleanServiceSettings, isBloodGroup, isKycType, LIMITS, MESSAGES, phoneV
 import { db } from '../../db/index.js';
 import { logAudit } from '../../services/pg-audit.js';
 import { calculateMonthlyRent, ensureFoodEntries } from '../../services/pg-billing.js';
-import { checkKycDocument } from '../../services/kyc-check.js';
+import { checkKycDocument, type KycCheckDeps } from '../../services/kyc-check.js';
 import { INVALID_REQUEST, parseBody } from '../../utils/validate.js';
 import { logger } from '../../utils/logger.js';
 import {
@@ -17,10 +17,10 @@ import {
 } from '../../validation/request.schemas.js';
 import { accessiblePropertyIds, canManageProperty, currentUser, MONEY_ACCESS_ROLES, ownStay, requestPropertyId, residentScope } from './access.js';
 
-async function runKycCheck(tenant: any): Promise<any> {
+async function runKycCheck(tenant: any, deps: KycCheckDeps = {}): Promise<any> {
   const property = await db.pGProperty.findUnique({ where: { id: tenant.propertyId }, select: { serviceSettings: true } });
   if (!cleanServiceSettings(property?.serviceSettings).kycAi) throw new Error('KYC_AI_OFF');
-  const check = await checkKycDocument({ fileKey: tenant.kycDocumentUrl, declaredType: tenant.kycType, residentName: tenant.name });
+  const check = await checkKycDocument({ fileKey: tenant.kycDocumentUrl, declaredType: tenant.kycType, residentName: tenant.name }, deps);
   await db.pGTenant.update({ where: { id: tenant.id }, data: { kycAiCheck: check as unknown as Prisma.InputJsonValue } });
   return check;
 }
@@ -35,29 +35,37 @@ function kycCheckError(res: Response, error: any): any {
 }
 
 /** Resident: read my uploaded KYC document with AI right after uploading it. */
-export const checkMyKyc = async (req: Request, res: Response): Promise<any> => {
-  if (!currentUser(req)) return res.status(401).json({ message: 'Unauthorized' });
-  try {
-    const tenant = await ownStay(req, String(req.params.tenantId));
-    if (!tenant) return res.status(404).json({ message: 'Stay not found' });
-    if (!tenant.kycDocumentUrl) return res.status(400).json({ message: 'Upload your ID document first' });
-    res.json(await runKycCheck(tenant));
-  } catch (error) {
-    return kycCheckError(res, error);
-  }
-};
+export function createCheckMyKycHandler(deps: KycCheckDeps = {}) {
+  return async (req: Request, res: Response): Promise<any> => {
+    if (!currentUser(req)) return res.status(401).json({ message: 'Unauthorized' });
+    try {
+      const tenant = await ownStay(req, String(req.params.tenantId));
+      if (!tenant) return res.status(404).json({ message: 'Stay not found' });
+      if (!tenant.kycDocumentUrl) return res.status(400).json({ message: 'Upload your ID document first' });
+      res.json(await runKycCheck(tenant, deps));
+    } catch (error) {
+      return kycCheckError(res, error);
+    }
+  };
+}
+
+export const checkMyKyc = createCheckMyKycHandler();
 
 /** Owner or warden: run (or re-run) the AI reading of a resident's KYC document. */
-export const checkTenantKyc = async (req: Request, res: Response): Promise<any> => {
-  try {
-    const tenant = await db.pGTenant.findUnique({ where: { id: String(req.params.tenantId) } });
-    if (!tenant || !await canManageProperty(req, tenant.propertyId)) return res.status(404).json({ message: 'Resident not found' });
-    if (!tenant.kycDocumentUrl) return res.status(400).json({ message: 'This resident has not uploaded an ID yet' });
-    res.json(await runKycCheck(tenant));
-  } catch (error) {
-    return kycCheckError(res, error);
-  }
-};
+export function createCheckTenantKycHandler(deps: KycCheckDeps = {}) {
+  return async (req: Request, res: Response): Promise<any> => {
+    try {
+      const tenant = await db.pGTenant.findUnique({ where: { id: String(req.params.tenantId) } });
+      if (!tenant || !await canManageProperty(req, tenant.propertyId)) return res.status(404).json({ message: 'Resident not found' });
+      if (!tenant.kycDocumentUrl) return res.status(400).json({ message: 'This resident has not uploaded an ID yet' });
+      res.json(await runKycCheck(tenant, deps));
+    } catch (error) {
+      return kycCheckError(res, error);
+    }
+  };
+}
+
+export const checkTenantKyc = createCheckTenantKycHandler();
 
 export const checkInTenant = async (req: Request, res: Response): Promise<any> => {
   try {

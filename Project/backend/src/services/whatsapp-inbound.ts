@@ -48,15 +48,7 @@ export function textMessages(payload: any): InboundText[] {
   return out;
 }
 
-// Per-number conversation state (instance memory: a fresh thread after a restart is acceptable).
-const conversations = new Map<string, { sessionId?: string; confirmationId?: string; at: number }>();
-const seen = new Map<string, number>();
 const CONVERSATION_TTL_MS = 6 * 60 * 60 * 1000;
-
-function remember(phone: string, state: { sessionId?: string; confirmationId?: string }): void {
-  conversations.set(phone, { ...state, at: Date.now() });
-  if (conversations.size > 5000) for (const [key, value] of conversations) if (Date.now() - value.at > CONVERSATION_TTL_MS) conversations.delete(key);
-}
 
 /** The resident account and stay behind a WhatsApp number, if any (a system lookup: the sender is not signed in). */
 async function residentFor(phone: string): Promise<{ userId: string; propertyId: string } | null> {
@@ -89,40 +81,52 @@ export async function sendWhatsAppText(to: string, body: string): Promise<void> 
 const YES = /^(yes|y|confirm|ok|haan|ஆம்|हाँ|हां)\b/i;
 const NO = /^(no|n|cancel|stop|வேண்டாம்|नहीं)\b/i;
 
-/** Answers one inbound text with the assistant. Duplicate deliveries (Meta retries) are ignored. */
-export async function handleInboundText(message: InboundText, deps: { chat: Chat; send?: Sender }): Promise<string | null> {
-  if (seen.has(message.id)) return null;
-  seen.set(message.id, Date.now());
-  if (seen.size > 10000) seen.delete(seen.keys().next().value!);
+/** Creates an inbound WhatsApp message handler with isolated per-instance conversation and deduplication state. */
+export function createWhatsAppInboundHandler() {
+  // Per-number conversation state (instance memory: a fresh thread after a restart is acceptable).
+  const conversations = new Map<string, { sessionId?: string; confirmationId?: string; at: number }>();
+  const seen = new Map<string, number>();
 
-  const send = deps.send ?? sendWhatsAppText;
-  const state = conversations.get(message.from);
-  const resident = await residentFor(message.from);
-  const req = resident
-    ? { user: { userId: resident.userId, role: 'PG_TENANT', propertyId: resident.propertyId }, pgPropertyId: resident.propertyId, ip: `whatsapp:${message.from}` }
-    : { user: undefined, ip: `whatsapp:${message.from}` };
-  const input: Parameters<Chat>[1] = { message: message.text, ...(state?.sessionId ? { sessionId: state.sessionId } : {}) };
-  if (state?.confirmationId && YES.test(message.text.trim())) input.confirmationId = state.confirmationId;
-  else if (state?.confirmationId && NO.test(message.text.trim())) input.cancelConfirmationId = state.confirmationId;
-
-  const run = () => deps.chat(req, input);
-  const result = resident
-    ? await runAsDbUser({ userId: resident.userId, role: 'PG_TENANT', tokenPropertyId: resident.propertyId, hostPropertyId: resident.propertyId }, run)
-    : await runAsDbUser({}, run);
-  const reply = result.needsConfirmation
-    ? `${result.reply}\n\n${result.needsConfirmation.preview}\nReply YES to confirm or NO to cancel.`
-    : result.reply;
-  remember(message.from, { sessionId: result.sessionId, ...(result.needsConfirmation ? { confirmationId: result.needsConfirmation.confirmationId } : {}) });
-  try {
-    await send(message.from, reply);
-  } catch (error) {
-    logger.error({ err: error }, 'WhatsApp reply failed');
+  function remember(phone: string, state: { sessionId?: string; confirmationId?: string }): void {
+    conversations.set(phone, { ...state, at: Date.now() });
+    if (conversations.size > 5000) {
+      for (const [key, value] of conversations) {
+        if (Date.now() - value.at > CONVERSATION_TTL_MS) conversations.delete(key);
+      }
+    }
   }
-  return reply;
+
+  return async function handleInbound(message: InboundText, deps: { chat: Chat; send?: Sender }): Promise<string | null> {
+    if (seen.has(message.id)) return null;
+    seen.set(message.id, Date.now());
+    if (seen.size > 10000) seen.delete(seen.keys().next().value!);
+
+    const send = deps.send ?? sendWhatsAppText;
+    const state = conversations.get(message.from);
+    const resident = await residentFor(message.from);
+    const req = resident
+      ? { user: { userId: resident.userId, role: 'PG_TENANT', propertyId: resident.propertyId }, pgPropertyId: resident.propertyId, ip: `whatsapp:${message.from}` }
+      : { user: undefined, ip: `whatsapp:${message.from}` };
+    const input: Parameters<Chat>[1] = { message: message.text, ...(state?.sessionId ? { sessionId: state.sessionId } : {}) };
+    if (state?.confirmationId && YES.test(message.text.trim())) input.confirmationId = state.confirmationId;
+    else if (state?.confirmationId && NO.test(message.text.trim())) input.cancelConfirmationId = state.confirmationId;
+
+    const run = () => deps.chat(req, input);
+    const result = resident
+      ? await runAsDbUser({ userId: resident.userId, role: 'PG_TENANT', tokenPropertyId: resident.propertyId, hostPropertyId: resident.propertyId }, run)
+      : await runAsDbUser({}, run);
+    const reply = result.needsConfirmation
+      ? `${result.reply}\n\n${result.needsConfirmation.preview}\nReply YES to confirm or NO to cancel.`
+      : result.reply;
+    remember(message.from, { sessionId: result.sessionId, ...(result.needsConfirmation ? { confirmationId: result.needsConfirmation.confirmationId } : {}) });
+    try {
+      await send(message.from, reply);
+    } catch (error) {
+      logger.error({ err: error }, 'WhatsApp reply failed');
+    }
+    return reply;
+  };
 }
 
-/** Test hook. */
-export function resetWhatsAppStateForTests(): void {
-  conversations.clear();
-  seen.clear();
-}
+/** Answers one inbound text with the assistant. Duplicate deliveries (Meta retries) are ignored. */
+export const handleInboundText = createWhatsAppInboundHandler();
