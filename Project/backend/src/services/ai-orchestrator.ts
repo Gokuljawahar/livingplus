@@ -20,11 +20,12 @@
 // host that prepared it, and expires after ten minutes.
 
 import { randomBytes } from 'crypto';
-import { BaseLlm, createEvent, createRunConfig, FunctionTool, InMemoryRunner, isLlmCallsLimitExceededError, LlmAgent, type LlmRequest, type LlmResponse } from '@google/adk';
+import { createEvent, createRunConfig, FunctionTool, InMemoryRunner, isLlmCallsLimitExceededError, LlmAgent } from '@google/adk';
 import type { Content, Schema } from '@google/genai';
 import { db } from '../db/index.js';
 import { actorFromRequest, parseToolArgs, toolCatalogue, toolDefinitionsFor, type Actor } from './ai-tools.js';
-import { modelFailure, modelTimeoutMs, type ModelStep, type ModelTurn, type ToolDefinition } from './ai-provider.js';
+import { modelFailure, type ModelStep, type ModelTurn, type ToolDefinition } from './ai-provider.js';
+import { AgentModelLlm, generateModelStep as generateStep, INVALID_ARGS, stripEmptyTextParts } from './adk-adapter.js';
 import { loadThreadState, saveThreadState, type ChatThreadState, type PendingAction } from './ai-checkpointer.js';
 import { confirmationSurface, surfacesForOutcomes, type A2uiMessage } from './a2ui.js';
 import { logger } from '../utils/logger.js';
@@ -190,15 +191,6 @@ function parseConfirmationId(value: string): { threadId: string; nonce: string }
   return match ? { threadId: match[1]!, nonce: match[2]! } : null;
 }
 
-async function generateStep(model: AgentModel, system: string, contents: Content[], tools: ToolDefinition[]): Promise<ModelStep> {
-  if (typeof model.generate !== 'function') throw new Error('AI_MODEL_INIT_FAILED: the configured model does not support tool calling');
-  try {
-    return await model.generate({ system, contents, tools, timeoutMs: modelTimeoutMs() });
-  } catch (error: any) {
-    throw modelFailure(error);
-  }
-}
-
 /** Closes a pause the user walked away from: every call answered, then a plain reply. Nothing runs. */
 function abandonPending(state: ChatThreadState): ChatThreadState {
   const pending = state.pending;
@@ -224,41 +216,7 @@ async function findSession(id: string | undefined, actor: Actor): Promise<{ id: 
   }).catch(() => null);
 }
 
-/** ADK skips any event whose first part is an empty text, which would orphan the function calls after it. */
-function withoutEmptyText<T extends { text?: string | undefined }>(parts: T[]): T[] {
-  const kept = parts.filter((part) => !(part.text === '' && Object.keys(part).length === 1));
-  return kept.length ? kept : parts;
-}
-
-/** Marks a model call whose arguments could not be parsed (see AgentModelLlm). */
-const INVALID_ARGS = '__invalid_args__';
 const AWAITING = 'AWAITING_CONFIRMATION';
-
-/**
- * Our Gemini SDK model (or a test's scripted model) as an ADK BaseLlm. ADK owns
- * the loop; this answers each model call with one generate() step, declaring
- * only the caller role's tools.
- */
-class AgentModelLlm extends BaseLlm {
-  constructor(private readonly inner: AgentModel, private readonly declared: ToolDefinition[], private readonly onUsage: (usage: ChatResult['usage']) => void) {
-    super({ model: 'livingplus-gemini' });
-  }
-
-  async *generateContentAsync(request: LlmRequest): AsyncGenerator<LlmResponse, void> {
-    const instruction = request.config?.systemInstruction as any;
-    const system = typeof instruction === 'string' ? instruction : (instruction?.parts ?? []).map((part: any) => part?.text ?? '').join('\n');
-    const step = await generateStep(this.inner, system, request.contents, this.declared);
-    if (step.usage) this.onUsage(step.usage);
-    // Calls the provider could not parse go back to the model as errors (it can retry).
-    const invalid = step.invalid.map((bad) => ({ functionCall: { id: bad.id, name: bad.name || 'search_properties', args: { [INVALID_ARGS]: bad.error } } }));
-    const parts = [...withoutEmptyText(step.content.parts ?? []), ...invalid];
-    yield { content: { role: 'model', parts: parts.length ? parts : [{ text: step.text }] }, ...(step.usage ? { usageMetadata: { promptTokenCount: step.usage.prompt_tokens, candidatesTokenCount: step.usage.completion_tokens } } : {}) } as LlmResponse;
-  }
-
-  async connect(): Promise<never> {
-    throw new Error('Live connections are not used by the LivingPlus assistant');
-  }
-}
 
 export async function runChat(
   req: any,
@@ -405,7 +363,7 @@ export async function runChat(
   for (const content of withoutOldPhotos(trimHistory(state.history))) {
     await runner.sessionService.appendEvent({
       session: adkSession,
-      event: createEvent({ invocationId: 'history', author: content.role === 'user' ? 'user' : agent.name, content: { ...content, parts: withoutEmptyText(content.parts ?? []) } })
+      event: createEvent({ invocationId: 'history', author: content.role === 'user' ? 'user' : agent.name, content: { ...content, parts: stripEmptyTextParts(content.parts ?? []) } })
     });
   }
 
