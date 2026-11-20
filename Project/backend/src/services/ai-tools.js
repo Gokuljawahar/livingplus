@@ -864,6 +864,7 @@ export const toolCatalogue = {
             await db.pGResidentNotification.createMany({
                 data: residents.map((resident) => ({ propertyId, tenantId: resident.id, type: 'NOTICE', title, message }))
             });
+            logAudit(propertyId, actor.userId, 'NOTICE_POSTED_VIA_AI', 'PGProperty', propertyId, title);
             return { sent: residents.length };
         }
     },

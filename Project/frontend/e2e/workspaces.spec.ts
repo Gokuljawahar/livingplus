@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 const OWNER = { phone: '9555500001', password: 'Owner@e2e-pass1' };
 const OWNER_VIEWS = [
   'Today', 'Bed requests', 'Residents & KYC', 'Room changes', 'Rent', 'Payments', 'Expenses', 'Utilities', 'Reports',
-  'Maintenance', 'Meals & cleaning', 'Activity', 'PGs & beds', 'Staff'
+  'Maintenance', 'Meals & cleaning', 'PG pulse', 'PGs & beds', 'Staff'
 ];
 const shotDir = process.env.E2E_SCREENSHOT_DIR;
 

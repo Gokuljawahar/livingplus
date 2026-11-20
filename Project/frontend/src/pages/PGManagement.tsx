@@ -22,6 +22,8 @@ import { useSidebar } from '../context/sidebar';
 import { apiErrorMessage } from '../utils/api-error';
 import StatusPill from '../components/ui/StatusPill';
 import { statusLabel } from '../utils/status';
+import PgPulse from '../components/PgPulse';
+import KitchenForecast from '../components/KitchenForecast';
 
 type Activity = { id: string; action: string; entityType?: string | null; entityId?: string | null; detail?: string | null; actorName?: string | null; createdAt: string; propertyId: string };
 type Property = { id: string; slug?: string | null; name: string; description?: string | null; address: string; locality: string; contactPhone?: string | null; upiId?: string | null; city: string; latitude?: number | null; longitude?: number | null; genderPolicy: string; status?: string; bookingLockMinutes?: number; rentDay?: number; rentDueDay?: number; amenities: string[]; houseRules: string[]; photoUrls: string[]; rooms: { id: string; roomNumber: string; monthlyRent: number; depositAmount: number; maintenanceFee: number; utilitiesSurcharge: number; foodCharge: number; roomType: string; beds: { id: string; label: string; status: string; maintenanceNote?: string | null }[] }[] };
@@ -145,7 +147,7 @@ export default function PGManagement() {
     meta: { errorMessage: 'Could not load PG operations' }
   });
   const {
-    properties, bookings, tickets, summary, tenants, activity, roomChanges,
+    properties, bookings, tickets, summary, tenants, roomChanges,
     rentEntries, expenses, expenseTotal, bills, report, staff, paymentClaims
   } = workspace ?? EMPTY_WORKSPACE;
   const refresh = () => { void queryClient.invalidateQueries({ queryKey: ['owner', 'workspace'] }); };
@@ -592,7 +594,7 @@ export default function PGManagement() {
     { id: 'reports', label: 'Reports', icon: FileText, group: 'Money' },
     { id: 'maintenance', label: 'Maintenance', icon: Wrench, group: 'Operations' },
     { id: 'services', label: 'Meals & cleaning', icon: UtensilsCrossed, group: 'Operations' },
-    { id: 'activity', label: 'Activity', icon: Clock, group: 'Operations' },
+    { id: 'activity', label: 'PG pulse', icon: Clock, group: 'Operations' },
     { id: 'properties', label: 'PGs & beds', icon: BedDouble, group: 'Setup' },
     { id: 'staff', label: 'Staff', icon: Users, group: 'Setup' }
   ].filter((item) => allowedViews.includes(item.id)) as { id: WorkspaceView; label: string; icon: typeof Users; group?: string }[], [allowedViews]);
@@ -716,7 +718,10 @@ export default function PGManagement() {
               );
             })()}
 
-            {view === 'services' && <OwnerServices canEditSettings={summary.canManageStaff} />}
+            {view === 'services' && <div className="space-y-6">
+              <KitchenForecast properties={[...properties].sort((a, b) => Number(b.rooms.some((room) => room.foodCharge > 0 || (room as { foodIncluded?: boolean }).foodIncluded)) - Number(a.rooms.some((room) => room.foodCharge > 0 || (room as { foodIncluded?: boolean }).foodIncluded))).map((property) => ({ id: property.id, name: property.name }))} />
+              <OwnerServices canEditSettings={summary.canManageStaff} />
+            </div>}
 
             {view === 'properties' && <section className={`grid gap-8 pt-2 ${showPropertyForm ? 'xl:grid-cols-[minmax(0,1.3fr)_minmax(340px,0.7fr)]' : ''}`}>
               <div>
@@ -1166,19 +1171,7 @@ export default function PGManagement() {
               </div>
             </section>}
 
-            {view === 'activity' && <section className="pt-2 space-y-4">
-              <h2 className="text-base font-bold text-slate-900">Activity log</h2>
-              <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-xs divide-y divide-slate-100">
-                {activity.map((entry) => <div key={entry.id} className="flex flex-col gap-1 py-3.5 sm:flex-row sm:items-center sm:justify-between first:pt-0 last:pb-0">
-                  <div>
-                    <p className="font-bold text-sm text-slate-800">{entry.action.replace(/_/g, ' ')}{entry.detail ? <span className="font-medium text-slate-500"> · {entry.detail}</span> : null}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">{entry.actorName || 'System'}{entry.entityType ? ` · ${entry.entityType}` : ''}</p>
-                  </div>
-                  <span className="text-xs font-medium text-slate-400">{new Date(entry.createdAt).toLocaleString()}</span>
-                </div>)}
-                {!activity.length && <p className="py-8 text-center text-xs text-slate-500 font-medium">No activity logged yet.</p>}
-              </div>
-            </section>}
+            {view === 'activity' && <PgPulse onGo={(target) => setView(target)} />}
 
             {view === 'staff' && summary.canManageStaff && <section className="grid gap-8 pt-2 xl:grid-cols-[minmax(0,1fr)_360px]">
               <div>

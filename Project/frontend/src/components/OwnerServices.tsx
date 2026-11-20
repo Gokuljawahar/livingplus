@@ -1,6 +1,6 @@
 // Owner and warden: the day's meal and cleaning orders (with kitchen head-counts),
 // and, for owners, which services each PG offers (the modular console).
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Loader2 } from 'lucide-react';
@@ -52,7 +52,7 @@ function SettingsCard({ property, onSaved }: { property: Data['properties'][numb
           {toggle('Meal orders', draft.mealOrders.enabled, (enabled) => setDraft({ ...draft, mealOrders: { ...draft.mealOrders, enabled } }), 'Residents order breakfast, lunch or dinner for a day.')}
           {draft.mealOrders.enabled && (
             <div className="grid grid-cols-3 gap-2 pb-3 pl-8">
-              {MEAL_SLOTS.map((slot) => priceInput(SLOT_LABELS[slot], draft.mealOrders.prices[slot], (price) => setDraft({ ...draft, mealOrders: { ...draft.mealOrders, prices: { ...draft.mealOrders.prices, [slot]: price } } })))}
+              {MEAL_SLOTS.map((slot) => <Fragment key={slot}>{priceInput(SLOT_LABELS[slot], draft.mealOrders.prices[slot], (price) => setDraft({ ...draft, mealOrders: { ...draft.mealOrders, prices: { ...draft.mealOrders.prices, [slot]: price } } }))}</Fragment>)}
             </div>
           )}
         </div>

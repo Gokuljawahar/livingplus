@@ -1,3 +1,4 @@
+import { getKitchenForecast, getPulse, postWeeklyBrief } from '../controllers/insights.controller.js';
 import { Router } from 'express';
 import { systemRoute } from '../db/context.js';
 import { cancelMyServiceOrder, createServiceOrder, listMyServiceOrders, listStaffServiceOrders, updateServiceOrderStatus, updateServiceSettings } from '../controllers/services.controller.js';
@@ -36,6 +37,9 @@ router.get('/tenant/vacant-beds', authenticate, listVacantBeds);
 router.post('/tenant/room-changes/:requestId/proposals', authenticate, proposeRoomSwap);
 router.post('/tenant/room-changes/:requestId/response', authenticate, respondRoomSwap);
 router.get('/owner/activity', authenticate, listAuditLogs);
+router.get('/owner/pulse', authenticate, getPulse);
+router.post('/owner/pulse/brief', authenticate, aiChatLimiter, postWeeklyBrief);
+router.get('/owner/kitchen-forecast', authenticate, aiChatLimiter, getKitchenForecast);
 // Public endpoints that work across PGs by design run as the system; each
 // validates its own input (slug-only lookups, verified phone codes, booking refs).
 router.get('/sites', systemRoute('directory of PG resident sites (name and place only)', listPgSites));

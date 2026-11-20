@@ -914,6 +914,47 @@ describe('search near a campus or office', () => {
   });
 });
 
+describe('owner insights: PG pulse and kitchen forecast', () => {
+  it('writes a plain weekly brief from the numbers when AI is off, with the right next step', async () => {
+    const insights = await import('../src/controllers/insights.controller.js');
+    const brief = insights.plainBrief({ beds: 20, occupied: 9, newResidents: 2, pendingRequests: 1, overdueCount: 3, overdueAmount: 21100, ticketsOpen: 1, ticketsOpened: 2, ticketsResolved: 1, avgFixHours: 5, mealOrders: 17, aiActions: 4 });
+    assert.equal(brief.ai, false);
+    assert.equal(brief.suggestion.action, 'SEND_RENT_REMINDERS', 'overdue rent comes first');
+    assert.ok(brief.points.some((point) => point.includes('₹21,100')));
+    const calm = insights.plainBrief({ beds: 4, occupied: 4, newResidents: 0, pendingRequests: 0, overdueCount: 0, overdueAmount: 0, ticketsOpen: 0, ticketsOpened: 0, ticketsResolved: 0, avgFixHours: null, mealOrders: 0, aiActions: 0 });
+    assert.equal(calm.suggestion.action, 'NONE');
+  });
+
+  it('forecasts plates from routines and never goes below booked orders or above the plan', async () => {
+    const insights = await import('../src/controllers/insights.controller.js');
+    const rules = insights.ruleForecast({ date: '2026-11-23', weekday: 'Monday', planResidents: 6, orders: { BREAKFAST: 0, LUNCH: 2, DINNER: 0 }, lateRisers: 2, dayWorkers: 3, nightWorkers: 1, sameWeekdayOrders: [1, 0, 2, 1] });
+    assert.ok(rules.BREAKFAST.plates < 6, 'late risers skip breakfast');
+    assert.ok(rules.LUNCH.plates >= 2, 'booked lunch orders are always made');
+
+    insights.setKitchenForecasterForTests(async () => ({
+      BREAKFAST: { plates: 99, why: 'too many' }, LUNCH: { plates: -3, why: 'too few' }, DINNER: { plates: 1, why: 'ok' }, tip: 'Cook in batches.'
+    }));
+    try {
+      const resident = await prisma.pGTenant.findFirst({ where: { propertyId: ids.prop.id, status: 'ACTIVE' } });
+      const roomA = await prisma.pGRoom.update({ where: { id: ids.roomB.id }, data: { foodCharge: 1500 } });
+      const date = '2026-12-07';
+      await prisma.pGServiceOrder.create({ data: { propertyId: ids.prop.id, tenantId: resident!.id, type: 'MEAL', forDate: new Date(`${date}T00:00:00.000Z`), slot: 'LUNCH', quantity: 2, unitPrice: 90 } });
+      const res: any = { statusCode: 200, status(code: number) { this.statusCode = code; return this; }, json(body: unknown) { this.body = body; return this; } };
+      await insights.getKitchenForecast({ ...userReq(ids.owner), query: { propertyId: ids.prop.id, date } } as any, res);
+      assert.equal(res.statusCode, 200);
+      const byMeal = Object.fromEntries(res.body.meals.map((meal: any) => [meal.meal, meal]));
+      assert.equal(byMeal.BREAKFAST.plates, byMeal.BREAKFAST.cookingForAll, 'never above everyone on the plan');
+      assert.equal(byMeal.LUNCH.plates, 2, 'never below the booked orders');
+      assert.equal(res.body.ai, true);
+      assert.ok(!JSON.stringify(res.body).includes('Spec Tenant'), 'plate counts only, no names');
+      await prisma.pGServiceOrder.deleteMany({ where: { propertyId: ids.prop.id, forDate: new Date(`${date}T00:00:00.000Z`) } });
+      await prisma.pGRoom.update({ where: { id: roomA.id }, data: { foodCharge: 0 } });
+    } finally {
+      insights.setKitchenForecasterForTests(null);
+    }
+  });
+});
+
 describe('owner sign-in forgives copy-paste slips', () => {
   it('accepts a pasted trailing space and local number formats, but not a wrong password', async () => {
     const bcrypt = (await import('bcryptjs')).default;
