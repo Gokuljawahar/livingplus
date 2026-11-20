@@ -14,14 +14,14 @@ export interface LiveHabits { answers: VibeAnswers; summary: string | null; done
 const IN_RATE = 16000;
 const OUT_RATE = 24000;
 
-function toBase64(bytes: Uint8Array): string {
+export function toBase64(bytes: Uint8Array): string {
   let binary = '';
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(binary);
 }
 
 /** Float samples at `rate` -> 16 kHz little-endian PCM16. */
-function downsample(input: Float32Array, rate: number): Uint8Array {
+export function downsample(input: Float32Array, rate: number): Uint8Array {
   const ratio = rate / IN_RATE;
   const length = Math.floor(input.length / ratio);
   const pcm = new Int16Array(length);
@@ -42,7 +42,7 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
   const [turns, setTurns] = useState<LiveTurn[]>([]);
   const [error, setError] = useState('');
   const socketRef = useRef<WebSocket | null>(null);
-  const micRef = useRef<{ stream: MediaStream; ctx: AudioContext; node: ScriptProcessorNode } | null>(null);
+  const micRef = useRef<{ stream: MediaStream; ctx: AudioContext; node: AudioWorkletNode } | null>(null);
   const playRef = useRef<{ ctx: AudioContext; next: number; sources: AudioBufferSourceNode[] } | null>(null);
   const habitsRef = useRef(onHabits);
   useEffect(() => { habitsRef.current = onHabits; }, [onHabits]);
@@ -93,6 +93,8 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     socketRef.current = null;
     const mic = micRef.current;
     if (mic) {
+      mic.node.port.onmessage = null;
+      mic.node.port.close();
       mic.node.disconnect();
       mic.stream.getTracks().forEach((track) => track.stop());
       void mic.ctx.close();
@@ -129,14 +131,29 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     void playCtx.resume();
     playRef.current = { ctx: playCtx, next: 0, sources: [] };
     const micCtx = new Ctor();
-    const source = micCtx.createMediaStreamSource(stream);
-    const node = micCtx.createScriptProcessor(4096, 1, 1);
-    const mute = micCtx.createGain();
-    mute.gain.value = 0;
-    source.connect(node);
-    node.connect(mute);
-    mute.connect(micCtx.destination);
-    micRef.current = { stream, ctx: micCtx, node };
+    if (!micCtx.audioWorklet) {
+      stream.getTracks().forEach((track) => track.stop());
+      void micCtx.close();
+      void playCtx.close();
+      playRef.current = null;
+      setStatus('failed');
+      return false;
+    }
+    let node: AudioWorkletNode;
+    try {
+      await micCtx.audioWorklet.addModule('/pcm-capture-worklet.js');
+      const source = micCtx.createMediaStreamSource(stream);
+      node = new AudioWorkletNode(micCtx, 'pcm-capture-processor');
+      source.connect(node);
+      micRef.current = { stream, ctx: micCtx, node };
+    } catch {
+      stream.getTracks().forEach((track) => track.stop());
+      void micCtx.close();
+      void playCtx.close();
+      playRef.current = null;
+      setStatus('failed');
+      return false;
+    }
 
     const opened = await new Promise<boolean>((resolve) => {
       const socket = new WebSocket(url ?? liveUrl(propertyId));
@@ -195,10 +212,10 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
       setStatus('failed');
       return false;
     }
-    node.onaudioprocess = (event) => {
+    node.port.onmessage = (event: MessageEvent<Float32Array>) => {
       const socket = socketRef.current;
       if (!socket || socket.readyState !== WebSocket.OPEN || speakingNow()) return;
-      const frame: LiveClientMessage = { type: 'audio', data: toBase64(downsample(event.inputBuffer.getChannelData(0), micCtx.sampleRate)) };
+      const frame: LiveClientMessage = { type: 'audio', data: toBase64(downsample(event.data, micCtx.sampleRate)) };
       socket.send(JSON.stringify(frame));
     };
     return true;
