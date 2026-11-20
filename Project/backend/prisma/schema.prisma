@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -14,8 +14,14 @@ model User {
   phone      String?  @unique
   password   String
   name       String
+  /// Set when the owner proved the phone number with a code (shown to guests as "Verified owner").
+  phoneVerifiedAt DateTime?
   role       String   @default("PG_OWNER")
   profileImage String?
+  // Google account linked by the user after a password sign-in (Firebase uid).
+  // Google sign-in matches this id, never the email typed at registration.
+  googleUid      String?   @unique
+  googleLinkedAt DateTime?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   pgAccess   PGPropertyAccess[]
@@ -42,6 +48,11 @@ model PGProperty {
   bookingLockMinutes Int @default(120)
   rentDay      Int      @default(1)
   rentDueDay   Int      @default(5)
+  // Semantic search index (see services/semantic-search.ts).
+  searchEmbedding      Float[]   @default([])
+  searchEmbeddingModel String?
+  searchTextHash       String?
+  searchIndexedAt      DateTime?
   upiId        String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -57,6 +68,10 @@ model PGProperty {
   paymentClaims      PGPaymentClaim[]
   residentNotifications PGResidentNotification[]
   roomChangeRequests PGRoomChangeRequest[]
+  /// Optional services switched on by the owner (see @livingplus/shared services). Null = defaults.
+  serviceSettings Json?
+  serviceOrders PGServiceOrder[]
+  conditionReports PGConditionReport[]
 }
 
 model PGPropertyAccess {
@@ -98,6 +113,8 @@ model PGRoom {
 
 model PGBed {
   id              String   @id @default(uuid())
+  /// Workspace key, set by a database trigger from the room (see the tenant_isolation migration).
+  propertyId      String   @default(dbgenerated("''"))
   roomId          String
   label           String
   status          String   @default("AVAILABLE")
@@ -112,6 +129,7 @@ model PGBed {
 
   @@unique([roomId, label])
   @@index([roomId, status])
+  @@index([propertyId])
 }
 
 model PGBooking {
@@ -127,6 +145,10 @@ model PGBooking {
   lockExpiresAt DateTime?
   status        String     @default("PENDING")
   notes         String?
+  /// VibeCheck answers given with the request; copied to the resident on approval.
+  vibeAnswers   Json?
+  /// VibeCheck habit summary given with the request; copied to the resident on approval.
+  vibeSummary   String?
   rejectionReason String?
   idempotencyKey String? @unique
   createdAt     DateTime   @default(now())
@@ -157,6 +179,12 @@ model PGTenant {
   kycVerified           Boolean    @default(false)
   kycVerifiedAt         DateTime?
   foodOptOut            Boolean    @default(false)
+  /// VibeCheck lifestyle answers (see @livingplus/shared vibecheck): { questionId: 0 | 1 | 2 }
+  vibeAnswers           Json?
+  /// VibeCheck habits in the resident's own words (written by the profile agent, reviewed by them).
+  vibeSummary           String?
+  /// AI reading of the KYC document (type, name match, last 4 digits, flags). Never the full ID number.
+  kycAiCheck            Json?
   noticeDate            DateTime?
   moveInDate            DateTime
   moveOutDate           DateTime?
@@ -178,6 +206,8 @@ model PGTenant {
   bed                   PGBed?       @relation(fields: [bedId], references: [id], onDelete: SetNull)
   booking               PGBooking?   @relation(fields: [bookingId], references: [id], onDelete: SetNull)
   rentEntries           PGRentEntry[]
+  conditionReports      PGConditionReport[]
+  serviceOrders         PGServiceOrder[]
   maintenanceTickets    PGMaintenanceTicket[]
   paymentClaims         PGPaymentClaim[]
   notifications         PGResidentNotification[]
@@ -189,6 +219,8 @@ model PGTenant {
 
 model PGRentEntry {
   id          String   @id @default(uuid())
+  /// Workspace key, set by a database trigger from the resident (see the tenant_isolation migration).
+  propertyId  String   @default(dbgenerated("''"))
   tenantId    String
   entryType   String   @default("RENT")
   period      String
@@ -209,6 +241,7 @@ model PGRentEntry {
 
   @@unique([tenantId, period, entryType])
   @@index([period, status])
+  @@index([propertyId, period])
 }
 
 model PGMaintenanceTicket {
@@ -366,4 +399,44 @@ model ConversationSession {
   updatedAt DateTime @updatedAt
 
   @@index([userId, updatedAt])
+}
+
+/// Timestamped room condition at move-in or move-out (notes + photos). Append-only:
+/// the database allows adding and reading, never editing or deleting (tenant_isolation policies).
+model PGConditionReport {
+  id          String     @id @default(uuid())
+  propertyId  String
+  tenantId    String
+  kind        String     /// MOVE_IN | MOVE_OUT
+  notes       String?
+  photoUrls   String[]
+  createdBy   String?
+  createdByRole String?
+  createdAt   DateTime   @default(now())
+  property    PGProperty @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  tenant      PGTenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([propertyId])
+}
+
+/// A resident's meal or housekeeping order for a date and slot (services switched on per PG).
+model PGServiceOrder {
+  id         String     @id @default(uuid())
+  propertyId String
+  tenantId   String
+  type       String     /// MEAL | HOUSEKEEPING
+  forDate    DateTime   @db.Date
+  slot       String     /// BREAKFAST | LUNCH | DINNER, or MORNING | AFTERNOON | EVENING
+  quantity   Int        @default(1)
+  unitPrice  Float      @default(0)
+  notes      String?
+  status     String     @default("REQUESTED") /// REQUESTED | CONFIRMED | DONE | CANCELLED
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  property   PGProperty @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  tenant     PGTenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId, forDate])
+  @@index([tenantId, forDate])
 }

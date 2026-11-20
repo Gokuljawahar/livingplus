@@ -1,11 +1,13 @@
 import jwt from 'jsonwebtoken';
 import { getJwtSecret } from '../utils/auth-config.js';
+import { setDbUser } from '../db/context.js';
 export const optionalAuthenticate = (req, _res, next) => {
     const authHeader = req.headers.authorization;
     const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : undefined;
     if (token) {
         try {
             req.user = jwt.verify(token, getJwtSecret());
+            setDbUser(req, req.user);
         }
         catch {
             // Invalid or expired token: continue as guest rather than blocking chat.
@@ -28,11 +30,12 @@ export const authenticate = (req, res, next) => {
         const decoded = jwt.verify(token, getJwtSecret());
         const hostPropertyId = req.pgPropertyId;
         const tokenPropertyId = typeof decoded.propertyId === 'string' ? decoded.propertyId : undefined;
-        if (hostPropertyId && tokenPropertyId !== hostPropertyId && decoded.role !== 'SUPER_ADMIN') {
+        if (hostPropertyId && tokenPropertyId !== hostPropertyId) {
             res.status(403).json({ message: 'This session is not valid for this PG host' });
             return;
         }
         req.user = decoded;
+        setDbUser(req, decoded);
         next();
     }
     catch (error) {

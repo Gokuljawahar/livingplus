@@ -8,7 +8,7 @@ export default function TermsAndConditions() {
   useEffect(() => { window.scrollTo(0, 0); }, []);
 
   return (
-    <div className="min-h-screen bg-[#F8FAFB]">
+    <div className="min-h-screen bg-surface">
       {/* Header */}
       <div className="bg-white border-b border-slate-100 sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 flex items-center gap-4">
@@ -20,7 +20,7 @@ export default function TermsAndConditions() {
           </button>
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-emerald-50 rounded-xl flex items-center justify-center">
-              <FileText className="w-5 h-5 text-[#02224B]" />
+              <FileText className="w-5 h-5 text-navy-900" />
             </div>
             <div>
               <h1 className="text-base font-bold text-slate-900">Terms & Conditions</h1>
@@ -90,7 +90,7 @@ export default function TermsAndConditions() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
-      <h2 className="text-base font-bold text-slate-900 border-l-4 border-[#FEB109] pl-3">{title}</h2>
+      <h2 className="text-base font-bold text-slate-900 border-l-4 border-amber-500 pl-3">{title}</h2>
       <div className="text-sm text-slate-600 leading-relaxed space-y-3 pl-1">
         {children}
       </div>

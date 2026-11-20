@@ -10,6 +10,18 @@ import { calculateMonthlyRent, ensureFoodEntries } from '../services/pg-billing.
 import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { buildGuestBookingWhere, isPlaceholderResidentName } from '../utils/guest-bookings.js';
 import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
+import { periodOf, periodRange } from '../utils/app-time.js';
+import { firebaseWebConfig, googleSignInEnabled, otpProvider } from '../services/phone-verification.js';
+import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
+import { minSemanticScore, scheduleSearchIndex, semanticScores, semanticSearchEnabled } from '../services/semantic-search.js';
+import { bookingRequestBody, paymentClaimBody, paymentClaimReviewBody, rentEntryBody, rentPaymentBody } from '../validation/pg.schemas.js';
+import { logger } from '../utils/logger.js';
+import { asSystem } from '../db/context.js';
+import { guestPhoneFrom } from '../utils/guest-token.js';
+import { checkKycDocument } from '../services/kyc-check.js';
+import { buildVibeProfile, vibeInterviewTurn, scoreVibeRooms } from '../services/vibe-agent.js';
+import { cleanServiceSettings, cleanVibeAnswers, cleanVibeSummary, isStaffRole, isBloodGroup, isGenderPolicy, isKycType, isValidUpiId, LIMITS, MESSAGES, vibeMatch, vibeTopicsFor } from '@livingplus/shared';
+import { cancelBookingBody, checkOutTenantBody, createMaintenanceTicketBody, createOwnerExpenseBody, createPropertyBody, createPropertyStaffBody, createRoomBody, createTenantTicketBody, markDepositRefundedBody, proposeElectricityBillBody, sendRentRemindersBody, updateBedStatusBody, updateBookingStatusBody, updateMaintenanceStatusBody, updatePropertyBody, updateResidentProfileBody, updateTenantProfileBody } from '../validation/request.schemas.js';
 function phoneVariants(phone) {
     const digits = String(phone || '').replace(/\D/g, '');
     const normalized = digits.length === 10 ? `91${digits}` : digits;
@@ -82,27 +94,19 @@ export async function canManageProperty(req, propertyId, roles = ['OWNER', 'WARD
     const scopedPropertyId = requestPropertyId(req);
     if ((scopedPropertyId && scopedPropertyId !== propertyId) || (user.propertyId && user.propertyId !== propertyId))
         return false;
-    if (user.role === 'SUPER_ADMIN')
-        return true;
     const access = await db.pGPropertyAccess.findFirst({
         where: { propertyId, userId: user.id, role: { in: roles } },
         select: { id: true }
     });
     return Boolean(access);
 }
-async function accessiblePropertyIds(req, roles = ['OWNER', 'WARDEN']) {
+export async function accessiblePropertyIds(req, roles = ['OWNER', 'WARDEN']) {
     const user = currentUser(req);
     if (!user)
         return [];
     const scopedPropertyId = requestPropertyId(req);
     if (user.propertyId && scopedPropertyId && user.propertyId !== scopedPropertyId)
         return [];
-    if (user.role === 'SUPER_ADMIN') {
-        if (scopedPropertyId)
-            return [scopedPropertyId];
-        const properties = await db.pGProperty.findMany({ select: { id: true } });
-        return properties.map((property) => property.id);
-    }
     const access = await db.pGPropertyAccess.findMany({
         where: { userId: user.id, role: { in: roles } },
         select: { propertyId: true }
@@ -115,6 +119,9 @@ async function accessiblePropertyIds(req, roles = ['OWNER', 'WARDEN']) {
     return propertyIds;
 }
 async function releaseExpiredBookingHolds() {
+    return asSystem('expire stale bed holds in every PG', () => releaseExpiredBookingHoldsNow());
+}
+async function releaseExpiredBookingHoldsNow() {
     const expiredBookings = await db.pGBooking.findMany({
         where: { status: 'PENDING', lockExpiresAt: { lte: new Date() } },
         select: { id: true, bedId: true }
@@ -137,10 +144,83 @@ async function releaseExpiredBookingHolds() {
     });
 }
 export const getPublicConfig = async (_req, res) => {
+    const provider = otpProvider();
     res.json({
         whatsappCloudApiEnabled: featureFlags.whatsappCloudApi,
-        upiPaymentEnabled: featureFlags.upiPayment
+        upiPaymentEnabled: featureFlags.upiPayment,
+        phoneVerification: { provider, ...(provider === 'firebase' ? { firebase: firebaseWebConfig() } : {}) },
+        googleSignIn: googleSignInEnabled() ? { firebase: firebaseWebConfig() } : null
     });
+};
+/**
+ * Meaning-based search over published PGs. Returns ranked property ids; the
+ * client combines them with its own keyword match and filters. Responds with
+ * semantic: false (and no results) when semantic search is off or failing,
+ * so the client simply keeps its keyword search.
+ */
+export const searchPropertiesSemantic = async (req, res) => {
+    const query = String(req.query.q || '').trim().slice(0, 200);
+    if (query.length < 2 || !semanticSearchEnabled())
+        return res.json({ semantic: false, results: [] });
+    try {
+        const hiddenPropertyIds = await ownStayPropertyIds(req);
+        const where = {
+            ...ownPropertyExclusionWhere(hiddenPropertyIds),
+            ...(requestPropertyId(req) ? { id: requestPropertyId(req) } : {})
+        };
+        const scores = await semanticScores(query, where);
+        const minimum = minSemanticScore();
+        const results = [...scores.entries()]
+            .filter(([, score]) => score >= minimum)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 50)
+            .map(([propertyId, score]) => ({ propertyId, score: Math.round(score * 1000) / 1000 }));
+        res.json({ semantic: true, results });
+    }
+    catch (error) {
+        logger.warn({ err: error }, 'Semantic search failed; client falls back to keyword search');
+        res.json({ semantic: false, results: [] });
+    }
+};
+const SITE_SELECT = { slug: true, name: true, locality: true, city: true };
+/** Public directory of PG resident sites (/stay/<slug>): name and place only. */
+export const listPgSites = async (req, res) => {
+    const search = String(req.query.search || '').trim().slice(0, 80);
+    try {
+        const sites = await db.pGProperty.findMany({
+            where: {
+                slug: { not: null },
+                ...(search ? {
+                    OR: [
+                        { name: { contains: search, mode: 'insensitive' } },
+                        { locality: { contains: search, mode: 'insensitive' } },
+                        { city: { contains: search, mode: 'insensitive' } }
+                    ]
+                } : {})
+            },
+            select: SITE_SELECT,
+            orderBy: { name: 'asc' },
+            take: 50
+        });
+        res.json(sites);
+    }
+    catch (error) {
+        logger.error({ err: error }, 'PG site list error');
+        res.status(500).json({ message: 'Failed to list PG sites' });
+    }
+};
+/** One PG resident site by slug, for the resident site header. */
+export const getPgSite = async (req, res) => {
+    try {
+        const site = await db.pGProperty.findFirst({ where: { slug: String(req.params.slug).toLowerCase() }, select: SITE_SELECT });
+        if (!site)
+            return res.status(404).json({ message: 'PG site not found' });
+        res.json(site);
+    }
+    catch (error) {
+        logger.error({ err: error }, 'PG site lookup error');
+        res.status(500).json({ message: 'Failed to load PG site' });
+    }
 };
 export const listProperties = async (req, res) => {
     const search = String(req.query.search || '').trim();
@@ -154,13 +234,13 @@ export const listProperties = async (req, res) => {
                 status: 'ACTIVE',
                 ...ownPropertyExclusionWhere(hiddenPropertyIds),
                 ...(requestPropertyId(req) ? { id: requestPropertyId(req) } : {}),
-                ...(locality ? { locality: { contains: locality } } : {}),
+                ...(locality ? { locality: { contains: locality, mode: 'insensitive' } } : {}),
                 ...(genderPolicy ? { genderPolicy: { in: [genderPolicy, 'ANY'] } } : {}),
                 ...(search ? {
                     OR: [
-                        { name: { contains: search } },
-                        { locality: { contains: search } },
-                        { address: { contains: search } }
+                        { name: { contains: search, mode: 'insensitive' } },
+                        { locality: { contains: search, mode: 'insensitive' } },
+                        { address: { contains: search, mode: 'insensitive' } }
                     ]
                 } : {})
             },
@@ -172,10 +252,18 @@ export const listProperties = async (req, res) => {
             },
             orderBy: { createdAt: 'desc' }
         });
+        // "Verified owner" = an owner of the PG proved their phone number with a code.
+        // Guests cannot read staff access under RLS, so this yes/no lookup runs as the system.
+        const verifiedOwners = await asSystem('listing badge: does the owner have a verified phone', () => db.pGPropertyAccess.findMany({
+            where: { role: 'OWNER', propertyId: { in: properties.map((property) => property.id) }, user: { phoneVerifiedAt: { not: null } } },
+            select: { propertyId: true }
+        }));
+        const verified = new Set(verifiedOwners.map((row) => row.propertyId));
         res.json(properties.map((property) => {
             const ownerPhone = String(property.contactPhone || '').replace(/\D/g, '');
             return {
                 ...property,
+                ownerVerified: verified.has(property.id),
                 managerPhone: ownerPhone.length === 10 ? `91${ownerPhone}` : ownerPhone || null,
                 availableBeds: property.rooms.reduce((total, room) => total + room.beds.length, 0),
                 rooms: property.rooms.map((room) => ({ ...room, availableBeds: room.beds.length }))
@@ -183,7 +271,7 @@ export const listProperties = async (req, res) => {
         }));
     }
     catch (error) {
-        console.error('PG property search error:', error);
+        logger.error({ err: error }, 'PG property search error');
         res.status(500).json({ message: 'Failed to search properties' });
     }
 };
@@ -198,26 +286,32 @@ export const listOwnerProperties = async (req, res) => {
         res.json(properties);
     }
     catch (error) {
-        console.error('PG owner property list error:', error);
+        logger.error({ err: error }, 'PG owner property list error');
         res.status(500).json({ message: 'Failed to fetch properties' });
     }
 };
 export const createProperty = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(createPropertyBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     const user = currentUser(req);
-    const { name, description, address, locality, contactPhone, upiId, landmark, city, pincode, latitude, longitude, genderPolicy, amenities, houseRules, photoUrls } = req.body;
+    const { name, description, address, locality, contactPhone, upiId, landmark, city, pincode, latitude, longitude, genderPolicy, amenities, houseRules, photoUrls } = input;
     if (!user)
         return res.status(401).json({ message: 'Unauthorized' });
-    if (!['SUPER_ADMIN', 'PG_OWNER'].includes(user.role)) {
+    if (user.role !== 'PG_OWNER') {
         return res.status(403).json({ message: 'Only property owners can add properties' });
     }
     if (!name?.trim() || !address?.trim() || !locality?.trim()) {
         return res.status(400).json({ message: 'Property name, address and locality are required' });
     }
-    if (upiId && !/^[a-zA-Z0-9._-]{2,100}@[a-zA-Z0-9.-]{2,60}$/.test(String(upiId).trim())) {
-        return res.status(400).json({ message: 'Enter a valid UPI ID' });
+    if (upiId && !isValidUpiId(String(upiId))) {
+        return res.status(400).json({ message: MESSAGES.upiId });
     }
     try {
-        const property = await db.pGProperty.create({
+        // Provisioning a new workspace: slugs are unique across every PG, and the
+        // creator becomes its owner (always the signed-in owner, never input).
+        const property = await asSystem('an owner provisions a new PG workspace', async () => db.pGProperty.create({
             data: {
                 slug: await createUniquePgSlug(db, name),
                 name: name.trim(),
@@ -231,40 +325,46 @@ export const createProperty = async (req, res) => {
                 pincode: pincode?.trim() || null,
                 latitude: latitude !== undefined && latitude !== '' && Number.isFinite(Number(latitude)) ? Number(latitude) : null,
                 longitude: longitude !== undefined && longitude !== '' && Number.isFinite(Number(longitude)) ? Number(longitude) : null,
-                genderPolicy: ['MEN', 'WOMEN', 'ANY'].includes(genderPolicy) ? genderPolicy : 'ANY',
+                genderPolicy: isGenderPolicy(String(genderPolicy)) ? genderPolicy : 'ANY',
                 amenities: Array.isArray(amenities) ? amenities : [],
                 houseRules: Array.isArray(houseRules) ? houseRules : [],
                 photoUrls: Array.isArray(photoUrls) ? photoUrls : [],
                 access: { create: { userId: user.id, role: 'OWNER' } }
             }
-        });
+        }));
         logAudit(property.id, user.id, 'PROPERTY_CREATED', 'PGProperty', property.id, property.name);
+        scheduleSearchIndex(property.id);
         res.status(201).json(property);
     }
     catch (error) {
-        console.error('PG property creation error:', error);
+        logger.error({ err: error }, 'PG property creation error');
         res.status(500).json({ message: 'Failed to create property' });
     }
 };
 export const updateProperty = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(updatePropertyBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const inputFields = input;
     const propertyId = String(req.params.propertyId);
     if (!await canManageProperty(req, propertyId, ['OWNER'])) {
         return res.status(403).json({ message: 'You do not have access to this property' });
     }
     const fields = ['name', 'description', 'address', 'locality', 'contactPhone', 'upiId', 'landmark', 'city', 'pincode', 'latitude', 'longitude', 'genderPolicy', 'amenities', 'houseRules', 'photoUrls', 'status', 'bookingLockMinutes', 'rentDay', 'rentDueDay'];
     for (const numeric of ['bookingLockMinutes', 'rentDay', 'rentDueDay']) {
-        if (req.body[numeric] !== undefined) {
-            const value = Number(req.body[numeric]);
+        if (inputFields[numeric] !== undefined) {
+            const value = Number(inputFields[numeric]);
             if (!Number.isInteger(value) || value < 1 || value > 1440) {
                 return res.status(400).json({ message: `${numeric} must be a whole number between 1 and 1440` });
             }
-            req.body[numeric] = value;
+            inputFields[numeric] = value;
         }
     }
     const data = {};
     for (const field of fields) {
-        if (req.body[field] !== undefined)
-            data[field] = req.body[field];
+        if (inputFields[field] !== undefined)
+            data[field] = inputFields[field];
     }
     if (typeof data.name === 'string')
         data.name = data.name.trim();
@@ -290,17 +390,18 @@ export const updateProperty = async (req, res) => {
     }
     if (data.upiId !== undefined) {
         const upiId = String(data.upiId || '').trim();
-        if (upiId && !/^[a-zA-Z0-9._-]{2,100}@[a-zA-Z0-9.-]{2,60}$/.test(upiId)) {
-            return res.status(400).json({ message: 'Enter a valid UPI ID' });
+        if (upiId && !isValidUpiId(upiId)) {
+            return res.status(400).json({ message: MESSAGES.upiId });
         }
         data.upiId = upiId || null;
     }
     try {
         const updated = await db.pGProperty.update({ where: { id: propertyId }, data });
+        scheduleSearchIndex(propertyId);
         res.json(updated);
     }
     catch (error) {
-        console.error('PG property update error:', error);
+        logger.error({ err: error }, 'PG property update error');
         res.status(500).json({ message: 'Failed to update property' });
     }
 };
@@ -321,13 +422,17 @@ export const deleteProperty = async (req, res) => {
         res.json({ message: 'Property and archived records deleted' });
     }
     catch (error) {
-        console.error('PG property delete error:', error);
+        logger.error({ err: error }, 'PG property delete error');
         res.status(500).json({ message: 'Failed to delete property' });
     }
 };
 export const createRoom = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(createRoomBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     const { propertyId } = req.params;
-    const { roomNumber, floor, block, roomType, monthlyRent, depositAmount, maintenanceFee, utilitiesSurcharge, hasAc, foodIncluded, foodCharge, numberOfBeds, bedLabels } = req.body;
+    const { roomNumber, floor, block, roomType, monthlyRent, depositAmount, maintenanceFee, utilitiesSurcharge, hasAc, foodIncluded, foodCharge, numberOfBeds, bedLabels } = input;
     if (!await canManageProperty(req, String(propertyId), ['OWNER'])) {
         return res.status(403).json({ message: 'You do not have access to this property' });
     }
@@ -356,15 +461,20 @@ export const createRoom = async (req, res) => {
             include: { beds: true }
         });
         logAudit(String(propertyId), currentUser(req)?.id, 'ROOM_CREATED', 'PGRoom', room.id, `${room.roomNumber} · ${bedCount} beds`);
+        scheduleSearchIndex(String(propertyId));
         res.status(201).json(room);
     }
     catch (error) {
-        console.error('PG room creation error:', error);
+        logger.error({ err: error }, 'PG room creation error');
         res.status(500).json({ message: 'Failed to create room' });
     }
 };
 export const updateBedStatus = async (req, res) => {
-    const status = String(req.body.status || '').toUpperCase();
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(updateBedStatusBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const status = String(input.status || '').toUpperCase();
     if (!['AVAILABLE', 'MAINTENANCE'].includes(status)) {
         return res.status(400).json({ message: 'Beds can be marked available or under maintenance here' });
     }
@@ -378,20 +488,20 @@ export const updateBedStatus = async (req, res) => {
         if (!['AVAILABLE', 'MAINTENANCE'].includes(bed.status)) {
             return res.status(409).json({ message: 'Reserved or occupied beds must be released through their booking or tenant record' });
         }
-        const updated = await db.pGBed.update({ where: { id: bed.id }, data: { status, maintenanceNote: status === 'MAINTENANCE' ? req.body.note?.trim() || null : null } });
+        const updated = await db.pGBed.update({ where: { id: bed.id }, data: { status, maintenanceNote: status === 'MAINTENANCE' ? input.note?.trim() || null : null } });
         res.json(updated);
     }
     catch (error) {
-        console.error('PG bed status update error:', error);
+        logger.error({ err: error }, 'PG bed status update error');
         res.status(500).json({ message: 'Failed to update bed status' });
     }
 };
 export const createBookingRequest = async (req, res) => {
-    const { propertyId, bedId, residentName, phone, email, moveInDate, notes, phoneToken } = req.body;
-    const idemKey = String(req.body.idempotencyKey || req.headers['x-idempotency-key'] || '').trim().slice(0, 80) || null;
-    if (!propertyId || !residentName?.trim() || !phone?.trim() || !moveInDate) {
-        return res.status(400).json({ message: 'Property, name, phone and move-in date are required' });
-    }
+    const body = parseBody(bookingRequestBody, req, res, 'Property, name, phone and move-in date are required');
+    if (!body)
+        return;
+    const { propertyId, bedId, residentName, phone, email, moveInDate, notes, phoneToken } = body;
+    const idemKey = String(body.idempotencyKey || req.headers['x-idempotency-key'] || '').trim().slice(0, 80) || null;
     if (isPlaceholderResidentName(residentName)) {
         return res.status(400).json({ message: 'Please enter the resident\u2019s real name as on their ID' });
     }
@@ -461,7 +571,8 @@ export const createBookingRequest = async (req, res) => {
                     moveInDate: moveIn,
                     lockExpiresAt: new Date(Date.now() + (property.bookingLockMinutes || 120) * 60 * 1000),
                     notes: notes?.trim() || null,
-                    idempotencyKey: idemKey
+                    idempotencyKey: idemKey,
+                    ...(cleanVibeAnswers(body.vibeAnswers) ? { vibeAnswers: cleanVibeAnswers(body.vibeAnswers), vibeSummary: cleanVibeSummary(body.vibeSummary) } : {})
                 }
             });
         });
@@ -477,22 +588,28 @@ export const createBookingRequest = async (req, res) => {
             if (existing)
                 return res.status(200).json({ id: existing.id, bookingRef: existing.bookingRef, status: existing.status, deduped: true, message: 'Booking request already submitted' });
         }
-        console.error('PG booking request error:', error);
+        logger.error({ err: error }, 'PG booking request error');
         res.status(500).json({ message: 'Failed to submit booking request' });
     }
 };
 export const cancelBookingRequest = async (req, res) => {
-    const phone = String(req.body.phone || '').replace(/\D/g, '');
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(cancelBookingBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    // The phone comes from the verified guest session, never from the request body.
+    const phone = guestPhoneFrom(req);
     if (!phone)
-        return res.status(400).json({ message: 'Phone number is required' });
+        return res.status(401).json({ code: 'GUEST_VERIFICATION_REQUIRED', message: 'Verify your phone number to manage your requests' });
     try {
         const booking = await db.pGBooking.findUnique({ where: { bookingRef: String(req.params.bookingRef) } });
         if (!booking)
             return res.status(404).json({ message: 'Booking request not found' });
         if (requestPropertyId(req) && booking.propertyId !== requestPropertyId(req))
             return res.status(404).json({ message: 'Booking request not found' });
-        if (booking.phone.replace(/\D/g, '') !== phone)
-            return res.status(403).json({ message: 'Phone number does not match this booking' });
+        // Same answer as a missing booking: never reveal requests made from other numbers.
+        if (booking.phone.replace(/\D/g, '').slice(-10) !== phone)
+            return res.status(404).json({ message: 'Booking request not found' });
         if (booking.status !== 'PENDING')
             return res.status(409).json({ message: 'Only pending requests can be cancelled' });
         await db.$transaction(async (tx) => {
@@ -504,7 +621,7 @@ export const cancelBookingRequest = async (req, res) => {
         res.json({ message: 'Booking request cancelled' });
     }
     catch (error) {
-        console.error('PG booking cancellation error:', error);
+        logger.error({ err: error }, 'PG booking cancellation error');
         res.status(500).json({ message: 'Failed to cancel booking request' });
     }
 };
@@ -536,14 +653,18 @@ export const getPublicBookingStatus = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('PG public booking status error:', error);
+        logger.error({ err: error }, 'PG public booking status error');
         res.status(500).json({ message: 'Failed to fetch booking status' });
     }
 };
 export const listGuestBookings = async (req, res) => {
-    const where = buildGuestBookingWhere(req.query.phone, requestPropertyId(req));
+    // Only the number proven by the guest's code; any ?phone= parameter is ignored.
+    const phone = guestPhoneFrom(req);
+    if (!phone)
+        return res.status(401).json({ code: 'GUEST_VERIFICATION_REQUIRED', message: 'Verify your phone number to see your requests' });
+    const where = buildGuestBookingWhere(phone, requestPropertyId(req));
     if (!where)
-        return res.status(400).json({ message: 'A valid phone number is required' });
+        return res.status(401).json({ code: 'GUEST_VERIFICATION_REQUIRED', message: 'Verify your phone number to see your requests' });
     try {
         await releaseExpiredBookingHolds();
         const bookings = await db.pGBooking.findMany({
@@ -567,8 +688,316 @@ export const listGuestBookings = async (req, res) => {
         })));
     }
     catch (error) {
-        console.error('PG guest booking list error:', error);
+        logger.error({ err: error }, 'PG guest booking list error');
         res.status(500).json({ message: 'Failed to fetch your booking requests' });
+    }
+};
+/** Money endpoints: owners and accountants (DESIGN: staff roles). */
+const MONEY_ROLES = ['OWNER', 'ACCOUNTANT'];
+/** Shared money-and-operations endpoints (expenses, utilities, reminders): also wardens. */
+const OPERATIONS_MONEY_ROLES = ['OWNER', 'WARDEN', 'ACCOUNTANT'];
+const VIBE_ROOMMATE_STATUSES = ['ACTIVE', 'NOTICE_PERIOD', 'RESERVED'];
+const VIBE_REMATCH_DAYS = 30;
+/** VibeCheck answers of the current residents of each room (excluding one resident, e.g. the caller). */
+async function roommateAnswersByRoom(roomIds, excludeTenantId) {
+    const byRoom = new Map();
+    for (const [roomId, vibes] of await roommateVibesByRoom(roomIds, excludeTenantId))
+        byRoom.set(roomId, vibes.answers);
+    return byRoom;
+}
+/** Residents' VibeCheck answers and habit summaries per room (never names). */
+async function roommateVibesByRoom(roomIds, excludeTenantId) {
+    const byRoom = new Map();
+    if (!roomIds.length)
+        return byRoom;
+    const tenants = await db.pGTenant.findMany({
+        where: { status: { in: VIBE_ROOMMATE_STATUSES }, bed: { roomId: { in: [...new Set(roomIds)] } }, ...(excludeTenantId ? { id: { not: excludeTenantId } } : {}) },
+        select: { vibeAnswers: true, vibeSummary: true, bed: { select: { roomId: true } } }
+    });
+    for (const tenant of tenants) {
+        const answers = cleanVibeAnswers(tenant.vibeAnswers);
+        if (!answers || !tenant.bed)
+            continue;
+        const room = byRoom.get(tenant.bed.roomId) ?? { answers: [], summaries: [] };
+        room.answers.push(answers);
+        const summary = cleanVibeSummary(tenant.vibeSummary);
+        if (summary)
+            room.summaries.push(summary);
+        byRoom.set(tenant.bed.roomId, room);
+    }
+    return byRoom;
+}
+/**
+ * Public: turns a free-text description of someone's routine (any language)
+ * into VibeCheck habits with one structured Gemini call. Nothing is stored;
+ * the person reviews the result before using it.
+ */
+export const buildVibeProfileFromText = async (req, res) => {
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (text.length < 10)
+        return res.status(400).json({ message: 'Tell us a little more about your day, e.g. when you sleep and how tidy you are' });
+    try {
+        res.json(await buildVibeProfile(text, cleanVibeAnswers(req.body?.answers) ?? {}));
+    }
+    catch (error) {
+        if (error?.message === 'VIBE_AI_UNAVAILABLE')
+            return res.status(503).json({ code: 'VIBE_AI_UNAVAILABLE', message: 'Describing your routine is not available right now. Answer the quick questions instead.' });
+        logger.warn({ err: error }, 'VibeCheck profile agent failed');
+        res.status(502).json({ code: 'VIBE_AI_FAILED', message: 'We could not read that just now. Answer the quick questions instead.' });
+    }
+};
+const VIBE_AUDIO_TYPES = new Set(['audio/wav', 'audio/x-wav', 'audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/aac']);
+const MAX_VIBE_AUDIO_BASE64 = 900_000; // about 25 s of 16 kHz mono WAV
+/**
+ * Public: one turn of the voice VibeCheck interview. Gemini hears the answer
+ * (audio or typed text), updates the habits and says the next question.
+ * Nothing is stored; the person reviews the habits before matching.
+ */
+export const vibeInterviewStep = async (req, res) => {
+    const body = req.body ?? {};
+    const history = (Array.isArray(body.history) ? body.history : [])
+        .filter((turn) => turn && (turn.role === 'assistant' || turn.role === 'user') && typeof turn.text === 'string')
+        .slice(-12)
+        .map((turn) => ({ role: turn.role, text: String(turn.text).slice(0, 500) }));
+    const text = typeof body.text === 'string' ? body.text.trim().slice(0, 1000) : '';
+    let audio;
+    if (body.audio && typeof body.audio === 'object') {
+        const mimeType = String(body.audio.mimeType || '').split(';')[0].trim().toLowerCase();
+        const data = String(body.audio.data || '');
+        if (!VIBE_AUDIO_TYPES.has(mimeType) || !/^[A-Za-z0-9+/=]+$/.test(data))
+            return res.status(400).json({ message: 'That recording format is not supported. Type your answer instead.' });
+        if (data.length > MAX_VIBE_AUDIO_BASE64)
+            return res.status(413).json({ message: 'That recording is too long. Keep answers under 20 seconds.' });
+        audio = { mimeType, data };
+    }
+    if (!text && !audio)
+        return res.status(400).json({ message: 'Say or type your answer first' });
+    try {
+        const propertyId = typeof body.propertyId === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(body.propertyId) ? body.propertyId : '';
+        const place = propertyId ? await db.pGProperty.findFirst({
+            where: { id: propertyId, status: 'ACTIVE' },
+            select: { name: true, locality: true, amenities: true, rooms: { where: { status: 'ACTIVE' }, select: { hasAc: true, foodIncluded: true, foodCharge: true } } }
+        }) : null;
+        const topics = vibeTopicsFor(place && { ...place, amenities: Array.isArray(place.amenities) ? place.amenities.filter((item) => typeof item === 'string') : [] });
+        res.json(await vibeInterviewTurn({ history, known: cleanVibeAnswers(body.answers) ?? {}, topics, ...(text ? { text } : {}), ...(audio ? { audio } : {}) }));
+    }
+    catch (error) {
+        if (error?.message === 'VIBE_AI_UNAVAILABLE')
+            return res.status(503).json({ code: 'VIBE_AI_UNAVAILABLE', message: 'Voice VibeCheck is not available right now. Answer the quick questions instead.' });
+        logger.warn({ err: error }, 'VibeCheck interview turn failed');
+        res.status(502).json({ code: 'VIBE_AI_FAILED', message: 'I did not catch that. Try again, or type your answer.' });
+    }
+};
+/**
+ * Public VibeCheck for a published PG: scores the visitor's answers against the
+ * residents of each room with a free bed. Returns scores and habit-level
+ * reasons only, never residents' names or individual answers.
+ */
+export const vibeCheckProperty = async (req, res) => {
+    const answers = cleanVibeAnswers(req.body?.answers);
+    if (!answers)
+        return res.status(400).json({ message: 'Answer at least one VibeCheck question' });
+    try {
+        const property = await db.pGProperty.findFirst({
+            where: { id: String(req.params.propertyId), status: 'ACTIVE', ...(requestPropertyId(req) ? { id: requestPropertyId(req) } : {}) },
+            select: { id: true, serviceSettings: true, rooms: { where: { status: 'ACTIVE' }, select: { id: true, roomNumber: true, beds: { where: { status: 'AVAILABLE' }, select: { id: true, label: true } } } } }
+        });
+        if (!property)
+            return res.status(404).json({ message: 'PG not found' });
+        if (!cleanServiceSettings(property.serviceSettings).vibeCheck)
+            return res.status(404).json({ message: 'VibeCheck is not offered by this PG' });
+        const rooms = property.rooms.filter((room) => room.beds.length);
+        const byRoom = await roommateVibesByRoom(rooms.map((room) => room.id));
+        // AI judgment per room (one Gemini call, deterministic fallback inside).
+        const matches = await scoreVibeRooms(answers, rooms.map((room) => ({
+            roomId: String(room.id),
+            roomNumber: String(room.roomNumber ?? ''),
+            roommates: byRoom.get(room.id)?.answers ?? [],
+            summaries: byRoom.get(room.id)?.summaries ?? []
+        })), cleanVibeSummary(req.body?.summary));
+        res.json({
+            beds: rooms.flatMap((room) => {
+                const match = matches.get(room.id) ?? { score: null, compared: 0, reasons: [], differences: [], ai: false };
+                return room.beds.map((bed) => ({ bedId: bed.id, roomId: room.id, roomNumber: room.roomNumber, label: bed.label, ...match }));
+            })
+        });
+    }
+    catch (error) {
+        logger.error({ err: error }, 'VibeCheck error');
+        res.status(500).json({ message: 'Could not run VibeCheck' });
+    }
+};
+/** The signed-in resident's own stay, or null (same ownership rule as notices). */
+export async function ownStay(req, tenantId) {
+    const user = currentUser(req);
+    if (!user)
+        return null;
+    const account = await db.user.findUnique({ where: { id: user.id }, select: { phone: true } });
+    const tenant = await db.pGTenant.findUnique({ where: { id: tenantId }, include: { bed: { select: { roomId: true } } } });
+    const scopedPropertyId = requestPropertyId(req) || user.propertyId;
+    if (!tenant || (scopedPropertyId && tenant.propertyId !== scopedPropertyId))
+        return null;
+    const mine = phoneVariants(String(account?.phone || '')).some((variant) => [tenant.phone, String(tenant.phone || '').replace(/\D/g, '')].includes(variant));
+    return mine ? tenant : null;
+}
+/** Residents answer VibeCheck so future roommates can match with them. */
+export const saveTenantVibe = async (req, res) => {
+    if (!currentUser(req))
+        return res.status(401).json({ message: 'Unauthorized' });
+    const answers = cleanVibeAnswers(req.body?.answers);
+    if (!answers)
+        return res.status(400).json({ message: 'Answer at least one VibeCheck question' });
+    try {
+        const tenant = await ownStay(req, String(req.params.tenantId));
+        if (!tenant)
+            return res.status(404).json({ message: 'Stay not found' });
+        const summary = cleanVibeSummary(req.body?.summary);
+        await db.pGTenant.update({ where: { id: tenant.id }, data: { vibeAnswers: answers, vibeSummary: summary } });
+        res.json({ answers, summary });
+    }
+    catch (error) {
+        logger.error({ err: error }, 'VibeCheck save error');
+        res.status(500).json({ message: 'Could not save your answers' });
+    }
+};
+/** The resident's match with their current roommates, and whether the rematch window is open. */
+export const getTenantVibeMatch = async (req, res) => {
+    if (!currentUser(req))
+        return res.status(401).json({ message: 'Unauthorized' });
+    try {
+        const tenant = await ownStay(req, String(req.params.tenantId));
+        if (!tenant)
+            return res.status(404).json({ message: 'Stay not found' });
+        const answers = cleanVibeAnswers(tenant.vibeAnswers);
+        const roomId = tenant.bed?.roomId;
+        const vibes = roomId ? (await roommateVibesByRoom([roomId], tenant.id)).get(roomId) : undefined;
+        const match = answers && roomId
+            ? (await scoreVibeRooms(answers, [{ roomId, roommates: vibes?.answers ?? [], summaries: vibes?.summaries ?? [] }], cleanVibeSummary(tenant.vibeSummary))).get(roomId) ?? null
+            : null;
+        const since = new Date(tenant.checkedInAt || tenant.moveInDate);
+        const rematchUntil = new Date(since.getTime() + VIBE_REMATCH_DAYS * 24 * 60 * 60 * 1000);
+        res.json({
+            answers,
+            summary: cleanVibeSummary(tenant.vibeSummary),
+            match,
+            rematchUntil: rematchUntil.toISOString(),
+            rematchOpen: ['ACTIVE', 'RESERVED'].includes(tenant.status) && Date.now() <= rematchUntil.getTime()
+        });
+    }
+    catch (error) {
+        logger.error({ err: error }, 'VibeCheck match error');
+        res.status(500).json({ message: 'Could not load your VibeCheck' });
+    }
+};
+async function runKycCheck(tenant) {
+    const property = await db.pGProperty.findUnique({ where: { id: tenant.propertyId }, select: { serviceSettings: true } });
+    if (!cleanServiceSettings(property?.serviceSettings).kycAi)
+        throw new Error('KYC_AI_OFF');
+    const check = await checkKycDocument({ fileKey: tenant.kycDocumentUrl, declaredType: tenant.kycType, residentName: tenant.name });
+    await db.pGTenant.update({ where: { id: tenant.id }, data: { kycAiCheck: check } });
+    return check;
+}
+function kycCheckError(res, error) {
+    const message = String(error?.message || '');
+    if (message.startsWith('AI_ORCHESTRATOR_NOT_CONFIGURED'))
+        return res.status(503).json({ message: 'Automatic ID checks are not available right now. The owner will review your document.' });
+    if (message === 'KYC_AI_OFF')
+        return res.status(409).json({ message: 'Automatic ID checks are off at this PG. The owner will review your document.' });
+    if (message === 'KYC_FILE_INVALID')
+        return res.status(400).json({ message: 'That file could not be read. Upload a clear photo or PDF under 8 MB.' });
+    logger.error({ err: error }, 'KYC AI check error');
+    return res.status(502).json({ message: 'The document check failed. Your document is saved; try the check again later.' });
+}
+/** Resident: read my uploaded KYC document with AI right after uploading it. */
+export const checkMyKyc = async (req, res) => {
+    if (!currentUser(req))
+        return res.status(401).json({ message: 'Unauthorized' });
+    try {
+        const tenant = await ownStay(req, String(req.params.tenantId));
+        if (!tenant)
+            return res.status(404).json({ message: 'Stay not found' });
+        if (!tenant.kycDocumentUrl)
+            return res.status(400).json({ message: 'Upload your ID document first' });
+        res.json(await runKycCheck(tenant));
+    }
+    catch (error) {
+        return kycCheckError(res, error);
+    }
+};
+/** Owner or warden: run (or re-run) the AI reading of a resident's KYC document. */
+export const checkTenantKyc = async (req, res) => {
+    try {
+        const tenant = await db.pGTenant.findUnique({ where: { id: String(req.params.tenantId) } });
+        if (!tenant || !await canManageProperty(req, tenant.propertyId))
+            return res.status(404).json({ message: 'Resident not found' });
+        if (!tenant.kycDocumentUrl)
+            return res.status(400).json({ message: 'This resident has not uploaded an ID yet' });
+        res.json(await runKycCheck(tenant));
+    }
+    catch (error) {
+        return kycCheckError(res, error);
+    }
+};
+const FILE_KEY = /^(?:local\/[0-9a-f-]{36}\.(?:webp|pdf)|uploads\/[a-zA-Z0-9._-]+)$/i;
+/** Staff of the resident's PG, or the resident themselves; returns the stay or null. */
+async function conditionAccess(req, tenantId) {
+    const user = currentUser(req);
+    if (!user)
+        return null;
+    if (user.role === 'PG_TENANT') {
+        const tenant = await ownStay(req, tenantId);
+        return tenant ? { tenant, role: 'resident' } : null;
+    }
+    const tenant = await db.pGTenant.findUnique({ where: { id: tenantId } });
+    return tenant && await canManageProperty(req, tenant.propertyId) ? { tenant, role: 'staff' } : null;
+}
+/** Timestamped move-in / move-out condition records for one stay, newest first. */
+export const listConditionReports = async (req, res) => {
+    if (!currentUser(req))
+        return res.status(401).json({ message: 'Unauthorized' });
+    try {
+        const access = await conditionAccess(req, String(req.query.tenantId || ''));
+        if (!access)
+            return res.status(404).json({ message: 'Stay not found' });
+        const reports = await db.pGConditionReport.findMany({ where: { tenantId: access.tenant.id }, orderBy: { createdAt: 'desc' } });
+        res.json(reports);
+    }
+    catch (error) {
+        logger.error({ err: error }, 'Condition report list error');
+        res.status(500).json({ message: 'Failed to load condition records' });
+    }
+};
+/** Adds a condition record. Records are never edited or deleted, so they can settle deposit disputes. */
+export const createConditionReport = async (req, res) => {
+    const user = currentUser(req);
+    if (!user)
+        return res.status(401).json({ message: 'Unauthorized' });
+    const body = req.body || {};
+    const kind = String(body.kind || '');
+    if (!['MOVE_IN', 'MOVE_OUT'].includes(kind))
+        return res.status(400).json({ message: 'Choose move-in or move-out' });
+    const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) : '';
+    const photoUrls = Array.isArray(body.photoUrls) ? body.photoUrls.map(String) : [];
+    if (photoUrls.length > 8 || photoUrls.some((key) => !FILE_KEY.test(key)))
+        return res.status(400).json({ message: 'Add up to 8 photos' });
+    if (!notes && !photoUrls.length)
+        return res.status(400).json({ message: 'Add a photo or a note' });
+    try {
+        const access = await conditionAccess(req, String(body.tenantId || ''));
+        if (!access)
+            return res.status(404).json({ message: 'Stay not found' });
+        if (access.role === 'resident' && ['CHECKED_OUT', 'CANCELLED'].includes(access.tenant.status)) {
+            return res.status(409).json({ message: 'This stay has ended; ask your PG owner to add records' });
+        }
+        const report = await db.pGConditionReport.create({
+            data: { propertyId: access.tenant.propertyId, tenantId: access.tenant.id, kind, notes: notes || null, photoUrls, createdBy: user.id, createdByRole: access.role === 'resident' ? 'RESIDENT' : user.role }
+        });
+        logAudit(access.tenant.propertyId, user.id, kind === 'MOVE_IN' ? 'MOVE_IN_RECORDED' : 'MOVE_OUT_RECORDED', 'PGConditionReport', report.id, `${photoUrls.length} photo(s)`);
+        res.status(201).json(report);
+    }
+    catch (error) {
+        logger.error({ err: error }, 'Condition report create error');
+        res.status(500).json({ message: 'Failed to save the condition record' });
     }
 };
 export const listOwnerBookings = async (req, res) => {
@@ -580,19 +1009,33 @@ export const listOwnerBookings = async (req, res) => {
             include: { property: { select: { name: true, locality: true } }, bed: { include: { room: true } }, tenant: true },
             orderBy: { createdAt: 'desc' }
         });
-        res.json(bookings);
+        // VibeCheck for pending requests: the applicant against the room's residents.
+        // Owner lists keep the deterministic baseline (no per-row model call); the
+        // visitor-facing endpoints above judge with Gemini on the same data.
+        const pending = bookings.filter((booking) => booking.status === 'PENDING' && booking.vibeAnswers && booking.bed);
+        const rooms = await roommateAnswersByRoom(pending.map((booking) => booking.bed.roomId));
+        res.json(bookings.map((booking) => {
+            const answers = cleanVibeAnswers(booking.vibeAnswers);
+            const vibe = booking.status === 'PENDING' && answers && booking.bed ? vibeMatch(answers, rooms.get(booking.bed.roomId) ?? []) : null;
+            const { vibeAnswers: _private, vibeSummary: _privateSummary, ...rest } = booking;
+            return { ...rest, vibe };
+        }));
     }
     catch (error) {
-        console.error('PG booking list error:', error);
+        logger.error({ err: error }, 'PG booking list error');
         res.status(500).json({ message: 'Failed to fetch booking requests' });
     }
 };
 export const updateBookingStatus = async (req, res) => {
-    const status = String(req.body.status || '').toUpperCase();
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(updateBookingStatusBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const status = String(input.status || '').toUpperCase();
     if (!['APPROVED', 'REJECTED', 'CANCELLED'].includes(status)) {
         return res.status(400).json({ message: 'Status must be APPROVED, REJECTED or CANCELLED' });
     }
-    const rejectionReason = String(req.body.rejectionReason || '').trim();
+    const rejectionReason = String(input.rejectionReason || '').trim();
     if (status === 'REJECTED' && !rejectionReason) {
         return res.status(400).json({ message: 'A reason is required when declining a booking' });
     }
@@ -608,7 +1051,7 @@ export const updateBookingStatus = async (req, res) => {
         }
         if (booking.status !== 'PENDING')
             return res.status(409).json({ message: 'Only pending requests can be updated' });
-        const newBedId = req.body.newBedId ? String(req.body.newBedId) : null;
+        const newBedId = input.newBedId ? String(input.newBedId) : null;
         const updated = await db.$transaction(async (tx) => {
             let assignedBedId = booking.bedId;
             if (status === 'APPROVED') {
@@ -649,7 +1092,8 @@ export const updateBookingStatus = async (req, res) => {
                         moveInDate: booking.moveInDate,
                         monthlyRent: booking.bed.room.monthlyRent,
                         depositAmount: booking.bed.room.depositAmount,
-                        status: 'RESERVED'
+                        status: 'RESERVED',
+                        ...(booking.vibeAnswers ? { vibeAnswers: booking.vibeAnswers, vibeSummary: booking.vibeSummary } : {})
                     }
                 });
             }
@@ -673,7 +1117,7 @@ export const updateBookingStatus = async (req, res) => {
         if (error?.message === 'BED_UNAVAILABLE') {
             return res.status(409).json({ message: 'This bed is no longer available' });
         }
-        console.error('PG booking status update error:', error);
+        logger.error({ err: error }, 'PG booking status update error');
         res.status(500).json({ message: 'Failed to update booking request' });
     }
 };
@@ -755,12 +1199,16 @@ export const checkInTenant = async (req, res) => {
             return res.status(409).json({ message: 'This bed is no longer reserved for the tenant' });
         if (error?.message === 'TENANT_STATE_CHANGED')
             return res.status(409).json({ message: 'Tenant status changed; refresh and try again' });
-        console.error('PG tenant check-in error:', error);
+        logger.error({ err: error }, 'PG tenant check-in error');
         res.status(500).json({ message: 'Failed to check in tenant' });
     }
 };
 export const checkOutTenant = async (req, res) => {
-    const depositDeductions = req.body?.depositDeductions === undefined ? 0 : Number(req.body.depositDeductions);
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(checkOutTenantBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const depositDeductions = input?.depositDeductions === undefined ? 0 : Number(input.depositDeductions);
     if (!Number.isFinite(depositDeductions) || depositDeductions < 0) {
         return res.status(400).json({ message: 'Deposit deductions must be a non-negative amount' });
     }
@@ -790,7 +1238,7 @@ export const checkOutTenant = async (req, res) => {
             }
             const updatedTenant = await tx.pGTenant.update({
                 where: { id: tenant.id },
-                data: { status: 'CHECKED_OUT', moveOutDate: now, checkedOutAt: now, depositDeductions, depositRefundAmount, depositRefundStatus, checkoutNote: String(req.body?.checkoutNote || '').trim() || null }
+                data: { status: 'CHECKED_OUT', moveOutDate: now, checkedOutAt: now, depositDeductions, depositRefundAmount, depositRefundStatus, checkoutNote: String(input?.checkoutNote || '').trim() || null }
             });
             if (tenant.bookingId) {
                 await tx.pGBooking.update({ where: { id: tenant.bookingId }, data: { status: 'CHECKED_OUT', moveOutDate: now } });
@@ -803,7 +1251,7 @@ export const checkOutTenant = async (req, res) => {
     catch (error) {
         if (error?.message === 'BED_STATE_INVALID')
             return res.status(409).json({ message: 'Bed status changed; refresh and try again' });
-        console.error('PG tenant check-out error:', error);
+        logger.error({ err: error }, 'PG tenant check-out error');
         res.status(500).json({ message: 'Failed to check out tenant' });
     }
 };
@@ -833,7 +1281,7 @@ export const listTenantStays = async (req, res) => {
         res.json(tenants);
     }
     catch (error) {
-        console.error('PG tenant stay list error:', error);
+        logger.error({ err: error }, 'PG tenant stay list error');
         res.status(500).json({ message: 'Failed to fetch your stays' });
     }
 };
@@ -855,7 +1303,7 @@ export const submitTenantNotice = async (req, res) => {
         res.json(updated);
     }
     catch (error) {
-        console.error('PG tenant notice error:', error);
+        logger.error({ err: error }, 'PG tenant notice error');
         res.status(500).json({ message: 'Failed to submit notice' });
     }
 };
@@ -877,7 +1325,7 @@ export const cancelTenantNotice = async (req, res) => {
         res.json(updated);
     }
     catch (error) {
-        console.error('PG tenant notice cancel error:', error);
+        logger.error({ err: error }, 'PG tenant notice cancel error');
         res.status(500).json({ message: 'Failed to cancel notice' });
     }
 };
@@ -895,16 +1343,20 @@ export const listAuditLogs = async (req, res) => {
         res.json(logs.map((log) => ({ ...log, actorName: log.actorId ? names.get(log.actorId) || 'Guest' : 'System' })));
     }
     catch (error) {
-        console.error('PG audit list error:', error);
+        logger.error({ err: error }, 'PG audit list error');
         res.status(500).json({ message: 'Failed to fetch activity' });
     }
 };
 export const markDepositRefunded = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(markDepositRefundedBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     try {
         const tenant = await db.pGTenant.findUnique({ where: { id: String(req.params.tenantId) } });
         if (!tenant)
             return res.status(404).json({ message: 'Tenant not found' });
-        if (!await canManageProperty(req, tenant.propertyId, ['OWNER'])) {
+        if (!await canManageProperty(req, tenant.propertyId, MONEY_ROLES)) {
             return res.status(403).json({ message: 'Only property owners can mark a deposit refund' });
         }
         if (tenant.status !== 'CHECKED_OUT' || tenant.depositRefundStatus !== 'PENDING') {
@@ -914,15 +1366,15 @@ export const markDepositRefunded = async (req, res) => {
             where: { id: tenant.id },
             data: {
                 depositRefundStatus: 'REFUNDED',
-                depositRefundReference: String(req.body?.reference || '').trim() || null,
+                depositRefundReference: String(input?.reference || '').trim() || null,
                 depositRefundedAt: new Date()
             }
         });
-        logAudit(tenant.propertyId, currentUser(req)?.id, 'DEPOSIT_REFUNDED', 'PGTenant', tenant.id, String(req.body?.reference || '').trim() || null);
+        logAudit(tenant.propertyId, currentUser(req)?.id, 'DEPOSIT_REFUNDED', 'PGTenant', tenant.id, String(input?.reference || '').trim() || null);
         res.json(updated);
     }
     catch (error) {
-        console.error('PG deposit refund error:', error);
+        logger.error({ err: error }, 'PG deposit refund error');
         res.status(500).json({ message: 'Failed to record deposit refund' });
     }
 };
@@ -944,11 +1396,16 @@ export const listOwnerTenants = async (req, res) => {
         res.json(tenants);
     }
     catch (error) {
-        console.error('PG tenant list error:', error);
+        logger.error({ err: error }, 'PG tenant list error');
         res.status(500).json({ message: 'Failed to fetch tenants' });
     }
 };
 export const updateTenantProfile = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(updateTenantProfileBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const inputFields = input;
     const allowedFields = [
         'permanentAddress',
         'bloodGroup',
@@ -958,7 +1415,7 @@ export const updateTenantProfile = async (req, res) => {
         'kycType',
         'kycDocumentUrl'
     ];
-    const verifyKyc = req.body.kycVerified;
+    const verifyKyc = input.kycVerified;
     try {
         const tenant = await db.pGTenant.findUnique({ where: { id: String(req.params.tenantId) } });
         if (!tenant)
@@ -968,21 +1425,21 @@ export const updateTenantProfile = async (req, res) => {
         }
         const data = {};
         for (const field of allowedFields) {
-            if (req.body[field] !== undefined)
-                data[field] = String(req.body[field]).trim() || null;
+            if (inputFields[field] !== undefined)
+                data[field] = String(inputFields[field]).trim() || null;
         }
         if (verifyKyc !== undefined) {
             data.kycVerified = Boolean(verifyKyc);
             data.kycVerifiedAt = verifyKyc ? new Date() : null;
         }
-        if (req.body.foodOptOut !== undefined) {
-            data.foodOptOut = Boolean(req.body.foodOptOut);
+        if (input.foodOptOut !== undefined) {
+            data.foodOptOut = Boolean(input.foodOptOut);
         }
         const updated = await db.pGTenant.update({ where: { id: tenant.id }, data });
         res.json(updated);
     }
     catch (error) {
-        console.error('PG tenant profile update error:', error);
+        logger.error({ err: error }, 'PG tenant profile update error');
         res.status(500).json({ message: 'Failed to update tenant profile' });
     }
 };
@@ -996,7 +1453,7 @@ export const listPropertyStaff = async (req, res) => {
         const staff = await db.pGPropertyAccess.findMany({
             where: {
                 propertyId: { in: propertyId ? [propertyId] : ownerPropertyIds },
-                role: 'WARDEN'
+                role: { in: ['WARDEN', 'COOK', 'HOUSEKEEPING', 'ACCOUNTANT'] }
             },
             include: {
                 property: { select: { id: true, name: true } },
@@ -1011,13 +1468,20 @@ export const listPropertyStaff = async (req, res) => {
         })));
     }
     catch (error) {
-        console.error('PG staff list error:', error);
+        logger.error({ err: error }, 'PG staff list error');
         res.status(500).json({ message: 'Failed to fetch property staff' });
     }
 };
 export const createPropertyStaff = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(createPropertyStaffBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     const owner = currentUser(req);
-    const { propertyId, name, email, phone, password } = req.body;
+    const { propertyId, name, email, phone, password } = input;
+    const staffRole = isStaffRole(String(input.role || 'WARDEN').toUpperCase()) ? String(input.role || 'WARDEN').toUpperCase() : null;
+    if (!staffRole)
+        return res.status(400).json({ message: 'Choose warden, cook, housekeeping or accountant' });
     const normalizedPhone = String(phone || '').replace(/\D/g, '');
     if (!owner || !propertyId || !name?.trim() || normalizedPhone.length < 10 || !password) {
         return res.status(400).json({ message: 'Property, staff name, valid phone and password are required' });
@@ -1038,15 +1502,15 @@ export const createPropertyStaff = async (req, res) => {
                 },
                 select: { id: true, name: true, phone: true, email: true }
             });
-            await tx.pGPropertyAccess.create({ data: { propertyId: String(propertyId), userId: newUser.id, role: 'WARDEN' } });
+            await tx.pGPropertyAccess.create({ data: { propertyId: String(propertyId), userId: newUser.id, role: staffRole } });
             return newUser;
         });
-        res.status(201).json({ ...staff, propertyId: String(propertyId), role: 'WARDEN' });
+        res.status(201).json({ ...staff, propertyId: String(propertyId), role: staffRole });
     }
     catch (error) {
         if (error?.code === 'P2002')
             return res.status(409).json({ message: 'A user with this phone or email already exists' });
-        console.error('PG staff creation error:', error);
+        logger.error({ err: error }, 'PG staff creation error');
         res.status(500).json({ message: 'Failed to create property staff account' });
     }
 };
@@ -1057,7 +1521,7 @@ export const removePropertyStaff = async (req, res) => {
     }
     try {
         const access = await db.pGPropertyAccess.findFirst({
-            where: { propertyId: String(propertyId), userId: String(userId), role: 'WARDEN' },
+            where: { propertyId: String(propertyId), userId: String(userId), role: { in: ['WARDEN', 'COOK', 'HOUSEKEEPING', 'ACCOUNTANT'] } },
             select: { id: true }
         });
         if (!access)
@@ -1069,13 +1533,13 @@ export const removePropertyStaff = async (req, res) => {
         res.json({ message: 'Staff access removed' });
     }
     catch (error) {
-        console.error('PG staff removal error:', error);
+        logger.error({ err: error }, 'PG staff removal error');
         res.status(500).json({ message: 'Failed to remove staff access' });
     }
 };
 export const listOwnerRentEntries = async (req, res) => {
     try {
-        const propertyIds = await accessiblePropertyIds(req, ['OWNER']);
+        const propertyIds = await accessiblePropertyIds(req, MONEY_ROLES);
         const period = req.query.period ? String(req.query.period) : undefined;
         const entries = await db.pGRentEntry.findMany({
             where: {
@@ -1098,25 +1562,27 @@ export const listOwnerRentEntries = async (req, res) => {
         res.json(entries);
     }
     catch (error) {
-        console.error('PG rent ledger list error:', error);
+        logger.error({ err: error }, 'PG rent ledger list error');
         res.status(500).json({ message: 'Failed to fetch rent ledger' });
     }
 };
 export const createRentEntry = async (req, res) => {
-    const { tenantId, period, amount, dueDate, entryType, notes } = req.body;
-    const value = Number(amount);
+    const body = parseBody(rentEntryBody, req, res, 'Tenant, period, positive amount and due date are required');
+    if (!body)
+        return;
+    const { tenantId, period, amount: value, dueDate, entryType, notes } = body;
     const due = new Date(dueDate);
-    if (!tenantId || !period || !Number.isFinite(value) || value <= 0 || Number.isNaN(due.getTime())) {
+    if (Number.isNaN(due.getTime())) {
         return res.status(400).json({ message: 'Tenant, period, positive amount and due date are required' });
     }
     try {
         const tenant = await db.pGTenant.findUnique({ where: { id: String(tenantId) } });
         if (!tenant)
             return res.status(404).json({ message: 'Tenant not found' });
-        if (!await canManageProperty(req, tenant.propertyId, ['OWNER'])) {
+        if (!await canManageProperty(req, tenant.propertyId, MONEY_ROLES)) {
             return res.status(403).json({ message: 'You do not have access to this property' });
         }
-        const type = ['RENT', 'DEPOSIT', 'UTILITY'].includes(String(entryType).toUpperCase())
+        const type = ['RENT', 'DEPOSIT', 'UTILITY'].includes(String(entryType || '').toUpperCase())
             ? String(entryType).toUpperCase()
             : 'RENT';
         const entry = await db.pGRentEntry.create({
@@ -1127,7 +1593,7 @@ export const createRentEntry = async (req, res) => {
                 amount: value,
                 dueDate: due,
                 invoiceCode: `PG-${Date.now()}`,
-                notes: notes?.trim() || null
+                notes: notes || null
             }
         });
         res.status(201).json(entry);
@@ -1135,49 +1601,57 @@ export const createRentEntry = async (req, res) => {
     catch (error) {
         if (error?.code === 'P2002')
             return res.status(409).json({ message: 'A ledger entry already exists for this tenant and period' });
-        console.error('PG rent ledger create error:', error);
+        logger.error({ err: error }, 'PG rent ledger create error');
         res.status(500).json({ message: 'Failed to create ledger entry' });
     }
 };
 export const sendRentReminders = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(sendRentRemindersBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     try {
-        const propertyIds = await accessiblePropertyIds(req, ['OWNER', 'WARDEN']);
+        const propertyIds = await accessiblePropertyIds(req, OPERATIONS_MONEY_ROLES);
         const summary = await sendDueRentReminders(db, {
             propertyIds,
-            period: req.body?.period ? String(req.body.period) : undefined,
-            force: req.body?.force === true || req.body?.force === 'true',
+            period: input?.period ? String(input.period) : undefined,
+            force: input?.force === true || input?.force === 'true',
             actorId: req.user?.userId ? String(req.user.userId) : null
         });
         res.json(summary);
     }
     catch (error) {
-        console.error('PG rent reminders error:', error);
+        logger.error({ err: error }, 'PG rent reminders error');
         res.status(500).json({ message: 'Failed to send rent reminders' });
     }
 };
 export const listOwnerExpenses = async (req, res) => {
     try {
-        const propertyIds = await accessiblePropertyIds(req, ['OWNER', 'WARDEN']);
+        const propertyIds = await accessiblePropertyIds(req, OPERATIONS_MONEY_ROLES);
         const period = req.query.period ? String(req.query.period) : undefined;
         res.json(await listExpenses(db, propertyIds, period));
     }
     catch (error) {
-        console.error('PG expense list error:', error);
+        logger.error({ err: error }, 'PG expense list error');
         res.status(500).json({ message: 'Failed to load expenses' });
     }
 };
 export const createOwnerExpense = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(createOwnerExpenseBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     try {
-        const propertyId = String(req.body?.propertyId || '');
-        if (!propertyId || !await canManageProperty(req, propertyId, ['OWNER', 'WARDEN'])) {
+        const propertyId = String(input?.propertyId || '');
+        if (!propertyId || !await canManageProperty(req, propertyId, OPERATIONS_MONEY_ROLES)) {
             return res.status(403).json({ message: 'You do not have access to this property' });
         }
         const expense = await createExpense(db, req.user?.userId ? String(req.user.userId) : null, {
             propertyId,
-            category: req.body?.category,
-            amount: req.body?.amount,
-            spentOn: req.body?.spentOn,
-            note: req.body?.note
+            category: input?.category,
+            amount: input?.amount,
+            spentOn: input?.spentOn,
+            note: input?.note
         });
         res.status(201).json(expense);
     }
@@ -1188,13 +1662,13 @@ export const createOwnerExpense = async (req, res) => {
         }
         if (code === 'PROPERTY_NOT_FOUND')
             return res.status(404).json({ message: 'Property is not available' });
-        console.error('PG expense create error:', error);
+        logger.error({ err: error }, 'PG expense create error');
         res.status(500).json({ message: 'Failed to record expense' });
     }
 };
 export const deleteOwnerExpense = async (req, res) => {
     try {
-        const propertyIds = await accessiblePropertyIds(req, ['OWNER']);
+        const propertyIds = await accessiblePropertyIds(req, MONEY_ROLES);
         await deleteExpense(db, req.user?.userId ? String(req.user.userId) : null, String(req.params.expenseId), propertyIds);
         res.json({ message: 'Expense removed' });
     }
@@ -1204,31 +1678,35 @@ export const deleteOwnerExpense = async (req, res) => {
             return res.status(404).json({ message: 'Expense not found' });
         if (code === 'FORBIDDEN')
             return res.status(403).json({ message: 'You do not have access to this expense' });
-        console.error('PG expense delete error:', error);
+        logger.error({ err: error }, 'PG expense delete error');
         res.status(500).json({ message: 'Failed to remove expense' });
     }
 };
 export const listElectricityBills = async (req, res) => {
     try {
-        const propertyIds = await accessiblePropertyIds(req, ['OWNER', 'WARDEN']);
+        const propertyIds = await accessiblePropertyIds(req, OPERATIONS_MONEY_ROLES);
         const period = req.query.period ? String(req.query.period) : undefined;
         const { listElectricityBills: listBills } = await import('../services/pg-billing.js');
         res.json(await listBills(db, propertyIds, period));
     }
     catch (error) {
-        console.error('PG electricity bill list error:', error);
+        logger.error({ err: error }, 'PG electricity bill list error');
         res.status(500).json({ message: 'Failed to load electricity bills' });
     }
 };
 export const proposeElectricityBill = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(proposeElectricityBillBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     try {
-        const propertyId = String(req.body?.propertyId || '');
-        if (!propertyId || !await canManageProperty(req, propertyId, ['OWNER', 'WARDEN'])) {
+        const propertyId = String(input?.propertyId || '');
+        if (!propertyId || !await canManageProperty(req, propertyId, OPERATIONS_MONEY_ROLES)) {
             return res.status(403).json({ message: 'You do not have access to this property' });
         }
         const { proposeElectricityBill: propose } = await import('../services/pg-billing.js');
         const bill = await propose(db, req.user?.userId ? String(req.user.userId) : null, {
-            propertyId, period: req.body?.period, totalAmount: req.body?.totalAmount, imageUrl: req.body?.imageUrl
+            propertyId, period: input?.period, totalAmount: input?.totalAmount, imageUrl: input?.imageUrl
         });
         res.status(201).json(bill);
     }
@@ -1243,13 +1721,13 @@ export const proposeElectricityBill = async (req, res) => {
             return res.status(409).json({ message: 'This period is already billed' });
         if (code === 'NO_OCCUPANTS')
             return res.status(409).json({ message: 'No active tenants to split across' });
-        console.error('PG electricity bill propose error:', error);
+        logger.error({ err: error }, 'PG electricity bill propose error');
         res.status(500).json({ message: 'Failed to propose electricity bill' });
     }
 };
 export const approveElectricityBill = async (req, res) => {
     try {
-        const propertyIds = await accessiblePropertyIds(req, ['OWNER', 'WARDEN']);
+        const propertyIds = await accessiblePropertyIds(req, OPERATIONS_MONEY_ROLES);
         const { approveElectricityBill: approve } = await import('../services/pg-billing.js');
         const result = await approve(db, req.user?.userId ? String(req.user.userId) : null, String(req.params.billId), propertyIds);
         res.json(result);
@@ -1260,16 +1738,15 @@ export const approveElectricityBill = async (req, res) => {
             return res.status(404).json({ message: 'Bill not found' });
         if (code === 'FORBIDDEN')
             return res.status(403).json({ message: 'You do not have access to this bill' });
-        console.error('PG electricity bill approve error:', error);
+        logger.error({ err: error }, 'PG electricity bill approve error');
         res.status(500).json({ message: 'Failed to approve electricity bill' });
     }
 };
 export const recordRentPayment = async (req, res) => {
-    const amount = Number(req.body.amount);
-    const method = String(req.body.method || '').toUpperCase();
-    if (!Number.isFinite(amount) || amount <= 0 || !['CASH', 'NEFT', 'UPI', 'OTHER'].includes(method)) {
-        return res.status(400).json({ message: 'A positive payment amount and valid payment method are required' });
-    }
+    const body = parseBody(rentPaymentBody, req, res, 'A positive payment amount and valid payment method are required');
+    if (!body)
+        return;
+    const { amount, method } = body;
     try {
         const entry = await db.pGRentEntry.findUnique({
             where: { id: String(req.params.entryId) },
@@ -1277,10 +1754,13 @@ export const recordRentPayment = async (req, res) => {
         });
         if (!entry)
             return res.status(404).json({ message: 'Ledger entry not found' });
-        if (!await canManageProperty(req, entry.tenant.propertyId, ['OWNER'])) {
+        if (!await canManageProperty(req, entry.tenant.propertyId, MONEY_ROLES)) {
             return res.status(403).json({ message: 'You do not have access to this property' });
         }
         const updated = await db.$transaction(async (tx) => {
+            // Lock the ledger row so concurrent payments apply one after another
+            // instead of the later one failing its compare-and-swap below.
+            await tx.$queryRaw `SELECT 1 FROM "PGRentEntry" WHERE "id" = ${entry.id} FOR UPDATE`;
             const current = await tx.pGRentEntry.findUnique({ where: { id: entry.id } });
             if (!current)
                 throw new Error('LEDGER_ENTRY_NOT_FOUND');
@@ -1292,7 +1772,7 @@ export const recordRentPayment = async (req, res) => {
                     paidAmount,
                     status,
                     method,
-                    reference: req.body.reference?.trim() || current.reference,
+                    reference: body.reference || current.reference,
                     paidAt: status === 'PAID' ? new Date() : current.paidAt
                 }
             });
@@ -1313,24 +1793,23 @@ export const recordRentPayment = async (req, res) => {
         if (error?.message === 'PAYMENT_CONFLICT') {
             return res.status(409).json({ message: 'Payment changed concurrently; refresh the ledger and retry' });
         }
-        console.error('PG rent payment record error:', error);
+        logger.error({ err: error }, 'PG rent payment record error');
         res.status(500).json({ message: 'Failed to record payment' });
     }
 };
 export const getOwnerReport = async (req, res) => {
     try {
-        const propertyIds = await accessiblePropertyIds(req, ['OWNER']);
+        const propertyIds = await accessiblePropertyIds(req, MONEY_ROLES);
         const propertyId = req.query.propertyId ? String(req.query.propertyId) : undefined;
         if (propertyId && !propertyIds.includes(propertyId)) {
             return res.status(403).json({ message: 'You do not have access to this property' });
         }
         const scope = propertyId ? [propertyId] : propertyIds;
-        const period = String(req.query.period || new Date().toISOString().slice(0, 7));
+        const period = String(req.query.period || periodOf());
         const [year, month] = period.split('-').map(Number);
         if (!year || !month || month < 1 || month > 12)
             return res.status(400).json({ message: 'Period must be YYYY-MM' });
-        const periodStart = new Date(Date.UTC(year, month - 1, 1));
-        const periodEnd = new Date(Date.UTC(year, month, 1));
+        const { gte: periodStart, lt: periodEnd } = periodRange(period);
         const [properties, tenants, entries, bookings] = await Promise.all([
             db.pGProperty.findMany({ where: { id: { in: scope } }, include: { rooms: { include: { beds: true } } } }),
             db.pGTenant.findMany({ where: { propertyId: { in: scope } }, select: { id: true, status: true, propertyId: true } }),
@@ -1369,7 +1848,7 @@ export const getOwnerReport = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('PG owner report error:', error);
+        logger.error({ err: error }, 'PG owner report error');
         res.status(500).json({ message: 'Failed to generate report' });
     }
 };
@@ -1380,7 +1859,9 @@ export const getOwnerSummary = async (req, res) => {
             return res.status(401).json({ message: 'Unauthorized' });
         const propertyIds = await accessiblePropertyIds(req);
         const ownerPropertyIds = await accessiblePropertyIds(req, ['OWNER']);
-        const canManageStaff = user.role === 'SUPER_ADMIN' || user.role === 'PG_OWNER' || ownerPropertyIds.length > 0;
+        const accessRows = await db.pGPropertyAccess.findMany({ where: { userId: user.id }, select: { role: true } });
+        const staffRoles = [...new Set(accessRows.map((row) => row.role))];
+        const canManageStaff = user.role === 'PG_OWNER' || ownerPropertyIds.length > 0;
         const propertyId = req.query.propertyId ? String(req.query.propertyId) : undefined;
         if (propertyId && !propertyIds.includes(propertyId)) {
             return res.status(403).json({ message: 'You do not have access to this property' });
@@ -1405,11 +1886,12 @@ export const getOwnerSummary = async (req, res) => {
             pendingBookings,
             openTickets,
             rentOutstanding,
-            canManageStaff
+            canManageStaff,
+            staffRoles
         });
     }
     catch (error) {
-        console.error('PG owner summary error:', error);
+        logger.error({ err: error }, 'PG owner summary error');
         res.status(500).json({ message: 'Failed to fetch owner summary' });
     }
 };
@@ -1427,7 +1909,7 @@ export const listOwnerTickets = async (req, res) => {
         res.json(tickets.map((ticket) => ({ ...ticket, assignedName: ticket.assignedTo ? assignedNames.get(ticket.assignedTo) || null : null })));
     }
     catch (error) {
-        console.error('PG maintenance list error:', error);
+        logger.error({ err: error }, 'PG maintenance list error');
         res.status(500).json({ message: 'Failed to fetch maintenance tickets' });
     }
 };
@@ -1453,14 +1935,18 @@ export const listTenantTickets = async (req, res) => {
         res.json(tickets);
     }
     catch (error) {
-        console.error('PG resident maintenance list error:', error);
+        logger.error({ err: error }, 'PG resident maintenance list error');
         res.status(500).json({ message: 'Failed to fetch maintenance requests' });
     }
 };
 export const createTenantTicket = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(createTenantTicketBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
     const user = currentUser(req);
     const propertyId = requestPropertyId(req) || user?.propertyId;
-    const { tenantId, title, description, category } = req.body;
+    const { tenantId, title, description, category } = input;
     if (!user || user.role !== 'PG_TENANT')
         return res.status(403).json({ message: 'Resident access is required' });
     if (!propertyId || (user.propertyId && user.propertyId !== propertyId)) {
@@ -1469,8 +1955,8 @@ export const createTenantTicket = async (req, res) => {
     if (!tenantId || !title?.trim() || !description?.trim()) {
         return res.status(400).json({ message: 'Stay, title and description are required' });
     }
-    if (title.trim().length > 120 || description.trim().length > 2000) {
-        return res.status(400).json({ message: 'Title must be 120 characters or less and description 2,000 characters or less' });
+    if (title.trim().length > LIMITS.ticketTitle || description.trim().length > LIMITS.ticketDetails) {
+        return res.status(400).json({ message: `Title must be ${LIMITS.ticketTitle} characters or less and description ${LIMITS.ticketDetails.toLocaleString('en-IN')} characters or less` });
     }
     const allowedCategories = ['PLUMBING', 'ELECTRICAL', 'APPLIANCE', 'CLEANING', 'SAFETY', 'PEST', 'OTHER'];
     const ticketCategory = String(category || 'OTHER').toUpperCase();
@@ -1504,11 +1990,16 @@ export const createTenantTicket = async (req, res) => {
         res.status(201).json(ticket);
     }
     catch (error) {
-        console.error('PG resident maintenance creation error:', error);
+        logger.error({ err: error }, 'PG resident maintenance creation error');
         res.status(500).json({ message: 'Failed to create maintenance request' });
     }
 };
 export const updateResidentProfile = async (req, res) => {
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(updateResidentProfileBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const inputFields = input;
     try {
         const scope = await residentScope(req);
         if (!scope)
@@ -1525,29 +2016,29 @@ export const updateResidentProfile = async (req, res) => {
         const allowedFields = ['permanentAddress', 'institutionOrEmployer', 'emergencyName', 'emergencyPhone'];
         const data = {};
         for (const field of allowedFields) {
-            if (req.body[field] === undefined)
+            if (inputFields[field] === undefined)
                 continue;
-            const value = String(req.body[field]).trim();
-            if (value.length > 200)
-                return res.status(400).json({ message: `${field} must be 200 characters or less` });
+            const value = String(inputFields[field]).trim();
+            if (value.length > LIMITS.profileText)
+                return res.status(400).json({ message: `${field} must be ${LIMITS.profileText} characters or less` });
             data[field] = value || null;
         }
-        if (req.body.bloodGroup !== undefined) {
-            const bloodGroup = String(req.body.bloodGroup).toUpperCase();
-            if (bloodGroup && !['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].includes(bloodGroup)) {
-                return res.status(400).json({ message: 'Invalid blood group' });
+        if (input.bloodGroup !== undefined) {
+            const bloodGroup = String(input.bloodGroup).toUpperCase();
+            if (bloodGroup && !isBloodGroup(bloodGroup)) {
+                return res.status(400).json({ message: MESSAGES.bloodGroup });
             }
             data.bloodGroup = bloodGroup || null;
         }
-        if (req.body.kycType !== undefined) {
-            const kycType = String(req.body.kycType).toUpperCase();
-            if (kycType && !['AADHAAR', 'PAN', 'PASSPORT', 'DRIVING_LICENSE', 'STUDENT_ID', 'WORK_ID'].includes(kycType)) {
-                return res.status(400).json({ message: 'Invalid KYC document type' });
+        if (input.kycType !== undefined) {
+            const kycType = String(input.kycType).toUpperCase();
+            if (kycType && !isKycType(kycType)) {
+                return res.status(400).json({ message: MESSAGES.kycType });
             }
             data.kycType = kycType || null;
         }
-        if (req.body.kycDocumentUrl !== undefined) {
-            const fileKey = String(req.body.kycDocumentUrl || '').trim();
+        if (input.kycDocumentUrl !== undefined) {
+            const fileKey = String(input.kycDocumentUrl || '').trim();
             if (fileKey && !/^(?:local\/[0-9a-f-]{36}\.(?:webp|pdf)|uploads\/[a-zA-Z0-9._-]+)$/i.test(fileKey)) {
                 return res.status(400).json({ message: 'Invalid KYC document reference' });
             }
@@ -1555,13 +2046,13 @@ export const updateResidentProfile = async (req, res) => {
             data.kycVerified = false;
             data.kycVerifiedAt = null;
         }
-        if (req.body.foodOptOut !== undefined)
-            data.foodOptOut = Boolean(req.body.foodOptOut);
+        if (input.foodOptOut !== undefined)
+            data.foodOptOut = Boolean(input.foodOptOut);
         const updated = await db.pGTenant.update({ where: { id: tenant.id }, data });
         res.json(updated);
     }
     catch (error) {
-        console.error('PG resident profile update error:', error);
+        logger.error({ err: error }, 'PG resident profile update error');
         res.status(500).json({ message: 'Failed to update resident profile' });
     }
 };
@@ -1578,26 +2069,25 @@ export const listResidentNotifications = async (req, res) => {
         res.json({ notifications, unreadCount: notifications.filter((notification) => !notification.readAt).length });
     }
     catch (error) {
-        console.error('PG resident notification list error:', error);
+        logger.error({ err: error }, 'PG resident notification list error');
         res.status(500).json({ message: 'Failed to fetch notifications' });
     }
 };
 export const createResidentPaymentClaim = async (req, res) => {
-    const amount = Number(req.body.amount);
-    const reference = String(req.body.reference || '').trim();
-    if (!Number.isFinite(amount) || amount <= 0 || !/^[a-zA-Z0-9._/-]{6,80}$/.test(reference)) {
-        return res.status(400).json({ message: 'Enter a positive amount and a valid UPI transaction reference' });
-    }
+    const body = parseBody(paymentClaimBody, req, res, 'Enter a positive amount and a valid UPI transaction reference');
+    if (!body)
+        return;
+    const { amount, reference } = body;
     try {
         const scope = await residentScope(req);
         if (!scope)
             return res.status(403).json({ message: 'Resident access is required on this PG host' });
-        const tenant = scope.tenants.find((item) => item.id === String(req.body.tenantId) && ['ACTIVE', 'NOTICE_PERIOD'].includes(item.status));
+        const tenant = scope.tenants.find((item) => item.id === String(body.tenantId) && ['ACTIVE', 'NOTICE_PERIOD'].includes(item.status));
         if (!tenant)
             return res.status(404).json({ message: 'Active stay not found' });
         const entry = await db.pGRentEntry.findFirst({
             where: {
-                id: String(req.body.rentEntryId || ''),
+                id: String(body.rentEntryId || ''),
                 tenantId: tenant.id,
                 entryType: { in: ['RENT', 'DEPOSIT', 'UTILITY', 'ELECTRICITY', 'FOOD'] },
                 status: { in: ['DUE', 'PARTIAL', 'OVERDUE'] }
@@ -1622,7 +2112,7 @@ export const createResidentPaymentClaim = async (req, res) => {
     catch (error) {
         if (error?.code === 'P2002')
             return res.status(409).json({ message: 'This transaction reference has already been submitted' });
-        console.error('PG resident payment claim error:', error);
+        logger.error({ err: error }, 'PG resident payment claim error');
         res.status(500).json({ message: 'Failed to submit payment claim' });
     }
 };
@@ -1640,7 +2130,7 @@ export const listResidentPaymentClaims = async (req, res) => {
         res.json(claims);
     }
     catch (error) {
-        console.error('PG resident payment claim list error:', error);
+        logger.error({ err: error }, 'PG resident payment claim list error');
         res.status(500).json({ message: 'Failed to fetch payment claims' });
     }
 };
@@ -1663,12 +2153,16 @@ export const markResidentNotificationRead = async (req, res) => {
         res.json({ message: 'Notification marked as read' });
     }
     catch (error) {
-        console.error('PG resident notification update error:', error);
+        logger.error({ err: error }, 'PG resident notification update error');
         res.status(500).json({ message: 'Failed to update notification' });
     }
 };
 export const createMaintenanceTicket = async (req, res) => {
-    const { propertyId, tenantId, title, description, category, priority, imageUrl, assignedTo } = req.body;
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(createMaintenanceTicketBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const { propertyId, tenantId, title, description, category, priority, imageUrl, assignedTo } = input;
     if (!propertyId || !title?.trim() || !description?.trim()) {
         return res.status(400).json({ message: 'Property, title and description are required' });
     }
@@ -1699,12 +2193,16 @@ export const createMaintenanceTicket = async (req, res) => {
         res.status(201).json(ticket);
     }
     catch (error) {
-        console.error('PG maintenance creation error:', error);
+        logger.error({ err: error }, 'PG maintenance creation error');
         res.status(500).json({ message: 'Failed to create maintenance ticket' });
     }
 };
 export const updateMaintenanceStatus = async (req, res) => {
-    const status = String(req.body.status || '').toUpperCase();
+    // Shape check only; the rules below still validate values.
+    const input = parseBody(updateMaintenanceStatusBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const status = String(input.status || '').toUpperCase();
     if (!['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'].includes(status)) {
         return res.status(400).json({ message: 'Invalid maintenance status' });
     }
@@ -1739,13 +2237,13 @@ export const updateMaintenanceStatus = async (req, res) => {
     catch (error) {
         if (error?.message === 'TICKET_STATUS_CHANGED')
             return res.status(409).json({ message: 'Ticket status changed; refresh and try again' });
-        console.error('PG maintenance status update error:', error);
+        logger.error({ err: error }, 'PG maintenance status update error');
         res.status(500).json({ message: 'Failed to update maintenance ticket' });
     }
 };
 export const listOwnerPaymentClaims = async (req, res) => {
     try {
-        const propertyIds = await accessiblePropertyIds(req, ['OWNER']);
+        const propertyIds = await accessiblePropertyIds(req, MONEY_ROLES);
         const claims = await db.pGPaymentClaim.findMany({
             where: { propertyId: { in: propertyIds } },
             include: {
@@ -1759,15 +2257,15 @@ export const listOwnerPaymentClaims = async (req, res) => {
         res.json(claims);
     }
     catch (error) {
-        console.error('PG payment claim list error:', error);
+        logger.error({ err: error }, 'PG payment claim list error');
         res.status(500).json({ message: 'Failed to fetch payment claims' });
     }
 };
 export const reviewPaymentClaim = async (req, res) => {
-    const status = String(req.body.status || '').toUpperCase();
-    const responseNote = String(req.body.responseNote || '').trim().slice(0, 300);
-    if (!['APPROVED', 'REJECTED'].includes(status))
-        return res.status(400).json({ message: 'Choose approve or reject' });
+    const body = parseBody(paymentClaimReviewBody, req, res, 'Choose approve or reject');
+    if (!body)
+        return;
+    const { status, responseNote } = body;
     if (status === 'REJECTED' && !responseNote)
         return res.status(400).json({ message: 'A reason is required when rejecting a payment claim' });
     try {
@@ -1777,7 +2275,7 @@ export const reviewPaymentClaim = async (req, res) => {
         });
         if (!claim)
             return res.status(404).json({ message: 'Payment claim not found' });
-        if (!await canManageProperty(req, claim.propertyId, ['OWNER']))
+        if (!await canManageProperty(req, claim.propertyId, MONEY_ROLES))
             return res.status(403).json({ message: 'Only the property owner can verify a payment claim' });
         if (claim.status !== 'PENDING')
             return res.status(409).json({ message: 'This payment claim has already been reviewed' });
@@ -1828,7 +2326,7 @@ export const reviewPaymentClaim = async (req, res) => {
             return res.status(409).json({ message: 'The outstanding balance changed; refresh the ledger before reviewing this claim' });
         if (code === 'PAYMENT_CONFLICT' || code === 'CLAIM_ALREADY_REVIEWED')
             return res.status(409).json({ message: 'Payment data changed; refresh and try again' });
-        console.error('PG payment claim review error:', error);
+        logger.error({ err: error }, 'PG payment claim review error');
         res.status(500).json({ message: 'Failed to review payment claim' });
     }
 };

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeftRight, Check, Loader2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
@@ -54,38 +55,28 @@ function bedLabel(bed: BedView | null): string {
 }
 
 export default function RoomChange() {
-  const [requests, setRequests] = useState<SwapRequest[]>([]);
-  const [matches, setMatches] = useState<Matches | null>(null);
-  const [vacantBeds, setVacantBeds] = useState<BedView[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [acting, setActing] = useState('');
-  const [refreshKey, setRefreshKey] = useState(0);
   const [form, setForm] = useState({ type: 'SWAP', bedId: '', floor: '', note: '', reason: '' });
 
-  useEffect(() => {
-    let live = true;
-    fetchRoomChangeData()
-      .then(({ rows, matchData }) => {
-        if (!live) return;
-        setRequests(rows);
-        setMatches(matchData);
-      })
-      .catch((error: unknown) => {
-        if (live) toast.error(apiErrorMessage(error, 'Could not load room changes'));
-      })
-      .finally(() => {
-        if (live) setLoading(false);
-      });
-    return () => { live = false; };
-  }, [refreshKey]);
+  const { data, isPending: loading } = useQuery({
+    queryKey: ['room-changes'],
+    queryFn: fetchRoomChangeData,
+    meta: { errorMessage: 'Could not load room changes' }
+  });
+  const requests = data?.rows ?? [];
+  const matches = data?.matchData ?? null;
+  // Vacant beds are only needed while the resident is choosing a move.
+  const { data: vacantBeds = [] } = useQuery({
+    queryKey: ['room-changes', 'vacant-beds'],
+    queryFn: async (): Promise<BedView[]> => (await api.get('/pg/tenant/vacant-beds')).data || [],
+    enabled: form.type === 'MOVE',
+    meta: { errorMessage: 'Could not load vacant beds' }
+  });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['room-changes'] });
 
   const pickType = (type: 'SWAP' | 'MOVE') => {
     setForm((current) => ({ ...current, type }));
-    if (type === 'MOVE' && !vacantBeds.length) {
-      api.get('/pg/tenant/vacant-beds')
-        .then((response) => setVacantBeds(response.data || []))
-        .catch((error) => toast.error(apiErrorMessage(error, 'Could not load vacant beds')));
-    }
   };
 
   const openRequest = async (event: React.FormEvent) => {
@@ -103,8 +94,7 @@ export default function RoomChange() {
       });
       toast.success(form.type === 'MOVE' ? 'Move request opened' : 'Swap request opened');
       setForm({ type: 'SWAP', bedId: '', floor: '', note: '', reason: '' });
-      setVacantBeds([]);
-      setRefreshKey((key) => key + 1);
+      await refresh();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not open request'));
     } finally {
@@ -117,7 +107,7 @@ export default function RoomChange() {
     try {
       await call();
       toast.success(success);
-      setRefreshKey((key) => key + 1);
+      await refresh();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Action failed'));
     } finally {
@@ -125,7 +115,7 @@ export default function RoomChange() {
     }
   };
 
-  if (loading) return <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-[#02224B]" /></div>;
+  if (loading) return <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-navy-900" /></div>;
 
   const openMine = requests.filter((row) => row.mine && ACTIVE.includes(row.status));
   const incoming = requests.filter((row) => !row.mine && row.status === 'PROPOSED');
@@ -136,8 +126,8 @@ export default function RoomChange() {
       {incoming.map((row) => (
         <article key={row.request_id} className="border border-blue-300 bg-white p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-semibold text-[#02224B]">{row.counterparty?.display_name || 'A resident'} wants to swap with you</h2>
-            <span className={`border px-2 py-0.5 text-xs font-semibold uppercase ${statusStyle(row.status)}`}>{row.status.replace('_', ' ')}</span>
+            <h2 className="font-semibold text-navy-900">{row.counterparty?.display_name || 'A resident'} wants to swap with you</h2>
+            <span className={`border px-2 py-0.5 text-xs font-semibold ${statusStyle(row.status)}`}>{row.status.replace('_', ' ')}</span>
           </div>
           <p className="mt-1 text-sm text-slate-600">They are in {row.counterparty?.current_room ? `room ${row.counterparty.current_room}` : 'another room'}{row.reason ? ` · “${row.reason}”` : ''}</p>
           <p className="mt-1 text-sm text-slate-600">Your warden confirms the move only if you accept.</p>
@@ -163,8 +153,8 @@ export default function RoomChange() {
       {openMine.map((row) => (
         <article key={row.request_id} className="border border-slate-200 bg-white p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-semibold text-[#02224B]">Your {row.request_type === 'MOVE' ? 'move' : 'swap'} request</h2>
-            <span className={`border px-2 py-0.5 text-xs font-semibold uppercase ${statusStyle(row.status)}`}>{row.status.replace('_', ' ')}</span>
+            <h2 className="font-semibold text-navy-900">Your {row.request_type === 'MOVE' ? 'move' : 'swap'} request</h2>
+            <span className={`border px-2 py-0.5 text-xs font-semibold ${statusStyle(row.status)}`}>{row.status.replace('_', ' ')}</span>
           </div>
           {row.request_type === 'MOVE' && row.offered_bed && <p className="mt-1 text-sm text-slate-600">To {bedLabel(row.offered_bed)}</p>}
           {row.reason && <p className="mt-1 text-sm text-slate-600">“{row.reason}”</p>}
@@ -174,13 +164,13 @@ export default function RoomChange() {
           {row.status === 'ACCEPTED' && <p className="mt-1 text-sm text-slate-600">Both sides agreed — your warden or owner confirms the move next.</p>}
           {row.request_type === 'SWAP' && row.status === 'PENDING_MATCH' && (
             <div className="mt-3 border-t border-slate-100 pt-3">
-              <h3 className="text-sm font-semibold text-[#02224B]">Possible swap partners</h3>
+              <h3 className="text-sm font-semibold text-navy-900">Possible swap partners</h3>
               {!matches?.candidates?.length && <p className="mt-1 text-sm text-slate-500">No other swap requests yet. Check back later.</p>}
               {matches?.candidates?.map((candidate) => (
                 <div key={candidate.their_request_id} className="mt-2 flex flex-col gap-2 border border-slate-200 p-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="font-medium">{candidate.partner.display_name}
-                      <span className={`ml-2 border px-1.5 py-0.5 text-[11px] font-semibold uppercase ${candidate.compatibility === 'MATCH' ? 'border-emerald-300 text-emerald-800' : 'border-slate-300 text-slate-500'}`}>
+                      <span className={`ml-2 border px-1.5 py-0.5 text-[11px] font-semibold ${candidate.compatibility === 'MATCH' ? 'border-emerald-300 text-emerald-800' : 'border-slate-300 text-slate-500'}`}>
                         {candidate.compatibility === 'MATCH' ? 'Good match' : 'Open'}
                       </span>
                     </p>
@@ -189,7 +179,7 @@ export default function RoomChange() {
                   <button
                     disabled={acting !== ''}
                     onClick={() => void act(`propose-${candidate.their_request_id}`, () => api.post(`/pg/tenant/room-changes/${row.request_id}/proposals`, { their_request_id: candidate.their_request_id }), 'Swap proposed')}
-                    className="inline-flex items-center gap-1.5 bg-[#02224B] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    className="inline-flex items-center gap-1.5 bg-navy-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
                   >
                     {acting === `propose-${candidate.their_request_id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowLeftRight className="h-4 w-4" />}Propose swap
                   </button>
@@ -202,7 +192,7 @@ export default function RoomChange() {
 
       {!openMine.length && (
         <form onSubmit={openRequest} className="border border-slate-200 bg-white p-5">
-          <h2 className="font-semibold text-[#02224B]">Request a room change</h2>
+          <h2 className="font-semibold text-navy-900">Request a room change</h2>
           <p className="mt-1 text-sm text-slate-600">Swap with another resident, or move to a vacant bed. The other side and your warden confirm before anything moves.</p>
           <div className="mt-3 flex gap-2">
             {(['SWAP', 'MOVE'] as const).map((type) => (
@@ -210,7 +200,7 @@ export default function RoomChange() {
                 key={type}
                 type="button"
                 onClick={() => pickType(type)}
-                className={`border px-3 py-2 text-sm font-semibold ${form.type === type ? 'border-[#02224B] bg-[#02224B] text-white' : 'border-slate-300 text-slate-700'}`}
+                className={`border px-3 py-2 text-sm font-semibold ${form.type === type ? 'border-navy-900 bg-navy-900 text-white' : 'border-slate-300 text-slate-700'}`}
               >
                 {type === 'SWAP' ? 'Swap rooms' : 'Move rooms'}
               </button>
@@ -237,7 +227,7 @@ export default function RoomChange() {
           <label className="mt-3 block text-sm text-slate-700">Reason (optional)
             <input value={form.reason} onChange={(event) => setForm((current) => ({ ...current, reason: event.target.value }))} maxLength={500} placeholder="Why do you want to change rooms?" className="mt-1 block w-full border border-slate-300 px-3 py-2" />
           </label>
-          <button disabled={acting !== ''} className="mt-3 inline-flex items-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+          <button disabled={acting !== ''} className="mt-3 inline-flex items-center gap-2 bg-navy-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
             {acting === 'new' && <Loader2 className="h-4 w-4 animate-spin" />}Open request
           </button>
         </form>
@@ -245,12 +235,12 @@ export default function RoomChange() {
 
       {past.length > 0 && (
         <div className="border border-slate-200 bg-white p-5">
-          <h2 className="font-semibold text-[#02224B]">Earlier requests</h2>
+          <h2 className="font-semibold text-navy-900">Earlier requests</h2>
           <div className="mt-2 divide-y divide-slate-100">
             {past.map((row) => (
               <div key={row.request_id} className="flex items-center justify-between gap-3 py-2 text-sm">
                 <span className="text-slate-600">{row.request_type === 'MOVE' ? 'Move' : 'Swap'}{row.offered_bed ? ` · ${bedLabel(row.offered_bed)}` : ''}</span>
-                <span className={`border px-2 py-0.5 text-xs font-semibold uppercase ${statusStyle(row.status)}`}>{row.status.replace('_', ' ')}</span>
+                <span className={`border px-2 py-0.5 text-xs font-semibold ${statusStyle(row.status)}`}>{row.status.replace('_', ' ')}</span>
               </div>
             ))}
           </div>

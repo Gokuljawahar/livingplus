@@ -1,4 +1,5 @@
-export declare const EXPENSE_CATEGORIES: readonly ["FOOD", "STAFF", "MAINTENANCE", "UTILITIES", "OTHER"];
+import { EXPENSE_CATEGORIES } from '@livingplus/shared';
+export { EXPENSE_CATEGORIES };
 export interface ExpenseInput {
     propertyId: string;
     category?: string;

@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { resolveHostContext } from '../utils/pg-slug.js';
+import { asSystem, setDbHostProperty } from '../db/context.js';
 
 export function resolvePgHost(db: any) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -19,10 +20,11 @@ export function resolvePgHost(db: any) {
     const slug = hostSlug || requestedSlug;
     let propertyId: string | undefined;
     if (slug) {
-      const property = await db.pGProperty.findFirst({
+      // Unpublished PGs keep their resident site, so look the slug up regardless of status.
+      const property: { id: string } | null = await asSystem('resolve a PG slug to its id', () => db.pGProperty.findFirst({
         where: { slug },
         select: { id: true }
-      });
+      }));
       if (!property) {
         res.status(404).json({ message: 'PG site not found' });
         return;
@@ -33,6 +35,7 @@ export function resolvePgHost(db: any) {
     (req as any).pgHostContext = hostContext;
     (req as any).pgSlug = slug || undefined;
     (req as any).pgPropertyId = propertyId;
+    setDbHostProperty(req, propertyId);
     next();
   };
 }

@@ -32,7 +32,7 @@ export default function SplitAuthLayout({
 }: SplitAuthLayoutProps) {
   return (
     <div className="min-h-screen bg-slate-50 lg:flex lg:h-screen">
-      <div className="hidden w-[45%] flex-col justify-between bg-[#02224B] p-8 text-white lg:flex lg:p-10">
+      <div className="hidden w-[45%] flex-col justify-between bg-navy-900 p-8 text-white lg:flex lg:p-10">
         <div>
           <Link to="/" className="inline-block">
             <img src={logo} alt="Living Plus" className="h-24 origin-left object-contain" />

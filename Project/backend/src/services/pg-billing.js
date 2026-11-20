@@ -3,13 +3,15 @@
 // the owner. Shares round to whole rupees with the remainder settled on the
 // largest share so the parts always sum to the bill total.
 import { logAudit } from './pg-audit.js';
+import { isYearMonth } from '@livingplus/shared';
+import { dueDateIn, periodOf, zonedDate } from '../utils/app-time.js';
 export function calculateMonthlyRent(tenant, at = new Date()) {
-    const period = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}`;
+    const period = periodOf(at);
     const dueDay = Math.min(28, Math.max(1, tenant.property?.rentDueDay || 5));
     return {
         period,
         amount: tenant.monthlyRent + (tenant.bed?.room?.maintenanceFee || 0) + (tenant.bed?.room?.utilitiesSurcharge || 0),
-        dueDate: new Date(at.getFullYear(), at.getMonth(), dueDay)
+        dueDate: dueDateIn(at, dueDay)
     };
 }
 export function validateBillInput(input) {
@@ -17,7 +19,7 @@ export function validateBillInput(input) {
     if (!propertyId)
         throw new Error('INVALID_PROPERTY');
     const period = String(input.period || '').trim();
-    if (!/^\d{4}-\d{2}$/.test(period))
+    if (!isYearMonth(period))
         throw new Error('INVALID_PERIOD');
     const totalAmount = Number(input.totalAmount);
     if (!Number.isFinite(totalAmount) || totalAmount <= 0 || totalAmount > 10000000)
@@ -109,7 +111,7 @@ export async function approveElectricityBill(db, actorId, billId, propertyIds) {
                 update: { amount: row.share, status: 'DUE' },
                 create: {
                     tenantId: tenant.id, period: bill.period, entryType: 'ELECTRICITY',
-                    amount: row.share, dueDate: new Date(year, month - 1, dueDay),
+                    amount: row.share, dueDate: zonedDate(year, month - 1, dueDay),
                     invoiceCode: `ELEC-${bill.period}-${tenant.id.slice(0, 8).toUpperCase()}`, status: 'DUE'
                 }
             });

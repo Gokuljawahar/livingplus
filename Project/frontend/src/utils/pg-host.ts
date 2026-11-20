@@ -1,6 +1,5 @@
 export type AppHostContext =
   | { kind: 'public' }
-  | { kind: 'platform-admin' }
   | { kind: 'property'; slug: string }
   | { kind: 'unknown' };
 
@@ -11,6 +10,13 @@ const reservedSlugs = new Set([
 
 const rootDomain = (import.meta.env.VITE_ROOT_DOMAIN || 'livingplus.com').toLowerCase();
 
+/**
+ * One-domain deployments (for example a Cloud Run URL) have no per-PG
+ * subdomains: every host is the main site and areas use paths
+ * (/owner, /stay/<pg>, /admin), exactly like local development.
+ */
+export const singleHostMode = import.meta.env.VITE_SINGLE_HOST_MODE === 'true';
+
 function parsePropertySlug(hostname: string, suffix: string): string | null {
   if (!hostname.endsWith(suffix)) return null;
   const slug = hostname.slice(0, -suffix.length);
@@ -19,11 +25,11 @@ function parsePropertySlug(hostname: string, suffix: string): string | null {
 }
 
 export function resolveAppHost(hostname = window.location.hostname): AppHostContext {
+  if (singleHostMode) return { kind: 'public' };
   const host = hostname.toLowerCase().replace(/\.$/, '');
   if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === rootDomain || host === `www.${rootDomain}`) {
     return { kind: 'public' };
   }
-  if (host === `admin.${rootDomain}`) return { kind: 'platform-admin' };
   const productionSlug = parsePropertySlug(host, `.${rootDomain}`);
   if (productionSlug) return { kind: 'property', slug: productionSlug };
 
@@ -32,12 +38,4 @@ export function resolveAppHost(hostname = window.location.hostname): AppHostCont
     if (localSlug) return { kind: 'property', slug: localSlug };
   }
   return { kind: 'unknown' };
-}
-
-export function pgHostUrl(slug: string): string {
-  const hostname = window.location.hostname;
-  if (import.meta.env.DEV && (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname.endsWith('.localhost'))) {
-    return `${window.location.protocol}//${slug}.localhost${window.location.port ? `:${window.location.port}` : ''}`;
-  }
-  return `${window.location.protocol}//${slug}.${rootDomain}`;
 }

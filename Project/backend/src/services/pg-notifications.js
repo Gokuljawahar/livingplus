@@ -1,6 +1,7 @@
 // WhatsApp Cloud API (spec Tier 2) and UPI gateway are optional modules.
 // Both stay disabled unless explicitly enabled, so the platform works
 // in offline mode (wa.me click-to-chat + manual ledger) without them.
+import { logger } from '../utils/logger.js';
 export const featureFlags = {
     whatsappCloudApi: process.env.ENABLE_WHATSAPP_CLOUD_API === 'true',
     upiPayment: process.env.ENABLE_UPI_PAYMENT === 'true'
@@ -47,7 +48,7 @@ export async function notifyWhatsAppTemplate(event, toPhone, parameters = []) {
 // Fire-and-forget wrapper: notifications must never break a booking flow.
 export function notifyWhatsAppSafely(event, toPhone, parameters = []) {
     void notifyWhatsAppTemplate(event, toPhone, parameters).catch((error) => {
-        console.error(`[PG notifications] ${event} failed:`, error);
+        logger.error({ err: error }, `[PG notifications] ${event} failed`);
     });
 }
 //# sourceMappingURL=pg-notifications.js.map

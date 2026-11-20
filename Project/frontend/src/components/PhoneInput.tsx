@@ -46,7 +46,7 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({
           {icon}
         </div>
       )}
-      <div className={`flex items-center bg-slate-50 border rounded-xl transition-all overflow-hidden ${className} ${disabled ? 'opacity-60 cursor-not-allowed' : ''} ${error ? 'border-red-500 ring-2 ring-red-500/20 bg-red-50/30' : 'border-slate-100 focus-within:ring-2 focus-within:ring-[#02224B] focus-within:bg-white'}`}>
+      <div className={`flex items-center bg-slate-50 border rounded-xl transition-all overflow-hidden ${className} ${disabled ? 'opacity-60 cursor-not-allowed' : ''} ${error ? 'border-red-500 ring-2 ring-red-500/20 bg-red-50/30' : 'border-slate-100 focus-within:ring-2 focus-within:ring-navy-900 focus-within:bg-white'}`}>
         <div className={`flex items-center justify-center px-3 py-3 border-r font-bold text-sm transition-colors ${error ? 'bg-red-50 border-red-100 text-red-500' : 'bg-slate-100 border-slate-200 text-slate-500'} ${icon ? 'pl-11' : ''}`}>
           +91
         </div>

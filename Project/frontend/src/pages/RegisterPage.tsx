@@ -1,5 +1,8 @@
-import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useRef, useState } from 'react';
+import { Controller, useForm, useWatch } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { registerSchema, type RegisterForm } from '../validation/forms';
+import { Link } from 'react-router-dom';
 import { PhoneInput } from '../components/PhoneInput';
 import { Building2, BedDouble, ClipboardList, Loader2 } from 'lucide-react';
 import PasswordInput from '../components/PasswordInput';
@@ -8,77 +11,56 @@ import toast from 'react-hot-toast';
 import LogoLoader from '../components/LogoLoader';
 import logo from '../assets/logo_bg_white.png';
 import logoBlack from '../assets/logo_bg_black.png';
-import { pgHostUrl, resolveAppHost } from '../utils/pg-host';
+import { ROUTES } from '../utils/app-areas';
 import { apiErrorMessage } from '../utils/api-error';
+import { phoneOtpErrorMessage, startPhoneVerification, type PhoneChallenge } from '../utils/phone-otp';
 
 export default function RegisterPage() {
-  const navigate = useNavigate();
 
   const [step, setStep] = useState(1);
-  const [loading, setLoading] = useState(false);
   const [showLoader, setShowLoader] = useState(false);
   const [nextLoginUrl, setNextLoginUrl] = useState('');
 
-  const [formData, setFormData] = useState({
-    name: '',
-    propertyName: '',
-    phone: '',
-    propertyAddress: '',
-    locality: '',
-    contactPhone: '',
-    city: 'Chennai',
-    genderPolicy: 'ANY',
-    businessLogo: '',
-    password: '',
-    confirmPassword: ''
+  const { register, control, handleSubmit, trigger, formState: { errors, isSubmitting: loading } } = useForm<RegisterForm>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: {
+      name: '', propertyName: '', phone: '', propertyAddress: '', locality: '', contactPhone: '',
+      city: 'Chennai', genderPolicy: 'ANY', businessLogo: '', password: '', confirmPassword: ''
+    }
   });
+  const phone = useWatch({ control, name: 'phone' });
 
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  // Owners prove their phone with a code, so guests can trust "Verified owner".
+  const challenge = useRef<PhoneChallenge<'BOOKING'> | null>(null);
+  const [codeSent, setCodeSent] = useState(false);
+  const [code, setCode] = useState('');
+  const [phoneToken, setPhoneToken] = useState('');
+  const [verifying, setVerifying] = useState(false);
 
-  useEffect(() => {
-    if (resolveAppHost().kind !== 'public') navigate('/', { replace: true });
-  }, [navigate]);
-
-  const handleContinue = () => {
-    const newErrors: Record<string, string> = {};
-    if (!formData.phone) newErrors.phone = 'Phone number is required';
-    else if (formData.phone.replace(/\D/g, '').length < 10) newErrors.phone = 'Enter a valid 10-digit number';
-
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
-      return;
+  const handleContinue = async () => {
+    if (!await trigger('phone')) return;
+    setVerifying(true);
+    try {
+      if (!codeSent) {
+        challenge.current = await startPhoneVerification(phone, 'BOOKING');
+        if (challenge.current.devCode) toast.success(`Demo code: ${challenge.current.devCode}`);
+        else toast.success('Code sent');
+        setCodeSent(true);
+        return;
+      }
+      if (!challenge.current) return;
+      const data = await challenge.current.verify(code);
+      setPhoneToken(data.phoneToken);
+      toast.success('Phone verified');
+      setStep(2);
+    } catch (error) {
+      toast.error(phoneOtpErrorMessage(error, codeSent ? 'That code did not work' : 'Could not send the code'));
+    } finally {
+      setVerifying(false);
     }
-
-    setErrors({});
-    setStep(2);
   };
 
-  const validatePassword = (pass: string) => {
-    const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-    return regex.test(pass);
-  };
-
-  const handleRegister = async () => {
-    const newErrors: Record<string, string> = {};
-    if (!formData.name.trim()) newErrors.name = 'Owner name is required';
-    if (!formData.propertyName.trim()) newErrors.propertyName = 'PG name is required';
-    if (!formData.propertyAddress.trim()) newErrors.propertyAddress = 'Property address is required';
-    if (!formData.locality.trim()) newErrors.locality = 'Locality is required';
-    if (!formData.password) {
-      newErrors.password = 'Password is required';
-    } else if (!validatePassword(formData.password)) {
-      newErrors.password = 'Must contain 8+ chars, 1 uppercase, 1 lowercase, 1 number, 1 special char';
-    }
-    if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = 'Passwords do not match';
-    }
-
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
-      return;
-    }
-
-    setLoading(true);
+  const onRegister = async (formData: RegisterForm) => {
     try {
       const cleanPhone = formData.phone.replace(/\D/g, '');
       const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
@@ -93,12 +75,13 @@ export default function RegisterPage() {
         city: formData.city,
         genderPolicy: formData.genderPolicy,
         businessLogo: formData.businessLogo,
-        password: formData.password
+        password: formData.password,
+        phoneToken
       };
 
       const response = await api.post('/auth/register', payload);
       if (!response.data.pgSlug) throw new Error('The property was created without a PG address');
-      setNextLoginUrl(`${pgHostUrl(response.data.pgSlug)}/login`);
+      setNextLoginUrl(ROUTES.ownerLogin);
 
       toast.success(
         <div>
@@ -110,8 +93,6 @@ export default function RegisterPage() {
       setShowLoader(true);
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Registration failed'));
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -122,11 +103,11 @@ export default function RegisterPage() {
       }} />}
       <div className="min-h-screen lg:h-screen bg-slate-50 flex">
         {/* Left Side: Animated Illustration */}
-        <div className="hidden lg:flex w-[45%] bg-[#02224B] text-white p-8 lg:p-10 flex-col justify-between relative overflow-hidden">
+        <div className="hidden lg:flex w-[45%] bg-navy-900 text-white p-8 lg:p-10 flex-col justify-between relative overflow-hidden">
           {/* Background Patterns */}
           <div className="absolute inset-0 opacity-10">
             <div className="absolute top-20 left-10 w-64 h-64 bg-white rounded-full mix-blend-overlay filter blur-3xl opacity-50 animate-blob"></div>
-            <div className="absolute top-40 right-10 w-72 h-72 bg-[#FEB109] rounded-full mix-blend-overlay filter blur-3xl opacity-50 animate-blob animation-delay-2000"></div>
+            <div className="absolute top-40 right-10 w-72 h-72 bg-amber-500 rounded-full mix-blend-overlay filter blur-3xl opacity-50 animate-blob animation-delay-2000"></div>
             <div className="absolute -bottom-8 left-20 w-80 h-80 bg-blue-400 rounded-full mix-blend-overlay filter blur-3xl opacity-50 animate-blob animation-delay-4000"></div>
           </div>
 
@@ -185,7 +166,7 @@ export default function RegisterPage() {
         {/* Right Side: Registration Form */}
         <div className="flex-1 flex flex-col justify-start py-8 lg:py-12 px-4 sm:px-6 lg:px-20 xl:px-32 relative min-h-screen lg:min-h-0 lg:overflow-y-auto">
           <div className="absolute top-8 right-8 hidden lg:block">
-            <Link to="/" className="text-sm font-medium text-slate-500 hover:text-[#02224B] transition-colors">
+            <Link to="/" className="text-sm font-medium text-slate-500 hover:text-navy-900 transition-colors">
               Back to home
             </Link>
           </div>
@@ -214,7 +195,7 @@ export default function RegisterPage() {
             {/* Progress Bar */}
             <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mb-6">
               <div
-                className="bg-[#02224B] h-full transition-all duration-500 ease-out"
+                className="bg-navy-900 h-full transition-all duration-500 ease-out"
                 style={{ width: `${(step / 2) * 100}%` }}
               />
             </div>
@@ -224,27 +205,33 @@ export default function RegisterPage() {
                 <div className="space-y-6 animate-in slide-in-from-right fade-in duration-500">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Owner phone (Login ID)</label>
-                    <PhoneInput
-                      value={formData.phone}
-                      onChange={(val) => {
-                        setFormData({ ...formData, phone: val });
-                        if (errors.phone) setErrors({ ...errors, phone: '' });
-                      }}
-                      onBlur={() => { }}
-                      placeholder="Phone number"
-                      error={!!errors.phone}
-                      required
+                    <Controller
+                      name="phone"
+                      control={control}
+                      render={({ field }) => (
+                        <PhoneInput value={field.value} onChange={field.onChange} onBlur={field.onBlur} placeholder="Phone number" error={!!errors.phone} required />
+                      )}
                     />
-                    {errors.phone && <p className="mt-1 text-xs text-red-500">{errors.phone}</p>}
+                    {errors.phone && <p className="mt-1 text-xs text-red-500">{errors.phone.message}</p>}
                   </div>
 
+                  {codeSent && (
+                    <label className="block text-sm font-medium text-slate-700">
+                      Code sent to {phone}
+                      <input aria-label="6-digit verification code" value={code} onChange={(event) => setCode(event.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+                        className="tabular mt-2 block w-full rounded-[6px] border border-field-border px-3 py-2.5 tracking-[0.2em]" />
+                      <button type="button" onClick={() => { setCodeSent(false); setCode(''); }} className="mt-2 text-sm font-medium text-navy-700 underline-offset-2 hover:underline">Change number</button>
+                    </label>
+                  )}
                   <button
-                    onClick={handleContinue}
-                    disabled={loading || formData.phone.replace(/\D/g, '').length !== 12}
-                    className="w-full py-4 bg-[#02224B] hover:bg-[#0A3B75] text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mt-8 disabled:opacity-70 disabled:cursor-not-allowed"
+                    onClick={() => void handleContinue()}
+                    disabled={loading || verifying || phone.replace(/\D/g, '').length !== 12 || (codeSent && code.length < 6)}
+                    className="w-full py-4 bg-navy-900 hover:bg-navy-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mt-8 disabled:opacity-70 disabled:cursor-not-allowed"
                   >
-                    Continue
+                    {verifying && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {codeSent ? 'Verify and continue' : 'Send code'}
                   </button>
+                  <p className="text-sm text-muted">We verify your number so guests see you as a verified owner.</p>
                 </div>
               )}
 
@@ -257,95 +244,96 @@ export default function RegisterPage() {
                     <div className="relative">
                       <input
                         type="text"
-                        value={formData.name}
-                        onChange={(e) => {
-                          setFormData({ ...formData, name: e.target.value });
-                          if (errors.name) setErrors({ ...errors, name: '' });
-                        }}
-                        className={`w-full px-4 py-3 bg-slate-50 border-slate-200 rounded-xl focus:ring-[#02224B] focus:border-[#02224B] ${errors.name ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
+                        aria-label="Owner name"
+                        {...register('name')}
+                        className={`w-full px-4 py-3 bg-slate-50 border-slate-200 rounded-xl focus:ring-navy-900 focus:border-navy-900 ${errors.name ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
                         placeholder="Your full name"
                       />
                     </div>
-                    {errors.name && <p className="mt-1 text-xs text-red-500">{errors.name}</p>}
+                    {errors.name && <p className="mt-1 text-xs text-red-500">{errors.name.message}</p>}
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">PG / Hostel name</label>
                     <input
-                      required
                       type="text"
-                      value={formData.propertyName}
-                      onChange={(e) => {
-                        setFormData({ ...formData, propertyName: e.target.value });
-                        if (errors.propertyName) setErrors({ ...errors, propertyName: '' });
-                      }}
-                      className={`w-full border border-slate-200 bg-slate-50 px-4 py-3 focus:border-[#02224B] focus:ring-[#02224B] ${errors.propertyName ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
+                      aria-label="PG / Hostel name"
+                      {...register('propertyName')}
+                      className={`w-full border border-slate-200 bg-slate-50 px-4 py-3 focus:border-navy-900 focus:ring-navy-900 ${errors.propertyName ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
                       placeholder="e.g. Cedar House PG"
                     />
-                    {errors.propertyName && <p className="mt-1 text-xs text-red-500">{errors.propertyName}</p>}
+                    {errors.propertyName && <p className="mt-1 text-xs text-red-500">{errors.propertyName.message}</p>}
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block text-sm font-medium text-slate-700">Street address
-                      <input required value={formData.propertyAddress} onChange={(e) => setFormData({ ...formData, propertyAddress: e.target.value })} className="mt-1.5 w-full border border-slate-200 bg-slate-50 px-3 py-2.5" placeholder="Building and street" />
-                      {errors.propertyAddress && <span className="mt-1 block text-xs text-red-500">{errors.propertyAddress}</span>}
+                      <input {...register('propertyAddress')} className="mt-1.5 w-full border border-slate-200 bg-slate-50 px-3 py-2.5" placeholder="Building and street" />
+                      {errors.propertyAddress && <span className="mt-1 block text-xs text-red-500">{errors.propertyAddress.message}</span>}
                     </label>
                     <label className="block text-sm font-medium text-slate-700">Locality
-                      <input required value={formData.locality} onChange={(e) => setFormData({ ...formData, locality: e.target.value })} className="mt-1.5 w-full border border-slate-200 bg-slate-50 px-3 py-2.5" placeholder="Neighbourhood" />
-                      {errors.locality && <span className="mt-1 block text-xs text-red-500">{errors.locality}</span>}
+                      <input {...register('locality')} className="mt-1.5 w-full border border-slate-200 bg-slate-50 px-3 py-2.5" placeholder="Neighbourhood" />
+                      {errors.locality && <span className="mt-1 block text-xs text-red-500">{errors.locality.message}</span>}
                     </label>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block text-sm font-medium text-slate-700">City
-                      <input required value={formData.city} onChange={(e) => setFormData({ ...formData, city: e.target.value })} className="mt-1.5 w-full border border-slate-200 bg-slate-50 px-3 py-2.5" />
+                      <input {...register('city')} className="mt-1.5 w-full border border-slate-200 bg-slate-50 px-3 py-2.5" />
                     </label>
                     <label className="block text-sm font-medium text-slate-700">Resident policy
-                      <select value={formData.genderPolicy} onChange={(e) => setFormData({ ...formData, genderPolicy: e.target.value })} className="mt-1.5 w-full border border-slate-200 bg-white px-3 py-2.5">
+                      <select {...register('genderPolicy')} className="mt-1.5 w-full border border-slate-200 bg-white px-3 py-2.5">
                         <option value="ANY">All residents</option><option value="MEN">Men</option><option value="WOMEN">Women</option>
                       </select>
                     </label>
                   </div>
                   <label className="block text-sm font-medium text-slate-700">Public WhatsApp contact <span className="font-normal text-slate-400">(optional)</span>
-                    <PhoneInput value={formData.contactPhone} onChange={(value) => setFormData({ ...formData, contactPhone: value })} className="mt-1.5" />
+                    <Controller name="contactPhone" control={control} render={({ field }) => <PhoneInput value={field.value} onChange={field.onChange} className="mt-1.5" />} />
                   </label>
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Set Password</label>
+                    <Controller
+                      name="password"
+                      control={control}
+                      render={({ field }) => (
                     <PasswordInput
-                      value={formData.password}
+                      value={field.value}
                       autoComplete="new-password"
                       ariaLabel="Set password"
-                      onChange={(value) => {
-                        setFormData({ ...formData, password: value });
-                        if (errors.password) setErrors({ ...errors, password: '' });
-                      }}
-                      inputClassName={`border border-slate-200 px-4 ${errors.password ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'focus:border-[#02224B] focus:ring-[#02224B]'}`}
+                      required={false}
+                      onChange={field.onChange}
+                      inputClassName={`border border-slate-200 px-4 ${errors.password ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'focus:border-navy-900 focus:ring-navy-900'}`}
                     />
-                    {errors.password ? <p className="mt-1 text-xs text-red-500">{errors.password}</p> : <p className="mt-1 text-xs text-slate-400">Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special</p>}
+                      )}
+                    />
+                    {errors.password ? <p className="mt-1 text-xs text-red-500">{errors.password.message}</p> : <p className="mt-1 text-xs text-slate-400">Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special</p>}
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Confirm Password</label>
+                    <Controller
+                      name="confirmPassword"
+                      control={control}
+                      render={({ field }) => (
                     <PasswordInput
-                      value={formData.confirmPassword}
+                      value={field.value}
                       autoComplete="new-password"
                       ariaLabel="Confirm password"
-                      onChange={(value) => {
-                        setFormData({ ...formData, confirmPassword: value });
-                        if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: '' });
-                      }}
-                      inputClassName={`border border-slate-200 px-4 ${errors.confirmPassword ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'focus:border-[#02224B] focus:ring-[#02224B]'}`}
+                      required={false}
+                      onChange={field.onChange}
+                      inputClassName={`border border-slate-200 px-4 ${errors.confirmPassword ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'focus:border-navy-900 focus:ring-navy-900'}`}
+                    />
+                      )}
                     />
                     {errors.confirmPassword && (
-                      <p className="mt-1 text-xs text-red-500">{errors.confirmPassword}</p>
+                      <p className="mt-1 text-xs text-red-500">{errors.confirmPassword.message}</p>
                     )}
                   </div>
 
                   <button
-                    onClick={handleRegister}
+                    onClick={handleSubmit(onRegister)}
                     disabled={loading}
-                    className="w-full py-3 bg-[#02224B] hover:bg-[#0A3B75] text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mt-4 disabled:opacity-70"
+                    className="w-full py-3 bg-navy-900 hover:bg-navy-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mt-4 disabled:opacity-70"
                   >
                     {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Create PG owner account'}
                   </button>
@@ -355,12 +343,12 @@ export default function RegisterPage() {
 
             <div className="mt-8 text-center text-sm text-slate-500">
               Already have an account?{' '}
-              <Link to="/login" className="font-semibold text-[#02224B] hover:underline">
+              <Link to={ROUTES.ownerLogin} className="font-semibold text-navy-900 hover:underline">
                 Sign in
               </Link>
             </div>
             <div className="mt-6 text-center lg:hidden">
-              <Link to="/" className="text-sm font-medium text-slate-500 hover:text-[#02224B] transition-colors flex items-center justify-center gap-1">
+              <Link to="/" className="text-sm font-medium text-slate-500 hover:text-navy-900 transition-colors flex items-center justify-center gap-1">
                 &larr; Back to home
               </Link>
             </div>

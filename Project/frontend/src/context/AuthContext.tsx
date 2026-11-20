@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { OWNER_TOKEN_KEY, OWNER_USER_KEY, RESIDENT_TOKEN_KEY, RESIDENT_USER_KEY } from '../utils/session';
 import { AuthContext, type User } from './auth';
+import { areaOf } from '../utils/app-areas';
 
 /** Reads the saved session for the current route, migrating legacy keys. */
 function readStoredSession(): { token: string | null; user: User | null } {
-  const residentRoute = window.location.pathname === '/resident' || window.location.pathname.startsWith('/pg/resident');
+  const residentRoute = areaOf(window.location.pathname) === 'resident';
   let savedToken = localStorage.getItem(residentRoute ? RESIDENT_TOKEN_KEY : OWNER_TOKEN_KEY);
   let savedUser = localStorage.getItem(residentRoute ? RESIDENT_USER_KEY : OWNER_USER_KEY);
   const legacyToken = localStorage.getItem('token');

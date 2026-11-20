@@ -1,22 +1,20 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Building2, ClipboardList, Loader2, Phone, Search, ShieldCheck } from 'lucide-react';
 import SplitAuthLayout from './SplitAuthLayout';
 import toast from 'react-hot-toast';
-import api from '../api/axios';
-import { useAuth } from '../context/auth';
 import { normalizePhoneDigits, saveGuestSession, type GuestSession } from '../utils/guest-session';
 import { useOtpCooldown } from '../hooks/useOtpCooldown';
-import { resolveAppHost } from '../utils/pg-host';
-import { apiErrorMessage } from '../utils/api-error';
+import { ROUTES } from '../utils/app-areas';
+import { phoneOtpErrorMessage, startPhoneVerification, type PhoneChallenge } from '../utils/phone-otp';
 
 interface GuestLoginGateProps {
   onVerified: (session: GuestSession) => void;
 }
 
 /**
- * Phone-OTP login gate for PG browsing. Guests verify their number once,
- * then browse listings and view their own booking requests. No password.
+ * Phone-OTP sign-in for "My requests". Browsing never needs it; a guest who
+ * already verified while requesting a bed skips it. No password.
  */
 export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
   const [phone, setPhone] = useState('');
@@ -24,8 +22,7 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
   const [step, setStep] = useState<'phone' | 'code'>('phone');
   const [loading, setLoading] = useState(false);
   const { cooldown, startCooldown } = useOtpCooldown();
-  const { login } = useAuth();
-  const navigate = useNavigate();
+  const challenge = useRef<PhoneChallenge<'BOOKING'> | null>(null);
 
   const requestCode = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -36,13 +33,13 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
     }
     setLoading(true);
     try {
-      const response = await api.post('/auth/otp-request', { phone: digits, purpose: 'BOOKING' });
-      if (response.data.devCode) toast.success(`Demo code: ${response.data.devCode}`);
+      challenge.current = await startPhoneVerification(digits, 'BOOKING');
+      if (challenge.current.devCode) toast.success(`Demo code: ${challenge.current.devCode}`);
       else toast.success('Verification code sent');
       setStep('code');
       startCooldown();
     } catch (error) {
-      toast.error(apiErrorMessage(error, 'Could not send code'));
+      toast.error(phoneOtpErrorMessage(error, 'Could not send code'));
     } finally {
       setLoading(false);
     }
@@ -51,26 +48,18 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
   const verifyCode = async (event: React.FormEvent) => {
     event.preventDefault();
     const digits = normalizePhoneDigits(phone);
+    if (!challenge.current) {
+      toast.error('Request a new code first');
+      return;
+    }
     setLoading(true);
     try {
-      const response = await api.post('/auth/otp-verify', { phone: digits, code, purpose: 'BOOKING' });
-      const session = saveGuestSession(digits, response.data.phoneToken);
+      const data = await challenge.current.verify(code);
+      const session = saveGuestSession(digits, data.phoneToken, data.guestToken);
       onVerified(session);
-      const resident = response.data.resident;
-      if (resident?.token && resident?.user) {
-        login(resident.token, resident.user);
-        const canReachResident = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname) || resolveAppHost().kind === 'property';
-        if (canReachResident) {
-          toast.success('Welcome back — opening your stays');
-          navigate('/resident');
-          return;
-        }
-        toast.success('Resident account found — sign in on your PG site to open it');
-        return;
-      }
-      toast.success('Signed in — happy house hunting');
+      toast.success('Phone verified');
     } catch (error) {
-      toast.error(apiErrorMessage(error, 'Invalid code'));
+      toast.error(phoneOtpErrorMessage(error, 'Invalid code'));
     } finally {
       setLoading(false);
     }
@@ -78,23 +67,23 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
 
   return (
     <SplitAuthLayout
-      panelTitle="Find a PG without the broker chase"
-      panelCopy="Verify your number once, browse verified PGs with real availability, and track every request you raise."
+      panelTitle="Track your booking requests"
+      panelCopy="Verify the phone number you used when requesting a bed to see the live status of every request."
       bullets={[
         { icon: ShieldCheck, heading: 'One verification', text: 'OTP sign-in, no passwords' },
-        { icon: Search, heading: 'Verified listings', text: 'Real beds, real rents' },
-        { icon: ClipboardList, heading: 'Request tracking', text: 'Watch your booking status' }
+        { icon: ClipboardList, heading: 'Live status', text: 'Pending, approved or declined' },
+        { icon: Search, heading: 'Keep browsing', text: 'Listings never need sign-in' }
       ]}
-      mobileTitle="Sign in to browse PGs"
-      mobileSubtitle="Verify your phone number once to continue."
+      mobileTitle="My booking requests"
+      mobileSubtitle="Verify your phone number to see your requests."
     >
       <div className="hidden lg:block">
-        <p className="flex items-center gap-1.5 text-xs font-bold uppercase text-amber-700">
-          <Building2 className="h-4 w-4" /> PG listings
+        <p className="flex items-center gap-1.5 text-xs font-bold text-amber-700">
+          <Building2 className="h-4 w-4" /> Guests
         </p>
-        <h1 className="mt-1 text-2xl font-bold text-[#02224B]">Sign in to browse PGs</h1>
+        <h1 className="mt-1 text-2xl font-bold text-navy-900">My booking requests</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Verify your phone number once. Residents go straight to their stays — everyone else can search stays and track booking requests.
+          Verify the phone number you used when requesting a bed.
         </p>
       </div>
         {step === 'phone' ? (
@@ -116,7 +105,7 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
             </label>
             <button
               disabled={loading || cooldown > 0}
-              className="flex w-full items-center justify-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+              className="flex w-full items-center justify-center gap-2 bg-navy-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
             >
               {loading && <Loader2 className="h-4 w-4 animate-spin" />} {cooldown > 0 ? `Resend in ${cooldown}s` : 'Send code'}
             </button>
@@ -138,23 +127,20 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
             />
             <button
               disabled={loading}
-              className="flex w-full items-center justify-center gap-2 bg-[#02224B] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+              className="flex w-full items-center justify-center gap-2 bg-navy-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
             >
-              {loading && <Loader2 className="h-4 w-4 animate-spin" />} Verify & browse PGs
+              {loading && <Loader2 className="h-4 w-4 animate-spin" />} Verify & see requests
             </button>
             <button type="button" onClick={() => setStep('phone')} className="text-sm font-semibold text-slate-500">
               Use a different number
             </button>
           </form>
         )}
-        {(['localhost', '127.0.0.1', '::1'].includes(window.location.hostname) || resolveAppHost().kind === 'property') && (
-          <p className="mt-5 border-t border-slate-100 pt-4 text-center text-sm text-slate-500">
-            Already onboarded?{' '}
-            <a href="/resident" className="font-bold text-[#02224B] hover:underline">
-              Open My stays
-            </a>
-          </p>
-        )}
+        <p className="mt-5 border-t border-slate-100 pt-4 text-center text-sm text-slate-500">
+          <Link to={ROUTES.guestHome} className="font-bold text-navy-900 hover:underline">Back to PGs</Link>
+          {' · '}Already living in a PG?{' '}
+          <a href={ROUTES.residentFinder} className="font-bold text-navy-900 hover:underline">Resident sign in</a>
+        </p>
     </SplitAuthLayout>
   );
 }

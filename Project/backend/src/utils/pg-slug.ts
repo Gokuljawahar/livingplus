@@ -50,6 +50,9 @@ export type HostContext =
   | { kind: 'unknown' };
 
 export function resolveHostContext(hostname: string, rootDomain = process.env.LIVINGPLUS_ROOT_DOMAIN || 'livingplus.com'): HostContext {
+  // One-domain deployments (e.g. a Cloud Run URL): every host is the main site;
+  // portals select a PG by path/session instead of subdomain.
+  if (process.env.SINGLE_HOST_MODE === 'true') return { kind: 'public' };
   const host = String(hostname || '').toLowerCase().replace(/\.$/, '');
   const root = rootDomain.toLowerCase().replace(/^\.+|\.+$/g, '');
   if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === root || host === `www.${root}`) {

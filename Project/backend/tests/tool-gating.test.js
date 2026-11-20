@@ -39,7 +39,7 @@ describe('agent tool gating by role', () => {
             'get_occupancy_report', 'update_maintenance_status', 'send_rent_reminders',
             'log_expense', 'get_expense_summary', 'propose_electricity_split',
             'approve_electricity_bill', 'get_booking_status', 'decide_room_change',
-            'list_room_change_requests'
+            'list_room_change_requests', 'send_property_notice', 'list_staff', 'assign_maintenance_ticket'
         ]) {
             assert.ok(names.includes(tool), `PG_WARDEN should have ${tool}`);
         }
@@ -55,19 +55,19 @@ describe('agent tool gating by role', () => {
         }
         assert.ok(owner.includes('get_pending_rent'), 'owners must see outstanding-dues detail');
     });
-    it('gives superadmins the owner tool set', () => {
-        assert.deepEqual(toolNamesFor('SUPER_ADMIN'), toolNamesFor('PG_OWNER'));
+    it('gives no tools to roles that do not exist, such as the retired platform super admin', () => {
+        assert.deepEqual(toolNamesFor('SUPER_ADMIN'), []);
     });
     it('keeps maintenance write access staff-side only', () => {
-        assert.deepEqual(rolesOf('update_maintenance_status'), ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN']);
+        assert.deepEqual(rolesOf('update_maintenance_status'), ['PG_OWNER', 'PG_WARDEN']);
         assert.deepEqual(rolesOf('create_maintenance_ticket'), ['PG_TENANT']);
     });
     it('keeps dues detail owner-side only', () => {
-        assert.deepEqual(rolesOf('get_pending_rent'), ['PG_OWNER', 'SUPER_ADMIN']);
+        assert.deepEqual(rolesOf('get_pending_rent'), ['PG_OWNER']);
     });
     it('keeps the swap handshake split across residents and staff', () => {
-        assert.deepEqual(rolesOf('decide_room_change'), ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN']);
-        assert.deepEqual(rolesOf('list_room_change_requests'), ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN']);
+        assert.deepEqual(rolesOf('decide_room_change'), ['PG_OWNER', 'PG_WARDEN']);
+        assert.deepEqual(rolesOf('list_room_change_requests'), ['PG_OWNER', 'PG_WARDEN']);
         for (const tool of ['request_room_change', 'get_my_room_change_requests', 'find_room_change_matches', 'propose_room_swap', 'respond_room_swap']) {
             assert.deepEqual(rolesOf(tool), ['PG_TENANT'], `${tool} must stay resident-side only`);
         }
