@@ -73,3 +73,24 @@ export const sendRentRemindersBody = z.object({ period: t(20), force: booleanLik
 export const aiChatBody = z.object({
   message: t(20000), sessionId: t(100), confirmationId: t(200), cancelConfirmationId: t(200), imageDataUrl: t(6_000_000), language: t(5)
 });
+
+// VibeCheck
+export const vibeProfileBody = z.object({ text: t(4000) });
+export const vibeInterviewBody = z.object({
+  text: t(4000),
+  propertyId: t(100),
+  history: z.array(z.object({ role: z.string().max(40), text: z.string().max(4000) })).max(50).nullish(),
+  answers: z.record(z.string(), z.unknown()).nullish(),
+  audio: z.object({ mimeType: z.string().max(100), data: z.string().max(2_000_000) }).nullish()
+});
+export const vibeCheckBody = z.object({ answers: z.record(z.string(), z.unknown()).nullish(), summary: t(1000) });
+export const saveTenantVibeBody = z.object({ answers: z.record(z.string(), z.unknown()).nullish(), summary: t(1000) });
+
+// Owner insights, briefings, deposit shield, condition reports, services
+export const weeklyBriefBody = z.object({ propertyId: t(100) });
+export const pulseQuery = z.object({ propertyId: t(100) });
+export const kitchenForecastQuery = z.object({ propertyId: t(100), date: t(20) });
+export const depositReviewBody = z.object({}).passthrough();
+export const briefingPassBody = z.object({}).passthrough();
+export const serviceOrderStatusBody = z.object({ status: t(30) });
+export const conditionReportBody = z.object({ tenantId: t(100), kind: t(30), notes: t(4000), photoUrls: textList() });
