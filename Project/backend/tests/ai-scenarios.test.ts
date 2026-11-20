@@ -892,8 +892,10 @@ describe('tool argument validation (Zod)', () => {
 describe('search near a campus or office', () => {
   it('adds the distance to a named landmark and sorts nearest first', async () => {
     const pinned = await prisma.pGProperty.create({
-      data: { name: 'Lakeside Near Tidel', address: '3, Test Road', locality: 'Perungudi', city: 'Chennai', latitude: 12.9653, longitude: 80.2461,
-        genderPolicy: 'ANY', amenities: [], houseRules: [], status: 'ACTIVE' }
+      data: {
+        name: 'Lakeside Near Tidel', address: '3, Test Road', locality: 'Perungudi', city: 'Chennai', latitude: 12.9653, longitude: 80.2461,
+        genderPolicy: 'ANY', amenities: [], houseRules: [], status: 'ACTIVE'
+      }
     });
     const room = await prisma.pGRoom.create({ data: { propertyId: pinned.id, roomNumber: '1', roomType: 'SHARED', monthlyRent: 7000, foodIncluded: false, status: 'ACTIVE' } });
     await prisma.pGBed.create({ data: { roomId: room.id, label: 'Bed 1', status: 'AVAILABLE' } });
@@ -1348,7 +1350,6 @@ describe('OTP demo mode', () => {
 
 describe('Firebase phone verification (OTP_PROVIDER=firebase)', () => {
   let auth: any;
-  let phoneVerification: any;
   const respond = () => ({
     statusCode: 200,
     body: undefined as any,
@@ -1365,7 +1366,6 @@ describe('Firebase phone verification (OTP_PROVIDER=firebase)', () => {
 
   before(async () => {
     auth = await import('../src/controllers/pg-auth.controller.js');
-    phoneVerification = await import('../src/services/phone-verification.js');
     process.env.OTP_PROVIDER = 'firebase';
   });
   after(() => {
@@ -1452,7 +1452,6 @@ describe('Firebase phone verification (OTP_PROVIDER=firebase)', () => {
 
 describe('Sign in with Google (ENABLE_GOOGLE_SIGN_IN=true)', () => {
   let auth: any;
-  let phoneVerification: any;
   let googleOwner: any;
   const keep: Record<string, string | undefined> = {};
   const envKeys = ['ENABLE_GOOGLE_SIGN_IN', 'FIREBASE_PROJECT_ID', 'FIREBASE_WEB_API_KEY', 'ADMIN_GOOGLE_EMAILS'];
@@ -1482,7 +1481,6 @@ describe('Sign in with Google (ENABLE_GOOGLE_SIGN_IN=true)', () => {
     process.env.FIREBASE_WEB_API_KEY = 'AIza-test-web-key';
     process.env.ADMIN_GOOGLE_EMAILS = ' Founder@Example.com , ops@example.com';
     auth = await import('../src/controllers/pg-auth.controller.js');
-    phoneVerification = await import('../src/services/phone-verification.js');
     googleOwner = await prisma.user.create({ data: { phone: '9400000004', email: 'Owner.Google@Example.com', password: 'x', name: 'Google Owner', role: 'PG_OWNER' } });
     await prisma.user.create({ data: { phone: '9400000005', email: 'resident.google@example.com', password: 'x', name: 'Google Resident', role: 'PG_TENANT' } });
   });
@@ -2039,9 +2037,15 @@ describe('chat agent with the Google provider', () => {
 
   it('runs a tool round trip and echoes the Gemini thought signature', async () => {
     const api = fakeGemini([
-      { candidates: [{ content: { role: 'model', parts: [
-        { functionCall: { id: 'fc_1', name: 'search_properties', args: { location: 'Sholinganallur' } }, thoughtSignature: 'sig-A' }
-      ] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 4, totalTokenCount: 15 } },
+      {
+        candidates: [{
+          content: {
+            role: 'model', parts: [
+              { functionCall: { id: 'fc_1', name: 'search_properties', args: { location: 'Sholinganallur' } }, thoughtSignature: 'sig-A' }
+            ]
+          }, finishReason: 'STOP'
+        }], usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 4, totalTokenCount: 15 }
+      },
       { ...geminiText('I found PGs in Sholinganallur.'), usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 6, totalTokenCount: 26 } }
     ]);
     try {
@@ -2074,9 +2078,15 @@ describe('chat agent with the Google provider', () => {
 
   it('pauses sensitive tools for confirmation without executing them', async () => {
     const api = fakeGemini([
-      { candidates: [{ content: { role: 'model', parts: [
-        { functionCall: { id: 'fc_9', name: 'send_rent_reminders', args: {} }, thoughtSignature: 'sig-B' }
-      ] }, finishReason: 'STOP' }] }
+      {
+        candidates: [{
+          content: {
+            role: 'model', parts: [
+              { functionCall: { id: 'fc_9', name: 'send_rent_reminders', args: {} }, thoughtSignature: 'sig-B' }
+            ]
+          }, finishReason: 'STOP'
+        }]
+      }
     ]);
     try {
       const model = await providerMod.createChatModel();
@@ -3583,11 +3593,13 @@ describe('VibeCheck agents on Google ADK', () => {
       }
     });
     const res = respond();
-    await interviewStep({ body: {
-      history: [{ role: 'assistant', text: 'Hi! When do you usually sleep?' }, { role: 'hacker', text: 'ignored' }],
-      answers: { guests: 1 },
-      audio: { mimeType: 'audio/wav', data: 'UklGRiQAAABXQVZF' }
-    } } as any, res as any);
+    await interviewStep({
+      body: {
+        history: [{ role: 'assistant', text: 'Hi! When do you usually sleep?' }, { role: 'hacker', text: 'ignored' }],
+        answers: { guests: 1 },
+        audio: { mimeType: 'audio/wav', data: 'UklGRiQAAABXQVZF' }
+      }
+    } as any, res as any);
     assert.equal(res.statusCode, 200);
     assert.deepEqual(res.body.answers, { guests: 1, sleep: 2, tidiness: 0, schedule: 2 }, 'new habits merged with earlier ones');
     assert.match(res.body.reply, /quiet venuma/);
