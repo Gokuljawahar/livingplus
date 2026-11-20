@@ -61,7 +61,7 @@ function AppRoutes() {
   const host = resolveAppHost();
 
   if (host.kind === 'unknown') {
-    return <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6 text-center"><section><h1 className="text-2xl font-bold text-slate-900">PG site not found</h1><p className="mt-2 text-sm text-slate-600">Check the PG address or contact the property owner.</p></section></main>;
+    return <main className="flex min-h-screen items-center justify-center bg-surface p-6 text-center"><section><h1 className="text-2xl font-bold text-navy-900">PG site not found</h1><p className="mt-2 text-sm text-muted">Check the PG address or contact the property owner.</p></section></main>;
   }
   if (isLoading) return null;
 
@@ -126,16 +126,16 @@ function App() {
             className: 'text-sm font-medium',
             duration: 4000,
             style: {
-              background: '#fff',
-              color: '#1E293B',
-              borderRadius: '12px',
-              border: '1px solid #E2E8F0',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+              background: 'var(--color-canvas)',
+              color: 'var(--color-ink)',
+              borderRadius: 'var(--radius-card)',
+              border: '1px solid var(--color-hairline)',
+              boxShadow: 'var(--shadow-float)',
             },
             success: {
               iconTheme: {
-                primary: '#02224B',
-                secondary: '#fff',
+                primary: 'var(--color-navy-900)',
+                secondary: 'var(--color-canvas)',
               },
             },
           }}
