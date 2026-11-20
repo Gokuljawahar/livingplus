@@ -310,7 +310,7 @@ export default function PGDiscovery() {
       )}
 
       {activeTab === 'requests' && guestPhone ? (
-        <section className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        <section className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
           <h1 className="text-2xl font-bold">My requests</h1>
           <p className="mt-1 text-muted">Requests sent from +{guestPhone}, with their latest status.</p>
           <div className="mt-5 rounded-[var(--radius-card)] border border-hairline bg-canvas px-5">
@@ -325,7 +325,7 @@ export default function PGDiscovery() {
           </div>
         </section>
       ) : (
-        <section id="results" className="mx-auto max-w-7xl px-4 pb-16 pt-5 sm:px-6">
+        <section id="results" className="mx-auto w-full max-w-7xl px-4 pb-16 pt-5 sm:px-6">
           <h1 className="sr-only">PGs in Chennai</h1>
           <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-hide sm:mx-0 sm:flex-wrap sm:px-0" role="group" aria-label="Quick filters">
             <label className={`relative inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border pl-3 pr-2 text-sm font-medium ${nearPlace ? 'border-navy-900 bg-amber-50 text-navy-900' : 'border-hairline bg-canvas text-ink hover:border-field-border'}`}>

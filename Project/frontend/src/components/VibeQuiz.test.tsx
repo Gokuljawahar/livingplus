@@ -14,4 +14,10 @@ describe('VibeQuiz', () => {
     expect(onChange).toHaveBeenCalledWith({ sleep: 0 });
     expect(screen.getByText(`0 of ${VIBE_QUESTIONS.length} answered`)).toBeInTheDocument();
   });
+  it('leaves out topics that do not apply at this PG', () => {
+    render(<VibeQuiz value={{}} onChange={() => {}} skip={['kitchen', 'cooling']} />);
+    expect(screen.queryByText('How often do you use the shared kitchen?')).toBeNull();
+    expect(screen.queryByText('What room temperature do you like?')).toBeNull();
+    expect(screen.getByText('0 of 6 answered')).toBeInTheDocument();
+  });
 });

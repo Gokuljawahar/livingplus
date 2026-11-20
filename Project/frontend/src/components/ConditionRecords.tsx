@@ -6,10 +6,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Camera, Loader2 } from 'lucide-react';
 import api from '../api/axios';
-import { SecureImage } from './SecureImage';
 import { apiErrorMessage } from '../utils/api-error';
 
-type Report = { id: string; kind: 'MOVE_IN' | 'MOVE_OUT'; notes?: string | null; photoUrls: string[]; createdByRole?: string | null; createdAt: string };
+type Report = { id: string; kind: 'MOVE_IN' | 'MOVE_OUT'; notes?: string | null; photoUrls: string[]; photoViews?: (string | null)[]; createdByRole?: string | null; createdAt: string };
 
 const KIND = { MOVE_IN: 'Move-in', MOVE_OUT: 'Move-out' };
 const BY: Record<string, string> = { RESIDENT: 'resident', PG_OWNER: 'owner', PG_WARDEN: 'warden' };
@@ -109,8 +108,8 @@ export default function ConditionRecords({ tenantId, viewer }: { tenantId: strin
               {report.notes && <p className="mt-1 text-ink">{report.notes}</p>}
               {report.photoUrls.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {report.photoUrls.map((key) => (
-                    <SecureImage key={key} srcKey={key} alt={`${KIND[report.kind]} photo`} className="h-20 w-24 rounded-[10px] object-cover" />
+                  {report.photoUrls.map((key, index) => (
+                    <img key={key} src={report.photoViews?.[index] ?? undefined} alt={`${KIND[report.kind]} photo`} loading="lazy" className="h-20 w-24 rounded-[10px] bg-surface object-cover" />
                   ))}
                 </div>
               )}

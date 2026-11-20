@@ -789,6 +789,7 @@ function fakeGemini(replies: any[]) {
     const request = input instanceof Request ? input : new Request(input, init);
     seen.push({ url: request.url, key: request.headers.get('x-goog-api-key') || '', body: JSON.parse(await request.text()) });
     const reply = replies[Math.min(seen.length - 1, replies.length - 1)];
+    if (typeof reply === 'function') return reply(request);
     if (reply instanceof Response) return reply;
     return new Response(JSON.stringify(reply), { status: 200, headers: { 'content-type': 'application/json' } });
   };
@@ -3255,6 +3256,7 @@ describe('move-in and move-out condition records', () => {
     await c.pg.listConditionReports(residentReq({}, { tenantId: c.tenant.id }), list as any);
     assert.deepEqual(list.body.map((r: any) => r.notes), ['Small crack in the window', 'Wardrobe hinge loose']);
     assert.ok(list.body.every((r: any) => r.createdAt));
+    assert.ok(list.body.every((r: any) => Array.isArray(r.photoViews) && r.photoViews.length === r.photoUrls.length), 'each photo gets a view link (or null) for people allowed to see the record');
   });
 
   it('rejects bad input and other PGs', async () => {
@@ -3700,6 +3702,46 @@ describe('VibeCheck agents on Google ADK', () => {
     assert.match(prompt, /Early riser who needs quiet/);
     assert.equal(v.agent.anchoredScore(-20, 10), 0);
     assert.equal(v.agent.anchoredScore(50, 40), 50);
+  });
+
+  it('retries once on a fallback model when Gemini is out of capacity, and only then', async () => {
+    const env = { ENABLE_AI_ORCHESTRATOR: 'true', AI_MODEL: 'google:gemini-3.8-flash', AI_MODEL_OPTIONS: undefined, AI_FALLBACK_MODEL: undefined, GOOGLE_GENAI_USE_ENTERPRISE: undefined, GOOGLE_API_KEY: 'test-key' };
+    const busy = new Response(JSON.stringify({ error: { code: 429, message: 'Resource exhausted.', status: 'RESOURCE_EXHAUSTED' } }), { status: 429, headers: { 'content-type': 'application/json' } });
+    const api = fakeGemini([busy, geminiText('{"a":3}')]);
+    try {
+      const out = await withEnv(env, () => v.provider.generateStructured({ system: 'sys', parts: [{ text: 'hi' }], schema: z.object({ a: z.number() }) }));
+      assert.deepEqual(out, { a: 3 });
+      assert.equal(api.seen.length, 2);
+      assert.match(api.seen[0]!.url, /models\/gemini-3\.8-flash:generateContent/);
+      assert.match(api.seen[1]!.url, /models\/gemini-3\.5-flash-lite:generateContent/, 'the retry goes to the fallback model');
+    } finally {
+      api.restore();
+    }
+
+    const bad = new Response(JSON.stringify({ error: { code: 400, message: 'Invalid argument.', status: 'INVALID_ARGUMENT' } }), { status: 400, headers: { 'content-type': 'application/json' } });
+    const api2 = fakeGemini([bad, geminiText('{"a":4}')]);
+    try {
+      await assert.rejects(withEnv(env, () => v.provider.generateStructured({ system: 'sys', parts: [{ text: 'hi' }], schema: z.object({ a: z.number() }) })));
+      assert.equal(api2.seen.length, 1, 'a real error is not retried');
+    } finally {
+      api2.restore();
+    }
+    // A main model that hangs hands over to the fallback after the patience window.
+    const hang = (request: Request) => new Promise<Response>((_, reject) => request.signal.addEventListener('abort', () => reject(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' }))));
+    const api3 = fakeGemini([hang, geminiText('{"a":5}')]);
+    try {
+      const started = Date.now();
+      const out = await withEnv({ ...env, AI_PRIMARY_PATIENCE_MS: '1000', MODEL_API_TIMEOUT_MS: '8000' }, () => v.provider.generateStructured({ system: 'sys', parts: [{ text: 'hi' }], schema: z.object({ a: z.number() }) }));
+      assert.deepEqual(out, { a: 5 });
+      assert.equal(api3.seen.length, 2);
+      assert.match(api3.seen[1]!.url, /gemini-3\.5-flash-lite/);
+      assert.ok(Date.now() - started < 4000, 'the fallback starts after the patience window, not the full timeout');
+    } finally {
+      api3.restore();
+    }
+    assert.equal(v.provider.fallbackModelName('gemini-3.5-flash-lite'), null, 'no fallback to itself');
+    assert.equal(v.provider.isCapacityError({ status: 503 }), true);
+    assert.equal(v.provider.isCapacityError(new Error('INVALID_ARGUMENT')), false);
   });
 
   it('makes one structured Gemini call for one-shot jobs, with the JSON schema', async () => {

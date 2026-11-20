@@ -193,10 +193,10 @@ function ResidentPortalView({ site }: { site: PgSite }) {
             <button
               onClick={() => setActiveTab('notifications')}
               className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] border border-hairline bg-surface px-3 py-1.5 text-xs font-semibold text-muted transition-colors hover:text-ink"
-              aria-label={`${unreadCount} unread notifications`}
+              aria-label={unreadCount ? `${unreadCount} unread notifications` : 'Notifications'}
             >
               <Bell className="h-4 w-4 text-muted" />
-              <span>{unreadCount}</span>
+              {unreadCount > 0 && <span className="tabular rounded-full bg-negative px-1.5 text-[11px] font-semibold text-canvas">{unreadCount}</span>}
             </button>
             <button
               onClick={logout}

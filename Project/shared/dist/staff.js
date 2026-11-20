@@ -15,7 +15,7 @@ export const STAFF_ROLE_HINTS = {
 };
 /** Owner workspace views each role sees; the first one is where they land. */
 export const VIEWS_BY_ROLE = {
-    OWNER: ['overview', 'properties', 'bookings', 'roomchanges', 'tenants', 'activity', 'maintenance', 'services', 'rent', 'payments', 'expenses', 'utilities', 'reports', 'staff'],
+    OWNER: ['overview', 'properties', 'bookings', 'roomchanges', 'tenants', 'activity', 'maintenance', 'services', 'rent', 'payments', 'expenses', 'utilities', 'reports', 'staff', 'settings'],
     WARDEN: ['overview', 'properties', 'bookings', 'roomchanges', 'tenants', 'activity', 'maintenance', 'services'],
     ACCOUNTANT: ['rent', 'payments', 'expenses', 'utilities', 'reports'],
     COOK: ['services'],

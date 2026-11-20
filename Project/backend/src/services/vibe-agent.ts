@@ -301,7 +301,9 @@ async function runVibeMatcher(prompt: string, model: string, deps: VibeMatcherDe
     ].join(' '),
     parts: [{ text: prompt }],
     schema: vibeJudgments,
-    model
+    model,
+    // The guest is watching a spinner; past this the deterministic baseline scores are shown instead.
+    timeoutMs: 12_000
   });
 }
 

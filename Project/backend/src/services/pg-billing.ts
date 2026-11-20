@@ -5,6 +5,7 @@
 import { logAudit } from './pg-audit.js';
 import { isYearMonth } from '@livingplus/shared';
 import { dueDateIn, periodOf, zonedDate } from '../utils/app-time.js';
+import { invoiceCode } from './invoice-code.js';
 
 export interface SplitRow {
   tenantId: string;
@@ -130,7 +131,7 @@ export async function approveElectricityBill(db: any, actorId: string | null, bi
         create: {
           tenantId: tenant.id, period: bill.period, entryType: 'ELECTRICITY',
           amount: row.share, dueDate: zonedDate(year as number, (month as number) - 1, dueDay),
-          invoiceCode: `ELEC-${bill.period}-${tenant.id.slice(0, 8).toUpperCase()}`, status: 'DUE'
+          invoiceCode: invoiceCode('ELEC', tenant.id, bill.period), status: 'DUE'
         }
       });
       created += 1;
@@ -170,7 +171,7 @@ export async function ensureFoodEntries(db: any, tenant: any, period: string, du
     update: {},
     create: {
       tenantId: tenant.id, period, entryType: 'FOOD', amount: charge, dueDate,
-      invoiceCode: `FOOD-${period}-${tenant.id.slice(0, 8).toUpperCase()}`, status: 'DUE'
+      invoiceCode: invoiceCode('FOOD', tenant.id, period), status: 'DUE'
     }
   });
 }

@@ -17,6 +17,7 @@
 import { GoogleGenAI, type Content, type FunctionDeclaration, type GenerateContentConfig, type GenerateContentResponse, type Schema } from '@google/genai';
 import { GoogleAuth } from 'google-auth-library';
 import { z, type ZodType } from 'zod';
+import { logger } from '../utils/logger.js';
 
 export interface ToolDefinition {
   name: string;
@@ -203,6 +204,51 @@ export interface GoogleChatModel {
 }
 
 /**
+ * When Gemini is out of capacity (HTTP 429 "resource exhausted" or 503
+ * "unavailable") or too slow to answer, one retry goes to a fallback model so
+ * people don't see an error or a long spinner. Any other failure is not
+ * retried: it is a real problem to surface.
+ */
+export function isCapacityError(error: any): boolean {
+  const status = Number(error?.status ?? error?.code ?? error?.response?.status);
+  const text = String(error?.message || error || '');
+  return status === 429 || status === 503 || /RESOURCE_EXHAUSTED|UNAVAILABLE|overloaded|\b429\b|\b503\b/i.test(text);
+}
+
+/** The fallback model name ("google:" prefix allowed), or null when it is switched off or the same as the primary. */
+export function fallbackModelName(primary: string): string | null {
+  const configured = (process.env.AI_FALLBACK_MODEL ?? 'gemini-3.5-flash-lite').trim();
+  if (!configured || configured === 'none') return null;
+  const name = configured.startsWith('google:') ? configured.slice('google:'.length) : configured;
+  return name === primary ? null : name;
+}
+
+export const isTimeoutError = (error: any): boolean =>
+  error?.name === 'AbortError' || error?.name === 'TimeoutError' || /abort|timed? ?out|MODEL_API_FAILED: TIMEOUT/i.test(String(error?.message || error || ''));
+
+/** How long the main model gets before the fallback takes over (when there is one). */
+export const primaryPatienceMs = (): number => Math.max(1000, Number(process.env.AI_PRIMARY_PATIENCE_MS) || 12_000);
+const MIN_FALLBACK_MS = 4_000;
+
+/**
+ * Runs `call` on the primary model within `budgetMs`. With a fallback model
+ * configured, the primary gets at most primaryPatienceMs() of that budget; on a
+ * capacity error or a timeout the rest of the budget goes to one fallback try.
+ */
+async function withFallback<T>(primary: string, budgetMs: number, call: (model: string, timeoutMs: number) => Promise<T>): Promise<T> {
+  const fallback = fallbackModelName(primary);
+  const started = Date.now();
+  try {
+    return await call(primary, fallback ? Math.min(budgetMs, primaryPatienceMs()) : budgetMs);
+  } catch (error) {
+    const remaining = budgetMs - (Date.now() - started);
+    if (!fallback || remaining < MIN_FALLBACK_MS || !(isCapacityError(error) || isTimeoutError(error))) throw error;
+    logger.warn({ primary, fallback, reason: isTimeoutError(error) ? 'slow' : 'capacity' }, 'Gemini busy; retrying on the fallback model');
+    return call(fallback, remaining);
+  }
+}
+
+/**
  * Builds the configured Google chat model. Throws AI_ORCHESTRATOR_NOT_CONFIGURED
  * when the assistant is off or no model is set, and AI_MODEL_INIT_FAILED when the
  * provider or credentials are unusable. Builds a client only; no network calls.
@@ -215,19 +261,19 @@ export async function createChatModel(purpose: ModelPurpose = 'chat'): Promise<G
   return {
     backend,
     model: name,
-    generate: async (turn: ModelTurn): Promise<ModelStep> => {
+    generate: async (turn: ModelTurn): Promise<ModelStep> => withFallback(name, turn.timeoutMs, async (model, timeoutMs) => {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), turn.timeoutMs);
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const config: GenerateContentConfig = { ...(options as GenerateContentConfig), abortSignal: controller.signal };
         if (turn.system) config.systemInstruction = { parts: [{ text: turn.system }] };
         if (turn.tools.length) config.tools = [{ functionDeclarations: toFunctionDeclarations(turn.tools) }];
-        const response = await client.models.generateContent({ model: name, contents: turn.contents, config });
+        const response = await client.models.generateContent({ model, contents: turn.contents, config });
         return toModelStep(response);
       } finally {
         clearTimeout(timer);
       }
-    }
+    })
   };
 }
 
@@ -251,14 +297,30 @@ export async function generateStructured<T>(options: {
   parts: Array<Record<string, unknown>>;
   schema: ZodType<T>;
   model?: string;
+  /** Shorter limit for calls a person is waiting on, when the caller has a non-AI fallback. */
+  timeoutMs?: number;
 }): Promise<T> {
   const { name, options: generation } = validatedModelConfig('chat');
   const client = await googleClient();
+  try {
+    const budget = Math.min(modelTimeoutMs(), options.timeoutMs ?? Infinity);
+    return await withFallback(options.model || name, budget, (model, timeoutMs) => structuredCall(client, model, generation, { ...options, timeoutMs }));
+  } catch (error: any) {
+    throw modelFailure(error);
+  }
+}
+
+async function structuredCall<T>(
+  client: GoogleGenAI,
+  model: string,
+  generation: Record<string, unknown>,
+  options: { system: string; parts: Array<Record<string, unknown>>; schema: ZodType<T>; timeoutMs?: number }
+): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), modelTimeoutMs());
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? modelTimeoutMs());
   try {
     const response = await client.models.generateContent({
-      model: options.model || name,
+      model,
       contents: [{ role: 'user', parts: options.parts as any }],
       config: {
         ...(generation as GenerateContentConfig),
@@ -271,8 +333,6 @@ export async function generateStructured<T>(options: {
     const text = response.text ?? '';
     if (!text.trim()) throw new Error('MODEL_API_FAILED: EMPTY_ANSWER');
     return options.schema.parse(JSON.parse(stripFences(text)));
-  } catch (error: any) {
-    throw modelFailure(error);
   } finally {
     clearTimeout(timer);
   }

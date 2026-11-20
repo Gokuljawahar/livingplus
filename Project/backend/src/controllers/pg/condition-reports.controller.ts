@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { db } from '../../db/index.js';
 import { logAudit } from '../../services/pg-audit.js';
 import { logger } from '../../utils/logger.js';
+import { viewUrl } from '../../services/storage.js';
 import { canManageProperty, currentUser, ownStay } from './access.js';
 
 const FILE_KEY = /^(?:local\/[0-9a-f-]{36}\.(?:webp|pdf)|uploads\/[a-zA-Z0-9._-]+)$/i;
@@ -25,7 +26,11 @@ export const listConditionReports = async (req: Request, res: Response): Promise
     const access = await conditionAccess(req, String(req.query.tenantId || ''));
     if (!access) return res.status(404).json({ message: 'Stay not found' });
     const reports = await db.pGConditionReport.findMany({ where: { tenantId: access.tenant.id }, orderBy: { createdAt: 'desc' } });
-    res.json(reports);
+    // Photos are private: short-lived view links go only to people who passed the access check above.
+    res.json(await Promise.all(reports.map(async (report: any) => ({
+      ...report,
+      photoViews: await Promise.all((report.photoUrls as string[]).map((key) => viewUrl(req, key).catch(() => null)))
+    }))));
   } catch (error) {
     logger.error({ err: error }, 'Condition report list error');
     res.status(500).json({ message: 'Failed to load condition records' });

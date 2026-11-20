@@ -62,7 +62,7 @@ export type Booking = {
   vibe?: { score: number | null; compared: number; reasons: string[]; differences: string[] } | null;
 };
 
-export type Ticket = {
+export type Ticket = { createdAt: string;
   id: string;
   title: string;
   description: string;
@@ -177,7 +177,8 @@ export type WorkspaceView =
   | 'maintenance'
   | 'reports'
   | 'staff'
-  | 'services';
+  | 'services'
+  | 'settings';
 
 export const OWNER_ROUTE_SLUGS: Record<WorkspaceView, string> = {
   overview: '',
@@ -193,7 +194,8 @@ export const OWNER_ROUTE_SLUGS: Record<WorkspaceView, string> = {
   maintenance: 'maintenance',
   reports: 'reports',
   staff: 'staff',
-  services: 'services'
+  services: 'services',
+  settings: 'settings'
 };
 
 export const OWNER_VIEW_BY_SLUG: Record<string, WorkspaceView> = Object.fromEntries(

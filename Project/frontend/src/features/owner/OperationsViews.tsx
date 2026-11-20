@@ -132,6 +132,8 @@ export function MaintenanceView({
   onChanged: () => void;
 }) {
   const [ticketImage, setTicketImage] = useState<File | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [openedAt] = useState(() => Date.now());
   const ticketFormApi = useForm<OwnerTicketForm>({ resolver: zodResolver(ownerTicketSchema), defaultValues: EMPTY_TICKET_FORM });
 
   const createTicket = ticketFormApi.handleSubmit(async (ticketForm) => {
@@ -148,6 +150,7 @@ export function MaintenanceView({
       ticketFormApi.reset(EMPTY_TICKET_FORM);
       setTicketImage(null);
       toast.success('Maintenance ticket created');
+      setShowForm(false);
       onChanged();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not create ticket'));
@@ -164,38 +167,23 @@ export function MaintenanceView({
     }
   };
 
-  return (
-    <section className="grid gap-8 pt-2 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <div>
-        <h2 className="mb-4 text-base font-bold text-ink">Maintenance tickets</h2>
-        <div className="space-y-3">
-          {tickets.map((ticket) => (
-            <Card key={ticket.id} className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-sm font-bold text-ink">{ticket.title}</h3>
-                  <StatusPill status={ticket.priority} />
-                  <StatusPill status={ticket.status} />
-                </div>
-                <p className="text-xs text-muted">
-                  {ticket.property.name} · {ticket.category.charAt(0) + ticket.category.slice(1).toLowerCase()}
-                  {ticket.tenant ? ` · ${ticket.tenant.name}` : ''}
-                  {ticket.assignedName ? ` · Assigned to ${ticket.assignedName}` : ''}
-                </p>
-                <p className="pt-1 text-xs text-ink">{ticket.description}</p>
-                {ticket.imageUrl && <p className="text-xs font-medium text-muted">Photo attached</p>}
-              </div>
-              {ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED' && (
-                <Button variant="secondary" size="sm" onClick={() => void updateTicket(ticket.id, 'RESOLVED')} className="shrink-0">
-                  Mark resolved
-                </Button>
-              )}
-            </Card>
-          ))}
-          {!tickets.length && <EmptyState title="No maintenance tickets yet." />}
-        </div>
-      </div>
+  const waiting = (value: string) => {
+    const hours = Math.max(0, Math.round((openedAt - new Date(value).getTime()) / 3_600_000));
+    return hours < 1 ? 'just now' : hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
+  };
+  const columns: { title: string; hint: string; items: Ticket[]; action?: { label: string; next: string } }[] = [
+    { title: 'New', hint: 'Reported, not started', items: tickets.filter((ticket) => ticket.status === 'OPEN'), action: { label: 'Start fixing', next: 'IN_PROGRESS' } },
+    { title: 'Being fixed', hint: 'Someone is on it', items: tickets.filter((ticket) => ticket.status === 'IN_PROGRESS'), action: { label: 'Mark fixed', next: 'RESOLVED' } },
+    { title: 'Done', hint: 'Most recent first', items: tickets.filter((ticket) => ticket.status === 'RESOLVED' || ticket.status === 'CLOSED').slice(0, 6) }
+  ];
 
+  return (
+    <section className="space-y-5 pt-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-muted">{columns[0]!.items.length} new · {columns[1]!.items.length} being fixed</p>
+        <Button onClick={() => setShowForm((open) => !open)}>{showForm ? 'Close' : 'Report an issue'}</Button>
+      </div>
+      {showForm && (
       <Card className="h-fit p-6">
         <form onSubmit={createTicket}>
           <h2 className="border-b border-hairline pb-3 text-sm font-bold text-ink">Report an issue</h2>
@@ -262,6 +250,37 @@ export function MaintenanceView({
           </Button>
         </form>
       </Card>
+      )}
+      <div className="grid gap-4 lg:grid-cols-3">
+        {columns.map((column) => (
+          <div key={column.title} className="min-w-0 rounded-[var(--radius-card)] bg-surface p-3">
+            <div className="mb-3 flex items-baseline justify-between gap-2 px-1">
+              <h2 className="text-base font-semibold text-ink">{column.title} <span className="tabular text-muted">({column.items.length})</span></h2>
+              <span className="text-xs text-muted">{column.hint}</span>
+            </div>
+            <div className="space-y-3">
+              {column.items.map((ticket) => (
+                <Card key={ticket.id} className="space-y-2 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-semibold text-ink">{ticket.title}</h3>
+                    {(ticket.priority === 'URGENT' || ticket.priority === 'HIGH') && <StatusPill status={ticket.priority} />}
+                  </div>
+                  <p className="text-xs text-muted">
+                    {ticket.property.name}{ticket.tenant ? ` · ${ticket.tenant.name}` : ''} · {waiting(ticket.createdAt)}
+                    {ticket.assignedName ? ` · ${ticket.assignedName}` : ''}
+                  </p>
+                  <p className="text-sm text-ink">{ticket.description}</p>
+                  {ticket.imageUrl && <p className="text-xs font-medium text-muted">Photo attached</p>}
+                  {column.action && (
+                    <Button variant="secondary" size="sm" onClick={() => void updateTicket(ticket.id, column.action!.next)}>{column.action.label}</Button>
+                  )}
+                </Card>
+              ))}
+              {!column.items.length && <p className="px-1 py-4 text-sm text-muted">Nothing here.</p>}
+            </div>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }

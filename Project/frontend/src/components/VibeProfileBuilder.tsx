@@ -18,6 +18,8 @@ interface VibeProfileBuilderProps {
   onChange: (answers: VibeAnswers, summary: string) => void;
   /** The PG being matched, so the conversation only covers what applies there. */
   propertyId?: string;
+  /** Topics to leave out of the quick questions (vibeTopicsFor(place).skip). */
+  skipTopics?: string[];
 }
 
 type Turn = { role: 'assistant' | 'user'; text: string };
@@ -51,7 +53,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
-export default function VibeProfileBuilder({ answers, summary, onChange, propertyId }: VibeProfileBuilderProps) {
+export default function VibeProfileBuilder({ answers, summary, onChange, propertyId, skipTopics }: VibeProfileBuilderProps) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [started, setStarted] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -69,6 +71,10 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
     onChange({ ...answers, ...learned }, learnedSummary ?? summary);
     if (finished) setDone(true);
   });
+
+  // Plain groups, not forms: this builder sits inside the bed-request form, and a
+  // nested form submits the whole page (a reload that closes the sheet mid-call).
+  const sendLiveDraft = () => { if (live.sendText(liveDraft)) setLiveDraft(''); };
 
   const startVoice = async () => {
     setError('');
@@ -206,11 +212,11 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
             ))}
           </div>
           {(live.status === 'listening' || live.status === 'speaking') && (
-            <form className="flex gap-2 border-t border-hairline px-4 py-3" onSubmit={(event) => { event.preventDefault(); if (live.sendText(liveDraft)) setLiveDraft(''); }}>
+            <div role="group" aria-label="Typed answer during the call" className="flex gap-2 border-t border-hairline px-4 py-3">
               <label htmlFor="vibe-live-typed" className="sr-only">Type an answer</label>
-              <input id="vibe-live-typed" value={liveDraft} onChange={(event) => setLiveDraft(event.target.value)} placeholder="Or type here" maxLength={1000} className="min-w-0 flex-1 rounded-full border border-field-border bg-white px-4 py-2" />
-              <button type="submit" disabled={!liveDraft.trim()} aria-label="Send typed answer" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-navy-900 text-white disabled:opacity-50"><Send className="h-4 w-4" /></button>
-            </form>
+              <input id="vibe-live-typed" value={liveDraft} onChange={(event) => setLiveDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); sendLiveDraft(); } }} placeholder="Or type here" maxLength={1000} className="min-w-0 flex-1 rounded-full border border-field-border bg-white px-4 py-2" />
+              <button type="button" onClick={sendLiveDraft} disabled={!liveDraft.trim()} aria-label="Send typed answer" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-navy-900 text-white disabled:opacity-50"><Send className="h-4 w-4" /></button>
+            </div>
           )}
           {live.error && <p role="alert" className="px-4 pb-3 text-sm text-attention">{live.error}</p>}
         </div>
@@ -264,23 +270,24 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
           {!done && (
             <div className="border-t border-hairline px-4 py-3">
               {typing ? (
-                <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); submitTyped(); }}>
+                <div role="group" aria-label="Answer by typing" className="flex gap-2">
                   <label htmlFor="vibe-typed" className="sr-only">Your answer</label>
                   <input
                     id="vibe-typed"
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); if (!thinking) submitTyped(); } }}
                     placeholder="Type your answer"
                     maxLength={1000}
                     className="min-w-0 flex-1 rounded-full border border-field-border bg-white px-4 py-2"
                   />
-                  <button type="submit" disabled={thinking || !draft.trim()} aria-label="Send answer" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-navy-900 text-white disabled:opacity-50">
+                  <button type="button" onClick={() => submitTyped()} disabled={thinking || !draft.trim()} aria-label="Send answer" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-navy-900 text-white disabled:opacity-50">
                     <Send className="h-4 w-4" />
                   </button>
                   <button type="button" onClick={() => setTyping(false)} aria-label="Answer by voice" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-hairline text-navy-900">
                     <Mic className="h-4 w-4" />
                   </button>
-                </form>
+                </div>
               ) : (
                 <div className="flex items-center justify-center gap-4">
                   <button
@@ -322,7 +329,7 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
       {showQuiz ? (
         <div>
           <p className="mb-2 text-sm text-muted">{learned.length ? 'Fix anything I got wrong.' : 'Pick what fits you.'}</p>
-          <VibeQuiz value={answers} onChange={(next) => onChange(next, summary)} />
+          <VibeQuiz value={answers} skip={skipTopics} onChange={(next) => onChange(next, summary)} />
         </div>
       ) : (
         <button type="button" onClick={() => setShowQuiz(true)} className="min-h-11 text-sm font-medium text-navy-700 underline-offset-2 hover:underline">

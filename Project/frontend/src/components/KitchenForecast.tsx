@@ -3,7 +3,7 @@
 // residents' routines; plate counts only, never names.
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Leaf, Loader2 } from 'lucide-react';
+import { Leaf } from 'lucide-react';
 import api from '../api/axios';
 import { queryKeys } from '../api/query-keys';
 import { rupees } from '../utils/money';
@@ -54,7 +54,15 @@ export default function KitchenForecast({ properties }: { properties: { id: stri
       </div>
 
       {forecast.isPending ? (
-        <p className="mt-4 inline-flex items-center gap-2 text-muted"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Working out the plates…</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3" aria-busy="true" aria-label="Working out the plates">
+          {[0, 1, 2].map((key) => (
+            <div key={key} className="space-y-2 rounded-[10px] bg-surface p-4">
+              <div className="h-3 w-16 animate-pulse rounded bg-hairline" />
+              <div className="h-8 w-24 animate-pulse rounded bg-hairline" />
+              <div className="h-3 w-full animate-pulse rounded bg-hairline" />
+            </div>
+          ))}
+        </div>
       ) : forecast.isError || !data ? (
         <p className="mt-4 text-muted">The forecast isn't available right now.</p>
       ) : data.planResidents === 0 && data.meals.every((meal) => meal.orders === 0) ? (

@@ -1,3 +1,4 @@
+import { adHocInvoiceCode } from '../../services/invoice-code.js';
 import type { Request, Response } from 'express';
 import { db } from '../../db/index.js';
 import { logAudit } from '../../services/pg-audit.js';
@@ -73,7 +74,7 @@ export const createRentEntry = async (req: Request, res: Response): Promise<any>
         entryType: type,
         amount: value,
         dueDate: due,
-        invoiceCode: `PG-${Date.now()}`,
+        invoiceCode: adHocInvoiceCode(),
         notes: notes || null
       }
     });

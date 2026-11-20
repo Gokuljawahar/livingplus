@@ -19,7 +19,9 @@ Built for the Google Startup Buildathon 2026. The answers this build delivers on
 | Assistant for guests, residents and owners (about 30 tools) | **Google ADK** (`@google/adk`) | An `LlmAgent` with one `FunctionTool` per backend action, run by ADK's `Runner`. Tools are scoped to the caller's role and PG. Owners can ask it to draft and post notices or assign a ticket to a warden. Anything that writes (bookings, expenses, bills, notices, assignments) pauses for explicit confirmation, bound to the same person and PG and stored in PostgreSQL, so it survives restarts. |
 | KYC document check | **Gemini API** (`@google/genai`), one structured call | Reads an uploaded ID and returns the document type, name, last 4 digits only, legibility and problems, as JSON checked with Zod. The owner still verifies. |
 | VibeCheck profile | Gemini, one structured call | Turns "I study till 1 am, keep my desk neat…" (in English, Tamil or Hindi) into 8 lifestyle habits plus a short summary, and asks one follow-up question if something important is missing. |
-| VibeCheck matching | Gemini, one structured call | Judges each room against a deterministic baseline score. The AI may move a score by at most ±15 points, and the reasons it gives are about habits only, never names. |
+| VibeCheck matching | Gemini, one structured call | Judges each room against a deterministic baseline score. The AI may move a score by at most 15 points, and the reasons it gives are about habits only, never names. |
+| VibeCheck Live & Owner Briefings | **Gemini Live API** | Low-latency 16 kHz AudioWorklet voice conversation in Tamil, Hindi or English for VibeCheck habit interviews and hands-free owner operational briefings. |
+| Deposit Shield & Kitchen Forecast | Gemini Vision & structured output | Compares paired move-in and move-out room photos (normal wear is always ₹0) and forecasts daily meal plates from food plans, opt-outs and resident routines. |
 | Voice notes, photo issues | Gemini multimodal | Transcribes voice notes and describes photo complaints, which become maintenance tickets. |
 | Search ("quiet PG near Tidel Park") | Gemini embeddings | Semantic matches alongside keyword search. |
 
@@ -79,12 +81,12 @@ cd ../frontend && npm install && npm run dev   # http://localhost:5173
 ## Tests
 
 ```bash
-cd Project/backend  && npm test                # 243 API, isolation and AI-agent tests
-cd Project/frontend && npm test && npm run e2e # unit tests and 7 browser journeys
+cd Project/backend  && npm test                # 259 API, isolation, invoice-code and AI-agent tests
+cd Project/frontend && npm test && npm run e2e # 56 unit tests and 7 browser journeys
 ```
 
-The AI tests script the model, so they check behaviour without network calls: role limits, confirmations bound to the caller, isolation between PGs, and the ±15 VibeCheck limit.
+The AI tests script the model, so they check behaviour without network calls: role limits, confirmations bound to the caller, isolation between PGs, and the 15-point VibeCheck limit.
 
 ## Design
 
-[`DESIGN.md`](DESIGN.md) is the design system: who each site is for, tokens, type (Plus Jakarta Sans and Inter), layouts, writing rules and the psychology behind them. Its reference material is in [`design/references/`](design/references/README.md).
+[`DESIGN.md`](DESIGN.md) is the design system: who each site is for, tokens, type (Plus Jakarta Sans and Inter), layouts, writing rules and the psychology behind them.

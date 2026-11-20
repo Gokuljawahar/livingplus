@@ -1,3 +1,4 @@
+import { invoiceCode } from '../../services/invoice-code.js';
 import type { Request, Response } from 'express';
 import type { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
@@ -116,7 +117,7 @@ export const checkInTenant = async (req: Request, res: Response): Promise<any> =
           amount: rent.amount,
           dueDate: rent.dueDate,
           entryType: 'RENT',
-          invoiceCode: `RENT-${rent.period}-${tenant.id.slice(0, 8).toUpperCase()}`
+          invoiceCode: invoiceCode('RENT', tenant.id, rent.period)
         }
       });
       await ensureFoodEntries(tx, tenant, rent.period, rent.dueDate);
@@ -130,7 +131,7 @@ export const checkInTenant = async (req: Request, res: Response): Promise<any> =
             entryType: 'DEPOSIT',
             amount: tenant.depositAmount,
             dueDate: now,
-            invoiceCode: `DEP-${tenant.id.slice(0, 8)}`
+            invoiceCode: invoiceCode('DEP', tenant.id)
           }
         });
       }

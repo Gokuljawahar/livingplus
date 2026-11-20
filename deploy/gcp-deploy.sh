@@ -23,8 +23,9 @@
 #                        structured output, high default quota). gemini-4-hydrogen
 #                        also works but new projects get a very low per-minute quota
 #                        (429s on multi-step tool calls) until it is raised.
-#   AI_MODEL_OPTIONS     default: {"thinkingConfig":{"thinkingLevel":"MEDIUM"}} (Gemini 4
-#                        thinks at HIGH by default; MEDIUM keeps chat responsive)
+#   AI_MODEL_OPTIONS     default: {"thinkingConfig":{"thinkingLevel":"LOW"}} (Gemini 4
+#                        thinks at HIGH by default; LOW keeps chat and voice-adjacent flows fast,
+#                        and slow answers fall back to AI_FALLBACK_MODEL after 12 s)
 #   AI_BACKEND=vertex|studio  default vertex (Vertex AI with the service account,
 #                        billed to the project). studio uses a Google AI Studio key
 #                        instead: set GOOGLE_API_KEY too (stored in Secret Manager).
@@ -61,7 +62,7 @@ DB_USER="${DB_USER:-livingplus}"
 BUCKET="${BUCKET:-${PROJECT_ID}-livingplus-uploads}"
 SA_NAME="${SA_NAME:-livingplus-run}"
 AI_MODEL="${AI_MODEL:-google:gemini-3.8-flash}"
-if [ -z "${AI_MODEL_OPTIONS:-}" ]; then AI_MODEL_OPTIONS='{"thinkingConfig":{"thinkingLevel":"MEDIUM"}}'; fi
+if [ -z "${AI_MODEL_OPTIONS:-}" ]; then AI_MODEL_OPTIONS='{"thinkingConfig":{"thinkingLevel":"LOW"}}'; fi
 # Gemini models are served from the "global" Vertex AI location; not every model is in every region.
 AI_LOCATION="${AI_LOCATION:-global}"
 AI_BACKEND="${AI_BACKEND:-vertex}"

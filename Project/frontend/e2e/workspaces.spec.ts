@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 const OWNER = { phone: '9555500001', password: 'Owner@e2e-pass1' };
 const OWNER_VIEWS = [
   'Today', 'Bed requests', 'Residents & KYC', 'Room changes', 'Rent', 'Payments', 'Expenses', 'Utilities', 'Reports',
-  'Maintenance', 'Meals & cleaning', 'PG pulse', 'PGs & beds', 'Staff'
+  'Maintenance', 'Meals & cleaning', 'PG pulse', 'PGs & beds', 'Staff', 'Settings'
 ];
 const shotDir = process.env.E2E_SCREENSHOT_DIR;
 
@@ -58,6 +58,7 @@ test('the owner opens every workspace view and logs an expense', async ({ page }
   await shot(page, 'owner-room-added');
 
   await nav.getByRole('button', { name: 'Maintenance', exact: true }).click();
+  await page.getByRole('button', { name: 'Report an issue' }).click();
   await page.getByPlaceholder('Issue title').fill('E2E fan noise');
   await page.getByPlaceholder('Describe the issue').fill('Ceiling fan rattles in room 101.');
   await page.getByRole('button', { name: 'Create ticket' }).click();

@@ -5,14 +5,17 @@ import { VIBE_QUESTIONS, type VibeAnswers } from '@livingplus/shared';
 interface VibeQuizProps {
   value: VibeAnswers;
   onChange: (next: VibeAnswers) => void;
+  /** Topics that don't apply at this PG (no shared kitchen, no AC), as from vibeTopicsFor. */
+  skip?: string[];
 }
 
-export default function VibeQuiz({ value, onChange }: VibeQuizProps) {
-  const answered = VIBE_QUESTIONS.filter((question) => value[question.id] !== undefined).length;
+export default function VibeQuiz({ value, onChange, skip = [] }: VibeQuizProps) {
+  const questions = VIBE_QUESTIONS.filter((question) => !skip.includes(question.id));
+  const answered = questions.filter((question) => value[question.id] !== undefined).length;
   return (
     <div className="space-y-5">
-      <p className="tabular text-sm text-muted" aria-live="polite">{answered} of {VIBE_QUESTIONS.length} answered</p>
-      {VIBE_QUESTIONS.map((question) => (
+      <p className="tabular text-sm text-muted" aria-live="polite">{answered} of {questions.length} answered</p>
+      {questions.map((question) => (
         <fieldset key={question.id}>
           <legend className="font-medium text-navy-900">{question.question}</legend>
           <div className="mt-2 grid gap-2 sm:grid-cols-3">

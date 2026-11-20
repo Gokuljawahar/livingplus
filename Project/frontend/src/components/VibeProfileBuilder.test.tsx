@@ -43,6 +43,17 @@ describe('VibeProfileBuilder (voice VibeCheck)', () => {
     expect(screen.getByText('Picking up on')).toBeInTheDocument();
   });
 
+  it('never submits the bed-request form it sits in when a typed answer is sent', async () => {
+    api.post.mockResolvedValue({ data: { heard: 'I sleep by 10', answers: { sleep: 1 }, summary: 'Early sleeper.', reply: 'Nice! Tidy?', done: false } });
+    const outerSubmit = vi.fn((event: React.FormEvent) => event.preventDefault());
+    const { container } = render(<form onSubmit={outerSubmit}><Harness /></form>);
+    await userEvent.click(screen.getByRole('button', { name: /Type instead/ }));
+    await userEvent.type(screen.getByLabelText('Your answer'), 'I sleep by 10{Enter}');
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(outerSubmit).not.toHaveBeenCalled();
+    expect(container.querySelectorAll('form form')).toHaveLength(0);
+  });
+
   it('keeps the conversation going after an error and offers the quick questions', async () => {
     api.post.mockRejectedValue({ isAxiosError: true, response: { status: 503, data: { message: 'Voice VibeCheck is not available right now. Answer the quick questions instead.' } } });
     render(<Harness />);

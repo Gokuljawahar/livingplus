@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import { calculateMonthlyRent, ensureFoodEntries } from './pg-billing.js';
 import { nextMonthStart, periodOf } from '../utils/app-time.js';
 import { logger } from '../utils/logger.js';
+import { invoiceCode } from './invoice-code.js';
 
 export async function generateMonthlyRentEntries(prisma: PrismaClient, at = new Date()): Promise<number> {
   const tenants = await prisma.pGTenant.findMany({
@@ -26,7 +27,7 @@ export async function generateMonthlyRentEntries(prisma: PrismaClient, at = new 
         entryType: 'RENT',
         amount: rent.amount,
         dueDate: rent.dueDate,
-        invoiceCode: `RENT-${rent.period}-${tenant.id.slice(0, 8).toUpperCase()}`,
+        invoiceCode: invoiceCode('RENT', tenant.id, rent.period),
         status: 'DUE'
       }
     });

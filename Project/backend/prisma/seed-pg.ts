@@ -141,13 +141,15 @@ async function main() {
     for (const roomData of item.rooms) {
       const room = await prisma.pGRoom.upsert({
         where: { propertyId_roomNumber: { propertyId: item.id, roomNumber: roomData.number } },
-        update: { monthlyRent: roomData.rent, foodIncluded: roomData.foodIncluded, foodCharge: roomData.foodCharge, status: 'ACTIVE' },
+        update: { monthlyRent: roomData.rent, depositAmount: roomData.rent, foodIncluded: roomData.foodIncluded, foodCharge: roomData.foodCharge, status: 'ACTIVE' },
         create: {
           propertyId: item.id,
           roomNumber: roomData.number,
           floor: Number(roomData.number[0]),
           roomType: 'SHARED',
           monthlyRent: roomData.rent,
+          // One month's rent as deposit, the common practice (and what demo residents paid).
+          depositAmount: roomData.rent,
           foodIncluded: roomData.foodIncluded,
           foodCharge: roomData.foodCharge
         }
@@ -281,8 +283,8 @@ async function seedLivelyDemo(ownerId: string | null) {
   });
   const room203 = await prisma.pGRoom.upsert({
     where: { propertyId_roomNumber: { propertyId: harbour, roomNumber: '203' } },
-    update: { monthlyRent: 8000, foodIncluded: true, foodCharge: 1500, status: 'ACTIVE' },
-    create: { propertyId: harbour, roomNumber: '203', floor: 2, roomType: 'SHARED', monthlyRent: 8000, foodIncluded: true, foodCharge: 1500 }
+    update: { monthlyRent: 8000, depositAmount: 8000, foodIncluded: true, foodCharge: 1500, status: 'ACTIVE' },
+    create: { propertyId: harbour, roomNumber: '203', floor: 2, roomType: 'SHARED', monthlyRent: 8000, depositAmount: 8000, foodIncluded: true, foodCharge: 1500 }
   });
   for (const label of ['Bed 1', 'Bed 2', 'Bed 3', 'Bed 4']) {
     const status = demoBedStatus(harbour, '203', label);
@@ -305,6 +307,14 @@ async function seedLivelyDemo(ownerId: string | null) {
       update: {},
       create: { tenantId: tenant.id, period: '2026-11', entryType: 'RENT', amount: person.rent, paidAmount: person.rent, dueDate: new Date('2026-11-05T00:00:00.000Z'), status: 'PAID' }
     });
+    // Harbour Point residents on the food plan paid this month's food bill too.
+    if (person.pg === HARBOUR_PG_ID && !person.optOut) {
+      await prisma.pGRentEntry.upsert({
+        where: { tenantId_period_entryType: { tenantId: tenant.id, period: '2026-11', entryType: 'FOOD' } },
+        update: { amount: 1500, paidAmount: 1500, status: 'PAID' },
+        create: { tenantId: tenant.id, period: '2026-11', entryType: 'FOOD', amount: 1500, paidAmount: 1500, dueDate: new Date('2026-11-05T00:00:00.000Z'), status: 'PAID' }
+      });
+    }
   }
 
   // Extra meal plates booked over the past four weeks and the coming week.

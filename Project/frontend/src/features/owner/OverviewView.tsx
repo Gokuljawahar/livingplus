@@ -1,5 +1,7 @@
 import { Check } from 'lucide-react';
-import { rupees, shortDate } from '../../utils/money';
+import { billName, rupees, shortDate } from '../../utils/money';
+
+const OVERDUE_LABEL: Record<string, string> = { RENT: 'Rent', FOOD: 'Food bill', ELECTRICITY: 'Electricity bill', DEPOSIT: 'Deposit', MAINTENANCE: 'Maintenance charge' };
 import type { Booking, PaymentClaim, RentEntry, Summary, Ticket, WorkspaceView } from './types';
 
 interface Props {
@@ -32,8 +34,8 @@ export default function OverviewView({ summary, rentEntries, tickets, paymentCla
             tone: 'negative',
             go: 'rent',
             action: 'Open ledger',
-            text: `Rent overdue: ${entry.tenant.name}`,
-            detail: `${rupees(Math.max(0, entry.amount - entry.paidAmount))} · due ${shortDate(entry.dueDate)}`
+            text: `${OVERDUE_LABEL[entry.entryType] ?? 'Bill'} overdue: ${entry.tenant.name}`,
+            detail: `${billName(entry.period, entry.entryType).replace(/^./, (c) => c.toUpperCase())} · ${rupees(Math.max(0, entry.amount - entry.paidAmount))} · due ${shortDate(entry.dueDate)}`
           }))
       : []),
     ...tickets
@@ -86,7 +88,7 @@ export default function OverviewView({ summary, rentEntries, tickets, paymentCla
 
   const tiles: [string, string, WorkspaceView][] = [
     [`${summary.pendingBookings}`, summary.pendingBookings === 1 ? 'request to review' : 'requests to review', 'bookings'],
-    ...(summary.canManageStaff ? [[rupees(summary.rentOutstanding), 'rent outstanding', 'rent'] as [string, string, WorkspaceView]] : []),
+    ...(summary.canManageStaff ? [[rupees(summary.rentOutstanding), 'dues outstanding', 'rent'] as [string, string, WorkspaceView]] : []),
     [`${summary.openTickets}`, summary.openTickets === 1 ? 'open issue' : 'open issues', 'maintenance']
   ];
   const dot = { negative: 'bg-negative', attention: 'bg-attention', info: 'bg-info' };

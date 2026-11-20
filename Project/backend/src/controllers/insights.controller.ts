@@ -15,6 +15,10 @@ import { issueBriefingPass } from '../services/owner-briefing.js';
 import { vibeLiveEnabled } from '../services/vibe-live.js';
 import { aiEnabled, generateStructured } from '../services/ai-provider.js';
 import { cleanVibeAnswers, MONEY_ROLES, rupees } from '@livingplus/shared';
+import { LRUCache } from 'lru-cache';
+
+/** AI answers are reused while their inputs are unchanged; a new payment or order changes the key. */
+const AI_ANSWER_TTL_MS = 6 * 60 * 60 * 1000;
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -168,6 +172,7 @@ export interface WeeklyBriefDeps {
 
 /** Gemini's weekly brief for the owner, from this week's numbers only. */
 export function createWeeklyBriefHandler(deps: WeeklyBriefDeps = {}) {
+  const briefs = new LRUCache<string, z.infer<typeof briefSchema>>({ max: 500, ttl: AI_ANSWER_TTL_MS });
   return async (req: Request, res: Response): Promise<any> => {
     try {
       const scope = await scopeFor(req);
@@ -175,6 +180,9 @@ export function createWeeklyBriefHandler(deps: WeeklyBriefDeps = {}) {
       const seesMoney = (await accessiblePropertyIds(req, [...MONEY_ROLES])).some((id) => scope.includes(id));
       const stats = await pulseStats(scope, seesMoney);
       if (!deps.writeBrief && !aiEnabled()) return res.json({ brief: plainBrief(stats), stats });
+      const key = JSON.stringify({ scope: [...scope].sort(), stats, fresh: req.body?.fresh === true ? Date.now() : 0 });
+      const cached = briefs.get(key);
+      if (cached) return res.json({ brief: { ...cached, ai: true }, stats });
       try {
         const raw = deps.writeBrief ? await deps.writeBrief(stats) : await generateStructured({
           system: [
@@ -186,7 +194,9 @@ export function createWeeklyBriefHandler(deps: WeeklyBriefDeps = {}) {
           parts: [{ text: `This week's numbers (null means not available to this person):\n${JSON.stringify(stats, null, 2)}` }],
           schema: briefSchema
         });
-        res.json({ brief: { ...briefSchema.parse(raw), ai: true }, stats });
+        const brief = briefSchema.parse(raw);
+        briefs.set(key, brief);
+        res.json({ brief: { ...brief, ai: true }, stats });
       } catch (error) {
         logger.warn({ err: error }, 'Weekly brief fell back to plain numbers');
         res.json({ brief: plainBrief(stats), stats });
@@ -245,6 +255,7 @@ export interface KitchenForecastDeps {
 
 /** Plates per meal for one PG and day, with the reason and the food saved. */
 export function createKitchenForecastHandler(deps: KitchenForecastDeps = {}) {
+  const forecasts = new LRUCache<string, z.infer<typeof forecastSchema>>({ max: 500, ttl: AI_ANSWER_TTL_MS });
   return async (req: Request, res: Response): Promise<any> => {
     try {
       const allowed = await accessiblePropertyIds(req, ['OWNER', 'WARDEN', 'COOK']);
@@ -280,7 +291,12 @@ export function createKitchenForecastHandler(deps: KitchenForecastDeps = {}) {
 
       let forecast = ruleForecast(signals);
       let ai = false;
-      if (deps.forecast || aiEnabled()) {
+      const forecastKey = JSON.stringify({ propertyId, signals });
+      const known = forecasts.get(forecastKey);
+      if (known) {
+        forecast = known;
+        ai = true;
+      } else if (deps.forecast || aiEnabled()) {
         try {
           const raw = deps.forecast ? await deps.forecast(signals) : await generateStructured({
             system: [
@@ -292,6 +308,7 @@ export function createKitchenForecastHandler(deps: KitchenForecastDeps = {}) {
             schema: forecastSchema
           });
           forecast = forecastSchema.parse(raw);
+          forecasts.set(forecastKey, forecast);
           ai = true;
         } catch (error) {
           logger.warn({ err: error }, 'Kitchen forecast fell back to rules');

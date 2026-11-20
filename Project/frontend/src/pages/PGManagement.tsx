@@ -14,7 +14,8 @@ import {
   UtensilsCrossed,
   Wallet,
   Wrench,
-  Zap
+  Zap,
+  SlidersHorizontal
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { viewsForRoles } from '@livingplus/shared';
@@ -156,7 +157,8 @@ export default function PGManagement() {
         { id: 'services', label: 'Meals & cleaning', icon: UtensilsCrossed, group: 'Operations' },
         { id: 'activity', label: 'PG pulse', icon: Clock, group: 'Operations' },
         { id: 'properties', label: 'PGs & beds', icon: BedDouble, group: 'Setup' },
-        { id: 'staff', label: 'Staff', icon: Users, group: 'Setup' }
+        { id: 'staff', label: 'Staff', icon: Users, group: 'Setup' },
+        { id: 'settings', label: 'Settings', icon: SlidersHorizontal, group: 'Setup' }
       ].filter((item) => allowedViews.includes(item.id)) as {
         id: WorkspaceView;
         label: string;
@@ -212,9 +214,10 @@ export default function PGManagement() {
                   )
                   .map((property) => ({ id: property.id, name: property.name }))}
               />
-              <OwnerServices canEditSettings={summary.canManageStaff} />
+              <OwnerServices part="orders" canEditSettings={summary.canManageStaff} onOpenSettings={() => setView('settings')} />
             </div>
           )}
+          {view === 'settings' && <OwnerServices part="settings" canEditSettings={summary.canManageStaff} />}
           {view === 'properties' && (
             <PropertiesView
               properties={properties}

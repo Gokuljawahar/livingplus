@@ -68,7 +68,7 @@ function SettingsCard({ property, onSaved }: { property: Data['properties'][numb
   );
 }
 
-export default function OwnerServices({ canEditSettings }: { canEditSettings: boolean }) {
+export default function OwnerServices({ canEditSettings, part = 'orders', onOpenSettings }: { canEditSettings: boolean; part?: 'orders' | 'settings'; onOpenSettings?: () => void }) {
   const queryClient = useQueryClient();
   const [date, setDate] = useState('');
   const queryKey = ['owner', 'service-orders', date];
@@ -90,7 +90,7 @@ export default function OwnerServices({ canEditSettings }: { canEditSettings: bo
 
   return (
     <div className="space-y-6">
-      <section className="space-y-3">
+      {part === 'orders' && <section className="space-y-3">
         <label className="block text-sm font-medium text-navy-900">
           Day
           <input type="date" value={date || data.date} onChange={(event) => setDate(event.target.value)} className="mt-1 block rounded-[6px] border border-field-border bg-white px-3 py-2" />
@@ -105,7 +105,7 @@ export default function OwnerServices({ canEditSettings }: { canEditSettings: bo
         </div>
         <div className="rounded-[14px] border border-hairline bg-white">
           {data.orders.length === 0 ? (
-            <p className="px-5 py-6 text-muted">{anyOn ? 'No orders for this day.' : 'Meal and cleaning orders are off. Switch them on below.'}</p>
+            <p className="px-5 py-6 text-muted">{anyOn ? 'No orders for this day.' : <>Meal and cleaning orders are off.{canEditSettings && onOpenSettings && <> <button type="button" onClick={onOpenSettings} className="font-medium text-navy-700 underline-offset-2 hover:underline">Turn them on in Settings</button></>}</>}</p>
           ) : (
             <ul className="divide-y divide-hairline">
               {data.orders.map((order) => (
@@ -130,9 +130,9 @@ export default function OwnerServices({ canEditSettings }: { canEditSettings: bo
             </ul>
           )}
         </div>
-      </section>
+      </section>}
 
-      {canEditSettings && (
+      {part === 'settings' && canEditSettings && (
         <section className="space-y-3">
           <h2 className="text-xl font-semibold">Services each PG offers</h2>
           <p className="text-muted">Switch on only what you run. Residents and guests see only what's on.</p>

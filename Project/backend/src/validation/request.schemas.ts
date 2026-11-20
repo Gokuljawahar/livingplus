@@ -87,7 +87,7 @@ export const vibeCheckBody = z.object({ answers: z.record(z.string(), z.unknown(
 export const saveTenantVibeBody = z.object({ answers: z.record(z.string(), z.unknown()).nullish(), summary: t(1000) });
 
 // Owner insights, briefings, deposit shield, condition reports, services
-export const weeklyBriefBody = z.object({ propertyId: t(100) });
+export const weeklyBriefBody = z.object({ propertyId: t(100), fresh: z.boolean().optional() });
 export const pulseQuery = z.object({ propertyId: t(100) });
 export const kitchenForecastQuery = z.object({ propertyId: t(100), date: t(20) });
 export const depositReviewBody = z.object({}).passthrough();

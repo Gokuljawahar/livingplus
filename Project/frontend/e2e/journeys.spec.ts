@@ -50,14 +50,16 @@ test('VibeCheck matches a guest with the residents of each room', async ({ page 
   // The test server runs without AI, so use the quick questions (the AI path is covered by unit tests).
   await sheet.getByRole('button', { name: 'Answer quick questions instead' }).click();
   for (const group of await sheet.getByRole('group').all()) await group.locator('label').first().click();
-  await expect(sheet.getByText('8 of 8 answered')).toBeVisible();
+  await expect(sheet.getByText(/^(\d) of \1 answered$/)).toBeVisible();
+  // Palm Grove has no AC rooms, so the quick questions leave out room temperature.
+  await expect(sheet.getByText('What room temperature do you like?')).toHaveCount(0);
   await sheet.getByRole('button', { name: 'See my matches' }).click();
   // Ananya (seeded) shares Room 101: early sleeper, tidy, quiet, like this guest.
-  const bed = sheet.getByLabel('Available bed');
-  await expect(bed.locator('option', { hasText: '% match' }).first()).toBeAttached();
-  await bed.selectOption({ index: 1 });
+  await expect(sheet.getByText('Beds, best match first')).toBeVisible();
+  await expect(sheet.getByText(/% match$/).first()).toBeVisible();
+  await sheet.getByRole('radio').first().check();
   await expect(sheet.getByText(/% VibeCheck match with the resident of this room/)).toBeVisible();
-  await expect(sheet.getByText('You both sleep before 11 pm')).toBeVisible();
+  await expect(sheet.getByText('You both sleep before 11 pm', { exact: true })).toBeVisible();
   await expect(sheet.getByText('Ananya')).toHaveCount(0);
 });
 

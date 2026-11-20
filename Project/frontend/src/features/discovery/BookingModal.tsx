@@ -1,3 +1,4 @@
+import { vibeTopicsFor } from '@livingplus/shared';
 import { useRef, useState } from 'react';
 import { Check, Loader2, MessageCircle, X } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -282,18 +283,71 @@ export default function BookingModal({ property, matchesRoom, guest, defaultName
             <div className="space-y-4 overflow-y-auto px-5 py-4">
               {step === 'bed' && (
                 <>
-                  <label className={labelClass}>
-                    Available bed
-                    <select required value={selectedBed} onChange={(event) => setSelectedBed(event.target.value)} className={fieldClass}>
-                      <option value="">Choose a bed</option>
-                      {bedChoices.map(({ room, bed, match }) => (
-                        <option key={bed.id} value={bed.id}>
-                          Room {room.roomNumber}, {bed.label} · {rupees(room.monthlyRent)}/mo{match ? (match.score !== null ? ` · ${match.score}% match` : ' · no roommates yet') : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
+                  {property.serviceSettings?.vibeCheck === false ? null : !vibeOpen ? (
+                    <div className="rounded-[var(--radius-card)] border border-hairline px-4 py-3">
+                      <p className="font-medium text-navy-900">{vibeMatches ? 'Sorted by VibeCheck' : 'Find roommates like you'}</p>
+                      <p className="mt-0.5 text-sm text-muted">
+                        {vibeMatches ? 'Best match first.' : 'Match beds by sleep, tidiness and noise.'}
+                      </p>
+                      <button type="button" onClick={() => setVibeOpen(true)} className="btn-secondary mt-3">
+                        {vibeMatches ? 'Change my answers' : 'Take VibeCheck'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="rounded-[var(--radius-card)] border border-navy-900/20 px-4 py-4">
+                      <div>
+                        <VibeProfileBuilder
+                          propertyId={property.id}
+                          skipTopics={vibeTopicsFor(property).skip}
+                          answers={vibeAnswers}
+                          summary={vibeSummary}
+                          onChange={(answers, summary) => {
+                            setVibeAnswers(answers);
+                            setVibeSummary(summary);
+                          }}
+                        />
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button type="button" disabled={!vibeComplete || vibeLoading} onClick={() => void runVibeCheck()} className="btn-secondary">
+                          {vibeLoading && <Loader2 className="h-4 w-4 animate-spin" />} See my matches
+                        </button>
+                        <button type="button" onClick={() => setVibeOpen(false)} className="min-h-11 px-3 font-medium text-muted hover:text-navy-900">
+                          Not now
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {vibeMatches ? (
+                    <fieldset>
+                      <legend className={labelClass}>Beds, best match first</legend>
+                      <div className="mt-2 space-y-2">
+                        {bedChoices.map(({ room, bed, match }) => (
+                          <label key={bed.id} className={`flex cursor-pointer items-start gap-3 rounded-[var(--radius-card)] border px-3 py-2.5 ${selectedBed === bed.id ? 'border-navy-900 bg-amber-50' : 'border-hairline bg-canvas'}`}>
+                            <input type="radio" name="bed" required value={bed.id} checked={selectedBed === bed.id} onChange={() => setSelectedBed(bed.id)} className="mt-1" />
+                            <span className="min-w-0 flex-1">
+                              <span className="flex flex-wrap items-baseline justify-between gap-2">
+                                <span className="font-medium text-navy-900">Room {room.roomNumber}, {bed.label}</span>
+                                <span className="tabular text-sm font-semibold text-navy-900">{match && match.score !== null ? `${match.score}% match` : 'No roommates yet'}</span>
+                              </span>
+                              <span className="block text-sm text-muted">{rupees(room.monthlyRent)}/mo{match?.reasons[0] ? ` · ${match.reasons[0]}` : ''}</span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                  ) : (
+                    <label className={labelClass}>
+                      Available bed
+                      <select required value={selectedBed} onChange={(event) => setSelectedBed(event.target.value)} className={fieldClass}>
+                        <option value="">Choose a bed</option>
+                        {bedChoices.map(({ room, bed, match }) => (
+                          <option key={bed.id} value={bed.id}>
+                            Room {room.roomNumber}, {bed.label} · {rupees(room.monthlyRent)}/mo{match ? (match.score !== null ? ` · ${match.score}% match` : ' · no roommates yet') : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   {vibeMatches && selectedBed && selectedMatch && (
                     <div className="rounded-[var(--radius-card)] border border-hairline bg-surface px-4 py-3" aria-live="polite">
                       {selectedMatch.score !== null ? (
@@ -317,39 +371,6 @@ export default function BookingModal({ property, matchesRoom, guest, defaultName
                     </div>
                   )}
 
-                  {property.serviceSettings?.vibeCheck === false ? null : !vibeOpen ? (
-                    <div className="rounded-[var(--radius-card)] border border-hairline px-4 py-3">
-                      <p className="font-medium text-navy-900">{vibeMatches ? 'Sorted by VibeCheck' : 'Find roommates like you'}</p>
-                      <p className="mt-0.5 text-sm text-muted">
-                        {vibeMatches ? 'Best match first.' : 'Match beds by sleep, tidiness and noise.'}
-                      </p>
-                      <button type="button" onClick={() => setVibeOpen(true)} className="btn-secondary mt-3">
-                        {vibeMatches ? 'Change my answers' : 'Take VibeCheck'}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="rounded-[var(--radius-card)] border border-navy-900/20 px-4 py-4">
-                      <div>
-                        <VibeProfileBuilder
-                          propertyId={property.id}
-                          answers={vibeAnswers}
-                          summary={vibeSummary}
-                          onChange={(answers, summary) => {
-                            setVibeAnswers(answers);
-                            setVibeSummary(summary);
-                          }}
-                        />
-                      </div>
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <button type="button" disabled={!vibeComplete || vibeLoading} onClick={() => void runVibeCheck()} className="btn-secondary">
-                          {vibeLoading && <Loader2 className="h-4 w-4 animate-spin" />} See my matches
-                        </button>
-                        <button type="button" onClick={() => setVibeOpen(false)} className="min-h-11 px-3 font-medium text-muted hover:text-navy-900">
-                          Not now
-                        </button>
-                      </div>
-                    </div>
-                  )}
                   <label className={labelClass}>
                     Move-in date
                     <input required type="date" min={new Date().toISOString().slice(0, 10)} value={request.moveInDate} onChange={(event) => setRequest({ ...request, moveInDate: event.target.value })} className={fieldClass} />

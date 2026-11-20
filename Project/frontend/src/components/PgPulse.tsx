@@ -1,7 +1,7 @@
 // PG pulse: a Gemini-written weekly brief with one next step, this week's
 // numbers, and a readable timeline that marks everything the assistant did and
 // who confirmed it.
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Bot, Loader2, Mic, PhoneOff, RefreshCw, Send } from 'lucide-react';
 import { useVibeLive } from '../hooks/useVibeLive';
@@ -35,6 +35,7 @@ function when(value: string): string {
 
 export default function PgPulse({ onGo }: { onGo: (target: PulseTarget) => void }) {
   const [filter, setFilter] = useState<'all' | 'ai'>('all');
+  const rewriteRef = useRef(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [voiceError, setVoiceError] = useState('');
   const [followUp, setFollowUp] = useState('');
@@ -63,7 +64,11 @@ export default function PgPulse({ onGo }: { onGo: (target: PulseTarget) => void 
   const pulse = useQuery({ queryKey: queryKeys.owner.pulse(), queryFn: async () => (await api.get('/pg/owner/pulse')).data as { timeline: Entry[]; stats: Stats | null } });
   const brief = useQuery({
     queryKey: queryKeys.owner.pulseBrief(),
-    queryFn: async () => (await api.post('/pg/owner/pulse/brief', {})).data as { brief: Brief },
+    queryFn: async () => {
+      const fresh = rewriteRef.current;
+      rewriteRef.current = false;
+      return (await api.post('/pg/owner/pulse/brief', fresh ? { fresh: true } : {})).data as { brief: Brief };
+    },
     staleTime: 10 * 60 * 1000,
     retry: false
   });
@@ -78,12 +83,17 @@ export default function PgPulse({ onGo }: { onGo: (target: PulseTarget) => void 
           <p id="brief-heading" className="inline-flex items-center gap-2 text-sm font-medium text-white/80">
             This week
           </p>
-          <button type="button" onClick={() => void brief.refetch()} disabled={brief.isFetching} aria-label="Rewrite the brief" className="flex h-9 w-9 items-center justify-center rounded-full text-white/80 hover:bg-white/10 disabled:opacity-50">
+          <button type="button" onClick={() => { rewriteRef.current = true; void brief.refetch(); }} disabled={brief.isFetching} aria-label="Rewrite the brief" className="flex h-9 w-9 items-center justify-center rounded-full text-white/80 hover:bg-white/10 disabled:opacity-50">
             <RefreshCw className={`h-4 w-4 ${brief.isFetching ? 'animate-spin' : ''}`} />
           </button>
         </div>
         {brief.isPending ? (
-          <p className="mt-3 inline-flex items-center gap-2 text-white/80"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Putting your week together…</p>
+          <div className="mt-3 space-y-2" aria-busy="true" aria-label="Putting your week together">
+            <div className="h-6 w-3/4 animate-pulse rounded bg-white/15" />
+            <div className="h-4 w-2/3 animate-pulse rounded bg-white/10" />
+            <div className="h-4 w-1/2 animate-pulse rounded bg-white/10" />
+            <div className="h-4 w-3/5 animate-pulse rounded bg-white/10" />
+          </div>
         ) : brief.data ? (
           <>
             <h2 className="mt-2 font-display text-xl font-bold text-white sm:text-2xl">{brief.data.brief.headline}</h2>
