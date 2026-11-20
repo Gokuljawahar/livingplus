@@ -889,6 +889,60 @@ describe('tool argument validation (Zod)', () => {
   });
 });
 
+describe('search near a campus or office', () => {
+  it('adds the distance to a named landmark and sorts nearest first', async () => {
+    const pinned = await prisma.pGProperty.create({
+      data: { name: 'Lakeside Near Tidel', address: '3, Test Road', locality: 'Perungudi', city: 'Chennai', latitude: 12.9653, longitude: 80.2461,
+        genderPolicy: 'ANY', amenities: [], houseRules: [], status: 'ACTIVE' }
+    });
+    const room = await prisma.pGRoom.create({ data: { propertyId: pinned.id, roomNumber: '1', roomType: 'SHARED', monthlyRent: 7000, foodIncluded: false, status: 'ACTIVE' } });
+    await prisma.pGBed.create({ data: { roomId: room.id, label: 'Bed 1', status: 'AVAILABLE' } });
+    try {
+      const results = await tools.toolCatalogue.search_properties.execute(guestActor, { near: 'tidel' });
+      const ours = results.find((p: any) => p.property_id === pinned.id);
+      assert.ok(ours, 'the pinned PG is in the results');
+      assert.equal(ours.near, 'Tidel Park, Taramani');
+      assert.ok(ours.distance_km > 2 && ours.distance_km < 3.5, `Perungudi is about 2.7 km from Tidel Park, got ${ours.distance_km}`);
+      const distances = results.map((p: any) => p.distance_km ?? Infinity);
+      assert.deepEqual(distances, [...distances].sort((x, y) => x - y), 'nearest first, PGs without a location last');
+      await assert.rejects(tools.toolCatalogue.search_properties.execute(guestActor, { near: 'Mars Base' }), /UNKNOWN_PLACE: use one of .*IIT Madras/);
+    } finally {
+      await prisma.pGBed.deleteMany({ where: { roomId: room.id } });
+      await prisma.pGRoom.delete({ where: { id: room.id } });
+      await prisma.pGProperty.delete({ where: { id: pinned.id } });
+    }
+  });
+});
+
+describe('staff coordination through the assistant', () => {
+  it('lists staff without phone numbers and assigns a ticket only after confirmation', async () => {
+    const warden = await prisma.user.create({ data: { phone: '9400000077', email: 'kavya.warden@example.com', password: 'x', name: 'Kavya Warden', role: 'PG_WARDEN' } });
+    const access = await prisma.pGPropertyAccess.create({ data: { propertyId: ids.prop.id, userId: warden.id, role: 'WARDEN' } });
+    try {
+      const ownerActor = await tools.actorFromRequest(userReq(ids.owner));
+      const staff = await tools.toolCatalogue.list_staff.execute(ownerActor, { property_id: ids.prop.id });
+      assert.ok(staff.some((member: any) => member.name === 'Kavya Warden' && member.role === 'WARDEN'));
+      assert.doesNotMatch(JSON.stringify(staff), /9400000077/, 'no phone numbers');
+
+      const prepared = await orchestrator.runChat(userReq(ids.owner), stubProvider([
+        { calls: [{ name: 'assign_maintenance_ticket', args: { ticket_id: ids.ticket.id, staff_name: 'kavya' } }] }
+      ]), { message: 'give the leak to Kavya' });
+      assert.equal(prepared.needsConfirmation?.tool, 'assign_maintenance_ticket');
+      assert.equal((await prisma.pGMaintenanceTicket.findUnique({ where: { id: ids.ticket.id } })).assignedTo, null, 'not assigned before confirmation');
+      const done = await orchestrator.runChat(userReq(ids.owner), stubProvider([]), { message: 'yes', confirmationId: prepared.needsConfirmation!.confirmationId });
+      assert.match(done.reply, /^Done\./);
+      assert.equal((await prisma.pGMaintenanceTicket.findUnique({ where: { id: ids.ticket.id } })).assignedTo, warden.id);
+
+      await assert.rejects(tools.toolCatalogue.assign_maintenance_ticket.execute(ownerActor, { ticket_id: ids.ticket.id, staff_name: 'Nobody' }), /STAFF_NOT_FOUND: .*Kavya Warden/);
+      await assert.rejects(tools.toolCatalogue.assign_maintenance_ticket.execute(ownerActor, { ticket_id: ids.otherTicket.id, staff_name: 'kavya' }), /FORBIDDEN/);
+    } finally {
+      await prisma.pGMaintenanceTicket.update({ where: { id: ids.ticket.id }, data: { assignedTo: null } });
+      await prisma.pGPropertyAccess.delete({ where: { id: access.id } });
+      await prisma.user.delete({ where: { id: warden.id } });
+    }
+  });
+});
+
 describe('owner notices through the assistant', () => {
   it('posts a confirmed notice to every current resident, and only on the caller\'s own PG', async () => {
     const before = await prisma.pGResidentNotification.count({ where: { type: 'NOTICE', propertyId: ids.prop.id } });

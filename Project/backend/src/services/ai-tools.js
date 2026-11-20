@@ -14,6 +14,7 @@ import { notifyWhatsAppTemplate } from './pg-notifications.js';
 import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
 import { periodOf } from '../utils/app-time.js';
 import { z } from 'zod';
+import { CHENNAI_LANDMARKS, distanceKm, findLandmark } from '@livingplus/shared';
 import { semanticScores, semanticSearchEnabled } from './semantic-search.js';
 const db = new Proxy({}, {
     get: (_target, property) => prisma[property]
@@ -156,12 +157,15 @@ function compactProperty(property) {
 }
 export const toolCatalogue = {
     search_properties: {
-        description: 'Find published PG properties matching location, budget, gender policy, room type, AC, food and amenities. A resident never sees their current PG here; room moves inside it go through the room change tools, never a new booking. For free-text wishes (vibe, nearby offices or landmarks, food habits) pass query: results are then ranked by meaning and include match_score.',
-        schema: toolArgs({ query: z.string().optional().describe('Free-text description of what the guest wants, e.g. quiet, near the OMR tech park, veg food.'), location: z.string().optional(), budget_max: num().optional(), gender: z.enum(['MEN', 'WOMEN', 'ANY']).optional(), room_type: z.string().optional(), ac: bool().optional(), food_included: bool().optional(), amenities: z.array(z.string()).optional() }),
+        description: 'Find published PG properties matching location, budget, gender policy, room type, AC, food and amenities. A resident never sees their current PG here; room moves inside it go through the room change tools, never a new booking. For free-text wishes (vibe, food habits) pass query: results are then ranked by meaning and include match_score. When the guest names their campus or office, pass near (e.g. "IIT Madras", "Tidel Park", "SIPCOT"): results then include distance_km (straight line) and are sorted nearest first.',
+        schema: toolArgs({ query: z.string().optional().describe('Free-text description of what the guest wants, e.g. quiet, near the OMR tech park, veg food.'), location: z.string().optional(), budget_max: num().optional(), gender: z.enum(['MEN', 'WOMEN', 'ANY']).optional(), room_type: z.string().optional(), ac: bool().optional(), food_included: bool().optional(), amenities: z.array(z.string()).optional(), near: z.string().optional().describe('Campus or office the guest will travel to, e.g. IIT Madras, Tidel Park, SIPCOT Siruseri.') }),
         requiresConfirmation: false,
         roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN'],
         execute: async (actor, args = {}) => {
             const q = str(args.location).toLowerCase();
+            const landmark = args.near ? findLandmark(str(args.near)) : null;
+            if (args.near && !landmark)
+                throw new Error(`UNKNOWN_PLACE: use one of ${CHENNAI_LANDMARKS.map((place) => place.name).join('; ')}`);
             const exclusion = actor.role === 'PG_TENANT' && actor.propertyId ? ownPropertyExclusionWhere([actor.propertyId]) : {};
             const properties = await publicProperties(exclusion);
             const matches = properties
@@ -174,20 +178,33 @@ export const toolCatalogue = {
                 (args.ac === undefined || r.has_ac === args.ac) &&
                 (args.food_included === undefined || r.food_included === args.food_included) &&
                 (!args.budget_max || r.monthly_rent <= Number(args.budget_max))));
+            const located = new Map(properties
+                .filter((p) => typeof p.latitude === 'number' && typeof p.longitude === 'number')
+                .map((p) => [p.id, { latitude: p.latitude, longitude: p.longitude }]));
+            const withDistance = (list) => {
+                if (!landmark)
+                    return list;
+                return list
+                    .map((p) => {
+                    const at = located.get(p.property_id);
+                    return { ...p, near: landmark.name, distance_km: at ? Math.round(distanceKm(at, landmark) * 10) / 10 : null };
+                })
+                    .sort((a, b) => (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity));
+            };
             const wish = str(args.query);
             if (wish && semanticSearchEnabled()) {
                 try {
                     const scores = await semanticScores(wish, exclusion);
-                    return matches
+                    const ranked = matches
                         .map((p) => ({ ...p, match_score: Math.round((scores.get(p.property_id) ?? 0) * 1000) / 1000 }))
-                        .sort((a, b) => b.match_score - a.match_score)
-                        .slice(0, 10);
+                        .sort((a, b) => b.match_score - a.match_score);
+                    return withDistance(ranked).slice(0, 10);
                 }
                 catch {
                     // Fall back to the unranked structured search below.
                 }
             }
-            return matches.slice(0, 10);
+            return withDistance(matches).slice(0, 10);
         }
     },
     get_property_details: {
@@ -757,6 +774,51 @@ export const toolCatalogue = {
             const updated = await db.pGMaintenanceTicket.update({ where: { id: ticket.id }, data: { status: String(args.status) } });
             logAudit(ticket.propertyId, actor.userId, 'TICKET_STATUS_VIA_AI', 'PGMaintenanceTicket', ticket.id, updated.status);
             return { ticket_id: updated.id, status: updated.status };
+        }
+    },
+    list_staff: {
+        description: 'Staff on one of the caller’s properties: name, role (WARDEN, COOK, HOUSEKEEPING, ACCOUNTANT) and how many open tickets each is handling. No phone numbers.',
+        schema: toolArgs({ property_id: z.string() }),
+        requiresConfirmation: false,
+        roles: ['PG_OWNER', 'PG_WARDEN'],
+        execute: async (actor, args = {}) => {
+            const propertyId = await resolveScopedPropertyId(actor, args.property_id);
+            if (!propertyId)
+                throw new Error('FORBIDDEN');
+            const staff = await db.pGPropertyAccess.findMany({
+                where: { propertyId, role: { not: 'OWNER' } },
+                select: { userId: true, role: true, user: { select: { name: true } } }
+            });
+            const open = await db.pGMaintenanceTicket.groupBy({
+                by: ['assignedTo'], where: { propertyId, status: { in: ['OPEN', 'IN_PROGRESS'] }, assignedTo: { not: null } }, _count: { _all: true }
+            });
+            const load = new Map(open.map((row) => [row.assignedTo, row._count._all]));
+            return staff.map((member) => ({ name: member.user?.name || 'Staff member', role: member.role, open_tickets: load.get(member.userId) ?? 0 }));
+        }
+    },
+    assign_maintenance_ticket: {
+        description: 'Assign a maintenance ticket to a warden or housekeeping staff member at the same property, by name (see list_staff). Audited.',
+        schema: toolArgs({ ticket_id: z.string(), staff_name: z.string() }),
+        requiresConfirmation: true,
+        roles: ['PG_OWNER', 'PG_WARDEN'],
+        execute: async (actor, args = {}) => {
+            const ticket = await db.pGMaintenanceTicket.findUnique({ where: { id: String(args.ticket_id) } });
+            if (!ticket || !actor.propertyIds.includes(ticket.propertyId))
+                throw new Error('FORBIDDEN');
+            const wanted = str(args.staff_name).trim().toLowerCase();
+            const staff = await db.pGPropertyAccess.findMany({
+                where: { propertyId: ticket.propertyId, role: { in: ['WARDEN', 'HOUSEKEEPING'] } },
+                select: { userId: true, role: true, user: { select: { name: true } } }
+            });
+            const named = staff.filter((member) => (member.user?.name || '').toLowerCase().includes(wanted));
+            if (!wanted || !named.length)
+                throw new Error(`STAFF_NOT_FOUND: wardens and housekeeping here are ${staff.map((member) => member.user?.name).filter(Boolean).join(', ') || 'none yet'}`);
+            if (named.length > 1)
+                throw new Error(`STAFF_AMBIGUOUS: did you mean ${named.map((member) => member.user?.name).join(' or ')}?`);
+            const chosen = named[0];
+            await db.pGMaintenanceTicket.update({ where: { id: ticket.id }, data: { assignedTo: chosen.userId } });
+            logAudit(ticket.propertyId, actor.userId, 'TICKET_ASSIGNED_VIA_AI', 'PGMaintenanceTicket', ticket.id, chosen.role);
+            return { ticket_id: ticket.id, title: ticket.title, assigned_to: chosen.user?.name, role: chosen.role };
         }
     },
     send_rent_reminders: {

@@ -59,3 +59,4 @@ export const isGenderPolicy = (value: string): value is GenderPolicy => includes
 export * from './vibecheck.js';
 export * from './services.js';
 export * from './staff.js';
+export * from './places.js';

@@ -5,6 +5,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowUpDown,
   Check,
+  ChevronDown,
   Loader2,
   LogOut,
   MapPin,
@@ -37,7 +38,7 @@ import GuestLoginGate from '../components/GuestLoginGate';
 import MyRequests from '../components/MyRequests';
 import VibeProfileBuilder from '../components/VibeProfileBuilder';
 import { hasKeyHabits, loadVibeAnswers, loadVibeSummary, saveVibeAnswers, saveVibeSummary } from '../utils/vibe-storage';
-import { type VibeAnswers, type VibeMatch } from '@livingplus/shared';
+import { CHENNAI_LANDMARKS, distanceKm, formatDistance, type VibeAnswers, type VibeMatch } from '@livingplus/shared';
 import { useOtpCooldown } from '../hooks/useOtpCooldown';
 import { apiErrorMessage, apiErrorStatus } from '../utils/api-error';
 import { phoneOtpErrorMessage, startPhoneVerification, type PhoneChallenge } from '../utils/phone-otp';
@@ -153,6 +154,10 @@ export default function PGDiscovery() {
   const [foodOnly, setFoodOnly] = useState(false);
   const [amenities, setAmenities] = useState<string[]>([]);
   const [sort, setSort] = useState('featured');
+  const [nearId, setNearId] = useState('');
+  const nearPlace = CHENNAI_LANDMARKS.find((place) => place.id === nearId) ?? null;
+  const distanceTo = (property: PGProperty): number | null =>
+    nearPlace && property.latitude != null && property.longitude != null ? distanceKm({ latitude: property.latitude, longitude: property.longitude }, nearPlace) : null;
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   // Booking-request modal state.
@@ -264,9 +269,11 @@ export default function PGDiscovery() {
     if (sort === 'price-asc') list.sort((a, b) => rentOf(a) - rentOf(b));
     if (sort === 'price-desc') list.sort((a, b) => rentOf(b) - rentOf(a));
     if (sort === 'beds-desc') list.sort((a, b) => b.availableBeds - a.availableBeds);
+    // "Near" without an explicit sort: nearest first, PGs without a pinned location last.
+    if (sort === 'featured' && nearPlace) list.sort((a, b) => (distanceTo(a) ?? Infinity) - (distanceTo(b) ?? Infinity));
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queryFiltered, gender, roomTypes, minRent, maxRent, acOnly, foodOnly, amenities, sort, query, semanticScores]);
+  }, [queryFiltered, gender, roomTypes, minRent, maxRent, acOnly, foodOnly, amenities, sort, query, semanticScores, nearId]);
 
   const activeFilterCount =
     (gender ? 1 : 0) +
@@ -284,6 +291,7 @@ export default function PGDiscovery() {
     setAcOnly(false);
     setFoodOnly(false);
     setAmenities([]);
+    setNearId('');
   };
 
   const signOut = () => {
@@ -753,6 +761,26 @@ export default function PGDiscovery() {
             </p>
           </div>
           <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-hide sm:mx-0 sm:flex-wrap sm:px-0" role="group" aria-label="Quick filters">
+            <label className={`relative inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border pl-3 pr-2 text-sm font-medium ${nearPlace ? 'border-navy-900 bg-amber-50 text-navy-900' : 'border-hairline bg-white text-ink hover:border-field-border'}`}>
+              <MapPin className="h-4 w-4" aria-hidden="true" />
+              <span className="sr-only">Near your campus or office</span>
+              <select
+                id="near-place"
+                value={nearId}
+                onChange={(event) => setNearId(event.target.value)}
+                className="max-w-56 cursor-pointer appearance-none bg-transparent pr-1 text-sm font-medium outline-none"
+                style={{ fontSize: '14px' }}
+              >
+                <option value="">Near my campus or office</option>
+                <optgroup label="Campuses">
+                  {CHENNAI_LANDMARKS.filter((place) => place.kind === 'campus').map((place) => <option key={place.id} value={place.id}>Near {place.name}</option>)}
+                </optgroup>
+                <optgroup label="Offices">
+                  {CHENNAI_LANDMARKS.filter((place) => place.kind === 'office').map((place) => <option key={place.id} value={place.id}>Near {place.name}</option>)}
+                </optgroup>
+              </select>
+              <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+            </label>
             {quickChips.map((chip) => (
               <button
                 key={chip.label}
@@ -779,6 +807,7 @@ export default function PGDiscovery() {
               <span className="tabular font-semibold text-navy-900">{filteredProperties.length}</span>{' '}
               {filteredProperties.length === 1 ? 'PG' : 'PGs'}
               {query.trim() ? <> for “{query.trim()}”</> : ' in Chennai'}
+              {nearPlace && sort === 'featured' && <span className="hidden text-muted sm:inline">, nearest to {nearPlace.name.split(',')[0]} first</span>}
               {query.trim() && semanticScores && semanticScores.size > 0 && (
                 <span className="ml-2 text-sm text-muted" title="Includes PGs that match what you described, not just the exact words">including close matches</span>
               )}
@@ -853,6 +882,14 @@ export default function PGDiscovery() {
                         <p className="mt-0.5 flex items-center gap-1 text-sm text-muted">
                           <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> {property.locality}, {property.city}
                         </p>
+                        {nearPlace && (() => {
+                          const km = distanceTo(property);
+                          return (
+                            <p className="mt-0.5 text-sm font-medium text-navy-700">
+                              {km === null ? `Distance to ${nearPlace.name.split(',')[0]} not known yet` : `${formatDistance(km)} to ${nearPlace.name.split(',')[0]}`}
+                            </p>
+                          );
+                        })()}
                         {price.from !== null && (
                           <p className="mt-1.5 text-ink">
                             <span className="tabular font-semibold text-navy-900">{rupees(price.from)}</span>/mo

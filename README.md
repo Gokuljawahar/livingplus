@@ -8,7 +8,7 @@ Built for the Google Startup Buildathon 2026. The answers this build delivers on
 
 | Site | Path | Who | What they do |
 |---|---|---|---|
-| Guest | `/` | Students and young professionals looking for a PG | Browse with no sign-up. See the real monthly cost (rent, food, deposit) and live bed availability. Take **VibeCheck** to see how they'd fit with each room. Request a bed with one phone code, then follow the reply in *My requests*. |
+| Guest | `/` | Students and young professionals looking for a PG | Browse with no sign-up. See the real monthly cost (rent, food, deposit), live bed availability, and how far each PG is from their campus or office (IIT Madras, Tidel Park, SIPCOT…). Take **VibeCheck** to see how they'd fit with each room. Request a bed with one phone code, then follow the reply in *My requests*. |
 | Resident | `/stay/<pg>` | People living in a PG | See what they owe and pay, report issues with photo or voice, order meals and cleaning, keep move-in condition records, update VibeCheck, request a room change, and read notices. |
 | Owner | `/owner` | PG owners and their staff | *Today* (what needs you), beds and bookings, tenants and KYC, the rent ledger and payment claims, expenses, utilities, maintenance, services, staff roles and reports. |
 
@@ -16,7 +16,7 @@ Built for the Google Startup Buildathon 2026. The answers this build delivers on
 
 | Job | Built with | How |
 |---|---|---|
-| Assistant for guests, residents and owners (about 25 tools) | **Google ADK** (`@google/adk`) | An `LlmAgent` with one `FunctionTool` per backend action, run by ADK's `Runner`. Tools are scoped to the caller's role and PG. Anything that writes (bookings, expenses, bills, notices) pauses for explicit confirmation, bound to the same person and PG and stored in PostgreSQL, so it survives restarts. |
+| Assistant for guests, residents and owners (about 30 tools) | **Google ADK** (`@google/adk`) | An `LlmAgent` with one `FunctionTool` per backend action, run by ADK's `Runner`. Tools are scoped to the caller's role and PG. Owners can ask it to draft and post notices or assign a ticket to a warden. Anything that writes (bookings, expenses, bills, notices, assignments) pauses for explicit confirmation, bound to the same person and PG and stored in PostgreSQL, so it survives restarts. |
 | KYC document check | **Gemini API** (`@google/genai`), one structured call | Reads an uploaded ID and returns the document type, name, last 4 digits only, legibility and problems, as JSON checked with Zod. The owner still verifies. |
 | VibeCheck profile | Gemini, one structured call | Turns "I study till 1 am, keep my desk neat…" (in English, Tamil or Hindi) into 8 lifestyle habits plus a short summary, and asks one follow-up question if something important is missing. |
 | VibeCheck matching | Gemini, one structured call | Judges each room against a deterministic baseline score. The AI may move a score by at most ±15 points, and the reasons it gives are about habits only, never names. |
@@ -79,7 +79,7 @@ cd ../frontend && npm install && npm run dev   # http://localhost:5173
 ## Tests
 
 ```bash
-cd Project/backend  && npm test                # 241 API, isolation and AI-agent tests
+cd Project/backend  && npm test                # 243 API, isolation and AI-agent tests
 cd Project/frontend && npm test && npm run e2e # unit tests and 7 browser journeys
 ```
 

@@ -39,7 +39,7 @@ describe('agent tool gating by role', () => {
             'get_occupancy_report', 'update_maintenance_status', 'send_rent_reminders',
             'log_expense', 'get_expense_summary', 'propose_electricity_split',
             'approve_electricity_bill', 'get_booking_status', 'decide_room_change',
-            'list_room_change_requests', 'send_property_notice'
+            'list_room_change_requests', 'send_property_notice', 'list_staff', 'assign_maintenance_ticket'
         ]) {
             assert.ok(names.includes(tool), `PG_WARDEN should have ${tool}`);
         }
