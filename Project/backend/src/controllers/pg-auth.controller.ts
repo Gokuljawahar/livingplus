@@ -7,15 +7,10 @@ import { prisma } from '../db/index.js';
 import { getJwtSecret } from '../utils/auth-config.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { logger } from '../utils/logger.js';
-import { isGenderPolicy, isStrongPassword, MESSAGES } from '@livingplus/shared';
+import { isGenderPolicy, isStrongPassword, MESSAGES, normalizeIndianPhone as normalizePhone } from '@livingplus/shared';
 import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
 import { changePasswordBody, googleLoginBody, verifyPhoneBody, loginBody, otpRequestBody, otpVerifyBody, registerBody, updateProfileBody } from '../validation/request.schemas.js';
 import { googleSignInEnabled, otpProvider, verifyFirebaseGoogleToken, verifyFirebasePhoneToken } from '../services/phone-verification.js';
-
-function normalizePhone(phone: string): string {
-  const digits = phone.replace(/\D/g, '');
-  return digits.length === 10 ? `91${digits}` : digits;
-}
 
 function toUserResponse(user: any) {
   return {

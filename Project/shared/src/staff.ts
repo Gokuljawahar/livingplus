@@ -5,6 +5,8 @@
 export const STAFF_ROLES = ['WARDEN', 'COOK', 'HOUSEKEEPING', 'ACCOUNTANT'] as const;
 export type StaffRole = (typeof STAFF_ROLES)[number];
 export type AccessRole = 'OWNER' | StaffRole;
+export const MONEY_ROLES = ['OWNER', 'ACCOUNTANT'] as const;
+export const canSeeMoneyRole = (role: string): boolean => (MONEY_ROLES as readonly string[]).includes(role);
 
 export const STAFF_ROLE_LABELS: Record<AccessRole, string> = {
   OWNER: 'Owner', WARDEN: 'Warden', COOK: 'Cook', HOUSEKEEPING: 'Housekeeping', ACCOUNTANT: 'Accountant'

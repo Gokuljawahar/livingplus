@@ -8,6 +8,7 @@
 // owner first gets a one-minute pass (a short-lived signed token) and the
 // voice connection presents it.
 import jwt from 'jsonwebtoken';
+import { canSeeMoneyRole, rupees, shortDate } from '@livingplus/shared';
 import { prisma } from '../db/index.js';
 import { asSystem } from '../db/context.js';
 import { getJwtSecret } from '../utils/auth-config.js';
@@ -15,8 +16,7 @@ import { pulseStats } from '../controllers/insights.controller.js';
 
 export const OWNER_BRIEFING_PATH = '/api/pg/owner/briefing/live';
 const PURPOSE = 'owner-voice-briefing';
-const rupees = (amount: number) => `₹${Math.round(amount).toLocaleString('en-IN')}`;
-const day = (value: Date | string) => new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
+const day = (value: Date | string) => shortDate(value, 'Asia/Kolkata');
 
 /** A one-minute pass for the briefing connection. */
 export function issueBriefingPass(userId: string): string {
@@ -46,7 +46,7 @@ export async function briefingFacts(userId: string): Promise<{ firstName: string
     ]);
     if (!user || !access.length) return null;
     const scope = access.map((row) => row.propertyId);
-    const moneyScope = access.filter((row) => row.role === 'OWNER' || row.role === 'ACCOUNTANT').map((row) => row.propertyId);
+    const moneyScope = access.filter((row) => canSeeMoneyRole(row.role)).map((row) => row.propertyId);
     const seesMoney = moneyScope.length > 0;
     const today = new Date(new Date().toISOString().slice(0, 10));
     const [stats, overdue, requests, tickets] = await Promise.all([

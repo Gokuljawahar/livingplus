@@ -22,14 +22,8 @@ import { asSystem } from '../db/context.js';
 import { guestPhoneFrom } from '../utils/guest-token.js';
 import { checkKycDocument } from '../services/kyc-check.js';
 import { buildVibeProfile, vibeInterviewTurn, scoreVibeRooms } from '../services/vibe-agent.js';
-import { cleanServiceSettings, cleanVibeAnswers, cleanVibeSummary, isStaffRole, isBloodGroup, isGenderPolicy, isKycType, isValidUpiId, LIMITS, MESSAGES, vibeMatch, type VibeAnswers, vibeTopicsFor } from '@livingplus/shared';
+import { cleanServiceSettings, cleanVibeAnswers, cleanVibeSummary, isStaffRole, isBloodGroup, isGenderPolicy, isKycType, isValidUpiId, LIMITS, MESSAGES, phoneVariants, vibeMatch, type VibeAnswers, vibeTopicsFor } from '@livingplus/shared';
 import { cancelBookingBody, checkOutTenantBody, createMaintenanceTicketBody, createOwnerExpenseBody, createPropertyBody, createPropertyStaffBody, createRoomBody, createTenantTicketBody, markDepositRefundedBody, proposeElectricityBillBody, sendRentRemindersBody, updateBedStatusBody, updateBookingStatusBody, updateMaintenanceStatusBody, updatePropertyBody, updateResidentProfileBody, updateTenantProfileBody } from '../validation/request.schemas.js';
-
-function phoneVariants(phone: string): string[] {
-  const digits = String(phone || '').replace(/\D/g, '');
-  const normalized = digits.length === 10 ? `91${digits}` : digits;
-  return [...new Set([digits, normalized, normalized.length > 10 ? normalized.slice(-10) : normalized])];
-}
 
 export function currentUser(req: Request): { id: string; role: string; propertyId?: string } | null {
   const user = (req as any).user;

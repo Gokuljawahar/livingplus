@@ -2,6 +2,8 @@
 // cooks, housekeeping staff and accountants with role-based access).
 // The API enforces these; the web app uses them to show only the right views.
 export const STAFF_ROLES = ['WARDEN', 'COOK', 'HOUSEKEEPING', 'ACCOUNTANT'];
+export const MONEY_ROLES = ['OWNER', 'ACCOUNTANT'];
+export const canSeeMoneyRole = (role) => MONEY_ROLES.includes(role);
 export const STAFF_ROLE_LABELS = {
     OWNER: 'Owner', WARDEN: 'Warden', COOK: 'Cook', HOUSEKEEPING: 'Housekeeping', ACCOUNTANT: 'Accountant'
 };

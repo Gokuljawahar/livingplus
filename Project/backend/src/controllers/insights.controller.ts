@@ -14,10 +14,9 @@ import { accessiblePropertyIds, currentUser } from './pg.controller.js';
 import { issueBriefingPass } from '../services/owner-briefing.js';
 import { vibeLiveEnabled } from '../services/vibe-live.js';
 import { aiEnabled, generateStructured } from '../services/ai-provider.js';
-import { cleanVibeAnswers } from '@livingplus/shared';
+import { cleanVibeAnswers, MONEY_ROLES, rupees } from '@livingplus/shared';
 
 const DAY = 24 * 60 * 60 * 1000;
-const rupees = (amount: number) => `₹${Math.round(amount).toLocaleString('en-IN')}`;
 
 // ---------------------------------------------------------------- pulse
 
@@ -105,7 +104,7 @@ export async function pulseStats(scope: string[], seesMoney: boolean): Promise<P
 export const getPulse = async (req: Request, res: Response): Promise<any> => {
   try {
     const scope = await scopeFor(req);
-    const seesMoney = (await accessiblePropertyIds(req, ['OWNER', 'ACCOUNTANT'])).some((id) => scope.includes(id));
+    const seesMoney = (await accessiblePropertyIds(req, [...MONEY_ROLES])).some((id) => scope.includes(id));
     const logs = scope.length ? await db.pHAuditLog.findMany({
       where: { propertyId: { in: scope }, createdAt: { gte: new Date(Date.now() - 14 * DAY) } },
       orderBy: { createdAt: 'desc' },
@@ -174,7 +173,7 @@ export const postWeeklyBrief = async (req: Request, res: Response): Promise<any>
   try {
     const scope = await scopeFor(req);
     if (!scope.length) return res.status(404).json({ message: 'No PG to summarise' });
-    const seesMoney = (await accessiblePropertyIds(req, ['OWNER', 'ACCOUNTANT'])).some((id) => scope.includes(id));
+    const seesMoney = (await accessiblePropertyIds(req, [...MONEY_ROLES])).some((id) => scope.includes(id));
     const stats = await pulseStats(scope, seesMoney);
     if (!briefOverride && !aiEnabled()) return res.json({ brief: plainBrief(stats), stats });
     try {

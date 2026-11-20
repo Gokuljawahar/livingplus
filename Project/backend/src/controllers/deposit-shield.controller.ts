@@ -9,9 +9,9 @@ import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
 import { canManageProperty } from './pg.controller.js';
 import { aiEnabled, generateStructured } from '../services/ai-provider.js';
+import { MONEY_ROLES } from '@livingplus/shared';
 import { readStoredFile } from '../services/storage.js';
 
-const MONEY_ROLES = ['OWNER', 'ACCOUNTANT'];
 const MAX_PHOTOS_PER_SIDE = 4;
 
 const reviewSchema = z.object({
@@ -64,7 +64,7 @@ async function photoParts(keys: string[]): Promise<Array<Record<string, unknown>
 export const reviewDeposit = async (req: Request, res: Response): Promise<any> => {
   try {
     const tenant = await db.pGTenant.findUnique({ where: { id: String(req.params.tenantId) }, select: { id: true, propertyId: true, depositReceived: true } });
-    if (!tenant || !await canManageProperty(req, tenant.propertyId, MONEY_ROLES)) return res.status(404).json({ message: 'Resident not found' });
+    if (!tenant || !await canManageProperty(req, tenant.propertyId, [...MONEY_ROLES])) return res.status(404).json({ message: 'Resident not found' });
     const [moveIn, moveOut] = await Promise.all(['MOVE_IN', 'MOVE_OUT'].map((kind) => db.pGConditionReport.findFirst({ where: { tenantId: tenant.id, kind }, orderBy: { createdAt: 'desc' } })));
     if (!moveIn || !moveOut) {
       return res.status(409).json({ code: 'NEED_BOTH_RECORDS', message: `Add a ${!moveIn ? 'move-in' : 'move-out'} condition record with photos first, then compare.` });
