@@ -7,7 +7,11 @@ export function createLiveProtocol(z) {
         }),
         z.object({
             type: z.literal('text'),
-            text: z.string().transform((value) => value.trim()).pipe(z.string().min(1)).transform((value) => value.slice(0, 1000))
+            text: z
+                .string()
+                .transform((value) => value.trim())
+                .pipe(z.string().min(1))
+                .transform((value) => value.slice(0, 1000))
         }),
         z.object({
             type: z.literal('pause')

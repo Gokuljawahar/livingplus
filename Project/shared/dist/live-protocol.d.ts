@@ -1,4 +1,3 @@
-import type { z as ZodModule } from 'zod';
 import type { VibeAnswers } from './vibecheck.js';
 export type LiveClientMessage = {
     type: 'audio';
@@ -38,45 +37,30 @@ export type LiveServerMessage = {
     type: 'end';
     reason?: string | undefined;
 };
-export declare function createLiveProtocol(z: typeof ZodModule): {
-    liveClientMessageSchema: ZodModule.ZodDiscriminatedUnion<[ZodModule.ZodObject<{
-        type: ZodModule.ZodLiteral<"audio">;
-        data: ZodModule.ZodString;
-    }, ZodModule.core.$strip>, ZodModule.ZodObject<{
-        type: ZodModule.ZodLiteral<"text">;
-        text: ZodModule.ZodPipe<ZodModule.ZodPipe<ZodModule.ZodPipe<ZodModule.ZodString, ZodModule.ZodTransform<string, string>>, ZodModule.ZodString>, ZodModule.ZodTransform<string, string>>;
-    }, ZodModule.core.$strip>, ZodModule.ZodObject<{
-        type: ZodModule.ZodLiteral<"pause">;
-    }, ZodModule.core.$strip>], "type">;
-    liveServerMessageSchema: ZodModule.ZodDiscriminatedUnion<[ZodModule.ZodObject<{
-        type: ZodModule.ZodLiteral<"ready">;
-    }, ZodModule.core.$strip>, ZodModule.ZodObject<{
-        type: ZodModule.ZodLiteral<"audio">;
-        data: ZodModule.ZodString;
-        mimeType: ZodModule.ZodDefault<ZodModule.ZodString>;
-    }, ZodModule.core.$strip>, ZodModule.ZodObject<{
-        type: ZodModule.ZodLiteral<"heard">;
-        text: ZodModule.ZodString;
-    }, ZodModule.core.$strip>, ZodModule.ZodObject<{
-        type: ZodModule.ZodLiteral<"said">;
-        text: ZodModule.ZodString;
-    }, ZodModule.core.$strip>, ZodModule.ZodObject<{
-        type: ZodModule.ZodLiteral<"interrupted">;
-    }, ZodModule.core.$strip>, ZodModule.ZodObject<{
-        type: ZodModule.ZodLiteral<"turn">;
-    }, ZodModule.core.$strip>, ZodModule.ZodObject<{
-        type: ZodModule.ZodLiteral<"habits">;
-        answers: ZodModule.ZodRecord<ZodModule.ZodString, ZodModule.ZodNumber>;
-        summary: ZodModule.ZodNullable<ZodModule.ZodString>;
-        done: ZodModule.ZodBoolean;
-        missing: ZodModule.ZodOptional<ZodModule.ZodArray<ZodModule.ZodString>>;
-    }, ZodModule.core.$strip>, ZodModule.ZodObject<{
-        type: ZodModule.ZodLiteral<"error">;
-        message: ZodModule.ZodString;
-    }, ZodModule.core.$strip>, ZodModule.ZodObject<{
-        type: ZodModule.ZodLiteral<"end">;
-        reason: ZodModule.ZodOptional<ZodModule.ZodString>;
-    }, ZodModule.core.$strip>], "type">;
-    parseLiveClientMessage: (raw: unknown) => LiveClientMessage | null;
-    parseLiveServerMessage: (raw: unknown) => LiveServerMessage | null;
-};
+export interface SafeParseResult<T = unknown> {
+    success: boolean;
+    data?: T;
+}
+export interface LiveMessageSchema<T> {
+    safeParse(input: unknown): SafeParseResult<T>;
+}
+/** Structural subset of Zod v4 used to build the live protocol schemas without importing `zod` in @livingplus/shared. */
+export interface ZodLike {
+    discriminatedUnion(discriminator: string, options: readonly any[]): {
+        safeParse(input: unknown): SafeParseResult;
+    };
+    object(shape: Record<string, any>): any;
+    literal(value: string): any;
+    string(): any;
+    number(): any;
+    boolean(): any;
+    record(key: any, value: any): any;
+    array(element: any): any;
+}
+export interface LiveProtocol {
+    liveClientMessageSchema: LiveMessageSchema<LiveClientMessage>;
+    liveServerMessageSchema: LiveMessageSchema<LiveServerMessage>;
+    parseLiveClientMessage(raw: unknown): LiveClientMessage | null;
+    parseLiveServerMessage(raw: unknown): LiveServerMessage | null;
+}
+export declare function createLiveProtocol(z: ZodLike): LiveProtocol;

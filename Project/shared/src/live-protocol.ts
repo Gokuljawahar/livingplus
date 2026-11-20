@@ -1,8 +1,7 @@
 // Typed WebSocket protocol between the browser and the Gemini Live relay
 // (used by both VibeCheck and the owner's hands-free voice briefing).
 // Defined once in @livingplus/shared; each app passes its own `z` (keeping
-// @livingplus/shared zero-dependency at runtime for Docker/CI portability).
-import type { z as ZodModule } from 'zod';
+// @livingplus/shared zero-dependency at both runtime and type-check time).
 import type { VibeAnswers } from './vibecheck.js';
 
 const BASE64_AUDIO = /^[A-Za-z0-9+/=]+$/;
@@ -23,7 +22,35 @@ export type LiveServerMessage =
   | { type: 'error'; message: string }
   | { type: 'end'; reason?: string | undefined };
 
-export function createLiveProtocol(z: typeof ZodModule) {
+export interface SafeParseResult<T = unknown> {
+  success: boolean;
+  data?: T;
+}
+
+export interface LiveMessageSchema<T> {
+  safeParse(input: unknown): SafeParseResult<T>;
+}
+
+/** Structural subset of Zod v4 used to build the live protocol schemas without importing `zod` in @livingplus/shared. */
+export interface ZodLike {
+  discriminatedUnion(discriminator: string, options: readonly any[]): { safeParse(input: unknown): SafeParseResult };
+  object(shape: Record<string, any>): any;
+  literal(value: string): any;
+  string(): any;
+  number(): any;
+  boolean(): any;
+  record(key: any, value: any): any;
+  array(element: any): any;
+}
+
+export interface LiveProtocol {
+  liveClientMessageSchema: LiveMessageSchema<LiveClientMessage>;
+  liveServerMessageSchema: LiveMessageSchema<LiveServerMessage>;
+  parseLiveClientMessage(raw: unknown): LiveClientMessage | null;
+  parseLiveServerMessage(raw: unknown): LiveServerMessage | null;
+}
+
+export function createLiveProtocol(z: ZodLike): LiveProtocol {
   const liveClientMessageSchema = z.discriminatedUnion('type', [
     z.object({
       type: z.literal('audio'),
@@ -31,12 +58,16 @@ export function createLiveProtocol(z: typeof ZodModule) {
     }),
     z.object({
       type: z.literal('text'),
-      text: z.string().transform((value) => value.trim()).pipe(z.string().min(1)).transform((value) => value.slice(0, 1000))
+      text: z
+        .string()
+        .transform((value: string) => value.trim())
+        .pipe(z.string().min(1))
+        .transform((value: string) => value.slice(0, 1000))
     }),
     z.object({
       type: z.literal('pause')
     })
-  ]);
+  ]) as LiveMessageSchema<LiveClientMessage>;
 
   const liveServerMessageSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal('ready') }),
@@ -58,7 +89,7 @@ export function createLiveProtocol(z: typeof ZodModule) {
     }),
     z.object({ type: z.literal('error'), message: z.string() }),
     z.object({ type: z.literal('end'), reason: z.string().optional() })
-  ]);
+  ]) as LiveMessageSchema<LiveServerMessage>;
 
   function parseLiveClientMessage(raw: unknown): LiveClientMessage | null {
     try {
