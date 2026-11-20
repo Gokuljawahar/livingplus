@@ -3716,4 +3716,67 @@ describe('VibeCheck agents on Google ADK', () => {
       api.restore();
     }
   });
+
+  it('issues scoped owner briefing passes, enforces live availability, and isolates money details by role', async () => {
+    const briefing = await import('../src/services/owner-briefing.js');
+    const insights = await import('../src/controllers/insights.controller.js');
+    const jwt = (await import('jsonwebtoken')).default;
+    const { getJwtSecret } = await import('../src/utils/auth-config.js');
+
+    // Pass validation: valid pass resolves userId; wrong-purpose / invalid / null rejected.
+    const pass = briefing.issueBriefingPass('owner-123');
+    assert.equal(briefing.readBriefingPass(pass), 'owner-123');
+    assert.equal(briefing.readBriefingPass(null), null);
+    assert.equal(briefing.readBriefingPass('not-a-jwt'), null);
+    const wrongPurpose = jwt.sign({ userId: 'owner-123', purpose: 'other' }, getJwtSecret(), { expiresIn: '60s' });
+    assert.equal(briefing.readBriefingPass(wrongPurpose), null);
+
+    const unauthRes = respond();
+    await insights.postBriefingPass({} as any, unauthRes as any);
+    assert.equal(unauthRes.statusCode, 401);
+
+    const suffix = String(Date.now());
+    const ownerUser = await prisma.user.create({ data: { name: 'Briefing Owner', email: `owner-brief-${suffix}@test.local`, phone: `97${suffix.slice(-8)}`, password: 'x', role: 'PG_OWNER' } });
+    const wardenUser = await prisma.user.create({ data: { name: 'Briefing Warden', email: `warden-brief-${suffix}@test.local`, phone: `98${suffix.slice(-8)}`, password: 'x', role: 'PG_WARDEN' } });
+    const pgOwned = await prisma.pGProperty.create({ data: { name: `Briefing Home ${suffix}`, address: '1, Test St', locality: 'Adyar', city: 'Chennai', genderPolicy: 'ANY', amenities: ['Wi-Fi'], houseRules: [], status: 'ACTIVE' } });
+    const pgOther = await prisma.pGProperty.create({ data: { name: `Other Owner PG ${suffix}`, address: '2, Test St', locality: 'OMR', city: 'Chennai', genderPolicy: 'ANY', amenities: ['Wi-Fi'], houseRules: [], status: 'ACTIVE' } });
+    try {
+      await prisma.pGPropertyAccess.create({ data: { userId: ownerUser.id, propertyId: pgOwned.id, role: 'OWNER' } });
+      await prisma.pGPropertyAccess.create({ data: { userId: wardenUser.id, propertyId: pgOwned.id, role: 'WARDEN' } });
+
+      // postBriefingPass returns 503 when live voice is disabled.
+      await withEnv({ VIBE_LIVE_ENABLED: 'false' }, async () => {
+        const disabledRes = respond();
+        await insights.postBriefingPass({ user: { userId: ownerUser.id, role: 'PG_OWNER' } } as any, disabledRes as any);
+        assert.equal(disabledRes.statusCode, 503);
+      });
+
+      // postBriefingPass returns a valid pass for an owner when live voice is enabled.
+      await withEnv({ ENABLE_AI_ORCHESTRATOR: 'true', VIBE_LIVE_ENABLED: 'true' }, async () => {
+        const okRes = respond();
+        await insights.postBriefingPass({ user: { userId: ownerUser.id, role: 'PG_OWNER' } } as any, okRes as any);
+        assert.equal(okRes.statusCode, 200);
+        assert.equal(briefing.readBriefingPass(okRes.body.pass), ownerUser.id);
+      });
+
+      // briefingFacts includes owner's PG and money details; never leaks another owner's PG.
+      const ownerFacts = await briefing.briefingFacts(ownerUser.id);
+      assert.ok(ownerFacts, 'owner receives briefing facts');
+      assert.match(ownerFacts!.facts, new RegExp(pgOwned.name));
+      assert.doesNotMatch(ownerFacts!.facts, new RegExp(pgOther.name), 'never leaks another owner PG');
+      assert.match(ownerFacts!.facts, /Overdue rent:/);
+      const prompt = briefing.briefingInstruction(ownerFacts!.facts);
+      assert.match(prompt, /You cannot change anything/);
+
+      // Warden gets no money details.
+      const wardenFacts = await briefing.briefingFacts(wardenUser.id);
+      assert.ok(wardenFacts);
+      assert.match(wardenFacts!.facts, /cannot see money details/);
+      assert.doesNotMatch(wardenFacts!.facts, /Overdue rent:/);
+    } finally {
+      await prisma.pGPropertyAccess.deleteMany({ where: { userId: { in: [ownerUser.id, wardenUser.id] } } });
+      await prisma.pGProperty.deleteMany({ where: { id: { in: [pgOwned.id, pgOther.id] } } });
+      await prisma.user.deleteMany({ where: { id: { in: [ownerUser.id, wardenUser.id] } } });
+    }
+  });
 });

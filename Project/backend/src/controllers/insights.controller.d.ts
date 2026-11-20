@@ -14,6 +14,7 @@ export interface PulseStats {
     mealOrders: number;
     aiActions: number;
 }
+export declare function pulseStats(scope: string[], seesMoney: boolean): Promise<PulseStats>;
 /** Timeline, assistant actions and this week's numbers for the caller's PGs. */
 export declare const getPulse: (req: Request, res: Response) => Promise<any>;
 declare const briefSchema: z.ZodObject<{
@@ -73,5 +74,7 @@ declare let forecastOverride: ((signals: KitchenSignals) => Promise<unknown>) | 
 export declare function setKitchenForecasterForTests(run: typeof forecastOverride): void;
 /** Plates per meal for one PG and day, with the reason and the food saved. */
 export declare const getKitchenForecast: (req: Request, res: Response) => Promise<any>;
+/** A one-minute pass for the owner's live voice briefing. */
+export declare const postBriefingPass: (req: Request, res: Response) => Promise<any>;
 export {};
 //# sourceMappingURL=insights.controller.d.ts.map

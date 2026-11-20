@@ -5,6 +5,7 @@ import { prisma } from '../app.js';
 import { asSystem } from '../db/context.js';
 import { aiEnabled, resolveGoogleAuth } from './ai-provider.js';
 import { logger } from '../utils/logger.js';
+import { briefingFacts, briefingInstruction, OWNER_BRIEFING_PATH, readBriefingPass } from './owner-briefing.js';
 export const VIBE_LIVE_PATH = '/api/pg/vibecheck/live';
 const MAX_SESSION_MS = 6 * 60 * 1000;
 const MAX_PER_VISITOR = 2;
@@ -85,7 +86,7 @@ export function attachVibeLive(server) {
     let open = 0;
     server.on('upgrade', (req, socket, head) => {
         const path = (req.url || '').split('?')[0];
-        if (path !== VIBE_LIVE_PATH)
+        if (path !== VIBE_LIVE_PATH && path !== OWNER_BRIEFING_PATH)
             return;
         const visitor = visitorOf(req);
         const refuse = (status) => { socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`); socket.destroy(); };
@@ -95,6 +96,9 @@ export function attachVibeLive(server) {
             return refuse('403 Forbidden');
         if (open >= MAX_PER_INSTANCE || (perVisitor.get(visitor) ?? 0) >= MAX_PER_VISITOR)
             return refuse('429 Too Many Requests');
+        const ownerId = path === OWNER_BRIEFING_PATH ? readBriefingPass(new URL(req.url || '/', 'http://local').searchParams.get('pass')) : null;
+        if (path === OWNER_BRIEFING_PATH && !ownerId)
+            return refuse('401 Unauthorized');
         wss.handleUpgrade(req, socket, head, (client) => {
             open += 1;
             perVisitor.set(visitor, (perVisitor.get(visitor) ?? 0) + 1);
@@ -106,6 +110,10 @@ export function attachVibeLive(server) {
                 else
                     perVisitor.delete(visitor);
             });
+            if (ownerId) {
+                void runBriefing(client, ownerId);
+                return;
+            }
             const propertyId = new URL(req.url || '/', 'http://local').searchParams.get('propertyId') || '';
             void runSession(client, /^[A-Za-z0-9-]{8,64}$/.test(propertyId) ? propertyId : null);
         });
@@ -123,13 +131,15 @@ async function loadPlace(propertyId) {
         amenities: Array.isArray(place.amenities) ? place.amenities.filter((item) => typeof item === 'string') : []
     }).catch(() => null);
 }
-async function runSession(client, propertyId) {
-    const topics = vibeTopicsFor(await loadPlace(propertyId));
+/**
+ * Relays one browser WebSocket to one Gemini Live session: mic audio and typed
+ * text in; Gemini's voice, both transcripts and turn markers out. Ends after
+ * MAX_SESSION_MS or when either side closes.
+ */
+async function relayLive(client, spec) {
     const send = (message) => { if (client.readyState === client.OPEN)
         client.send(JSON.stringify(message)); };
-    let known = {};
     let live = null;
-    // Habits only count once the person has said or typed something.
     let heardFromUser = false;
     const timer = setTimeout(() => { send({ type: 'end', reason: 'time' }); client.close(); }, MAX_SESSION_MS);
     client.once('close', () => { clearTimeout(timer); try {
@@ -154,14 +164,8 @@ async function runSession(client, propertyId) {
         if (calls.length && live) {
             const responses = calls.map((call) => {
                 const base = { ...(call.id ? { id: call.id } : {}), name: call.name || 'unknown' };
-                if (call.name !== 'record_habits')
-                    return { ...base, response: { error: 'unknown tool' } };
-                if (!heardFromUser)
-                    return { ...base, response: { saved: false, note: 'Wait for their answer before recording habits.' } };
-                const result = applyHabitCall(known, call.args, topics.skip);
-                known = result.answers;
-                send({ type: 'habits', ...result });
-                return { ...base, response: { saved: true, still_missing: result.missing } };
+                const response = spec.onToolCall ? spec.onToolCall(call.name || '', call.args, heardFromUser) : { error: 'no tools here' };
+                return { ...base, response };
             });
             live.sendToolResponse({ functionResponses: responses });
         }
@@ -172,20 +176,20 @@ async function runSession(client, propertyId) {
             model: liveModel(),
             config: {
                 responseModalities: [Modality.AUDIO],
-                systemInstruction: { parts: [{ text: liveInstruction(topics) }] },
+                systemInstruction: { parts: [{ text: spec.instruction }] },
                 inputAudioTranscription: {},
                 outputAudioTranscription: {},
-                tools: [{ functionDeclarations: [recordHabitsFor(topics.skip)] }]
+                ...(spec.tools?.length ? { tools: [{ functionDeclarations: spec.tools }] } : {})
             },
             callbacks: {
                 onmessage: onMessage,
-                onerror: (error) => { logger.warn({ err: error?.message || String(error) }, 'VibeCheck live session error'); send({ type: 'error', message: 'The live voice connection dropped.' }); client.close(); },
+                onerror: (error) => { logger.warn({ err: error?.message || String(error) }, `${spec.label} live session error`); send({ type: 'error', message: 'The live voice connection dropped.' }); client.close(); },
                 onclose: () => client.close()
             }
         });
     }
     catch (error) {
-        logger.warn({ err: error?.message || String(error) }, 'VibeCheck live session could not start');
+        logger.warn({ err: error?.message || String(error) }, `${spec.label} live session could not start`);
         send({ type: 'error', message: 'Live voice is not available right now.' });
         client.close();
         return;
@@ -195,7 +199,7 @@ async function runSession(client, propertyId) {
         return;
     }
     send({ type: 'ready' });
-    live.sendClientContent({ turns: [{ role: 'user', parts: [{ text: '(The person just joined the call. Say hi like a friend in one short line and casually ask whether they are studying or working these days.)' }] }], turnComplete: true });
+    live.sendClientContent({ turns: [{ role: 'user', parts: [{ text: spec.kickoff }] }], turnComplete: true });
     client.on('message', (raw) => {
         let message;
         try {
@@ -217,6 +221,44 @@ async function runSession(client, propertyId) {
         else if (message?.type === 'pause') {
             live.sendRealtimeInput({ audioStreamEnd: true });
         }
+    });
+}
+/** VibeCheck: the PG buddy conversation, recording habits as it goes. */
+async function runSession(client, propertyId) {
+    const topics = vibeTopicsFor(await loadPlace(propertyId));
+    let known = {};
+    const send = (message) => { if (client.readyState === client.OPEN)
+        client.send(JSON.stringify(message)); };
+    await relayLive(client, {
+        label: 'VibeCheck',
+        instruction: liveInstruction(topics),
+        kickoff: '(The person just joined the call. Say hi like a friend in one short line and casually ask whether they are studying or working these days.)',
+        tools: [recordHabitsFor(topics.skip)],
+        onToolCall: (name, args, heard) => {
+            if (name !== 'record_habits')
+                return { error: 'unknown tool' };
+            if (!heard)
+                return { saved: false, note: 'Wait for their answer before recording habits.' };
+            const result = applyHabitCall(known, args, topics.skip);
+            known = result.answers;
+            send({ type: 'habits', ...result });
+            return { saved: true, still_missing: result.missing };
+        }
+    });
+}
+/** Owner voice briefing: read-only, from the owner's own numbers and lists. */
+async function runBriefing(client, userId) {
+    const context = await briefingFacts(userId).catch(() => null);
+    if (!context) {
+        if (client.readyState === client.OPEN)
+            client.send(JSON.stringify({ type: 'error', message: 'There is nothing to brief you on yet.' }));
+        client.close();
+        return;
+    }
+    await relayLive(client, {
+        label: 'Owner briefing',
+        instruction: briefingInstruction(context.facts),
+        kickoff: `(The owner, ${context.firstName}, just tapped "Brief me". Greet them by first name in a few words and give the briefing.)`
     });
 }
 //# sourceMappingURL=vibe-live.js.map

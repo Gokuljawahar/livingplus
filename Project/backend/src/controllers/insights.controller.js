@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import { prisma } from '../app.js';
 import { logger } from '../utils/logger.js';
-import { accessiblePropertyIds } from './pg.controller.js';
+import { accessiblePropertyIds, currentUser } from './pg.controller.js';
+import { issueBriefingPass } from '../services/owner-briefing.js';
+import { vibeLiveEnabled } from '../services/vibe-live.js';
 import { aiEnabled, generateStructured } from '../services/ai-provider.js';
 import { cleanVibeAnswers } from '@livingplus/shared';
 const db = new Proxy({}, { get: (_target, property) => prisma[property] });
@@ -44,7 +46,7 @@ async function scopeFor(req) {
     const wanted = typeof req.query.propertyId === 'string' ? req.query.propertyId : typeof req.body?.propertyId === 'string' ? req.body.propertyId : '';
     return wanted ? ids.filter((id) => id === wanted) : ids;
 }
-async function pulseStats(scope, seesMoney) {
+export async function pulseStats(scope, seesMoney) {
     const since = new Date(Date.now() - 7 * DAY);
     const today = new Date(new Date().toISOString().slice(0, 10));
     const [beds, occupied, newResidents, pendingRequests, overdue, ticketsOpen, ticketsOpened, resolved, mealOrders, aiActions] = await Promise.all([
@@ -148,7 +150,7 @@ export const postWeeklyBrief = async (req, res) => {
                 system: [
                     'You write a short weekly brief for the owner of a paying-guest (PG) housing business in India.',
                     'Use only the numbers given. Be warm, plain and specific, like a good manager talking to the owner; no jargon, no emojis, no invented facts.',
-                    'Write money with the rupee sign and Indian grouping, e.g. ₹21,100. The headline and each point must say different things; never repeat a fact.',
+                    'Write money with the rupee sign and Indian grouping, e.g. ₹21,100, and occupancy as "9 of 20 beds". The headline and each point must say different things; never repeat a fact.',
                     'Pick the single most useful next step. Never mention residents by name.'
                 ].join(' '),
                 parts: [{ text: `This week's numbers (null means not available to this person):\n${JSON.stringify(stats, null, 2)}` }],
@@ -267,5 +269,17 @@ export const getKitchenForecast = async (req, res) => {
         logger.error({ err: error }, 'Kitchen forecast error');
         res.status(500).json({ message: 'Could not forecast the kitchen' });
     }
+};
+/** A one-minute pass for the owner's live voice briefing. */
+export const postBriefingPass = async (req, res) => {
+    const user = currentUser(req);
+    if (!user)
+        return res.status(401).json({ message: 'Sign in again to continue' });
+    if (!vibeLiveEnabled())
+        return res.status(503).json({ message: 'Voice briefing is not available right now. The written brief is above.' });
+    const scope = await accessiblePropertyIds(req, ['OWNER', 'WARDEN', 'ACCOUNTANT']);
+    if (!scope.length)
+        return res.status(404).json({ message: 'There is no PG to brief you on yet' });
+    res.json({ pass: issueBriefingPass(user.id) });
 };
 //# sourceMappingURL=insights.controller.js.map

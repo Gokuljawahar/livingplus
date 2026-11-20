@@ -1,5 +1,5 @@
 import { reviewDeposit } from '../controllers/deposit-shield.controller.js';
-import { getKitchenForecast, getPulse, postWeeklyBrief } from '../controllers/insights.controller.js';
+import { getKitchenForecast, getPulse, postBriefingPass, postWeeklyBrief } from '../controllers/insights.controller.js';
 import { Router } from 'express';
 import { systemRoute } from '../db/context.js';
 import { cancelMyServiceOrder, createServiceOrder, listMyServiceOrders, listStaffServiceOrders, updateServiceOrderStatus, updateServiceSettings } from '../controllers/services.controller.js';
@@ -115,6 +115,7 @@ router.post('/tenant/room-changes/:requestId/proposals', authenticate, proposeRo
 router.post('/tenant/room-changes/:requestId/response', authenticate, respondRoomSwap);
 router.get('/owner/activity', authenticate, listAuditLogs);
 router.get('/owner/pulse', authenticate, getPulse);
+router.post('/owner/briefing/pass', authenticate, aiChatLimiter, postBriefingPass);
 router.post('/owner/pulse/brief', authenticate, aiChatLimiter, postWeeklyBrief);
 router.get('/owner/kitchen-forecast', authenticate, aiChatLimiter, getKitchenForecast);
 // Public endpoints that work across PGs by design run as the system; each

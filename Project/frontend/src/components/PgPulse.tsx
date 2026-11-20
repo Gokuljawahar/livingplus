@@ -3,7 +3,9 @@
 // who confirmed it.
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Bot, Loader2, RefreshCw } from 'lucide-react';
+import { Bot, Loader2, Mic, PhoneOff, RefreshCw, Send } from 'lucide-react';
+import { useVibeLive } from '../hooks/useVibeLive';
+import { apiErrorMessage } from '../utils/api-error';
 import api from '../api/axios';
 import { rupees } from '../utils/money';
 
@@ -32,6 +34,31 @@ function when(value: string): string {
 
 export default function PgPulse({ onGo }: { onGo: (target: PulseTarget) => void }) {
   const [filter, setFilter] = useState<'all' | 'ai'>('all');
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [voiceError, setVoiceError] = useState('');
+  const [followUp, setFollowUp] = useState('');
+  const voice = useVibeLive(() => {});
+  const startBriefing = async () => {
+    setVoiceError('');
+    setVoiceOpen(true);
+    try {
+      const { pass } = (await api.post('/pg/owner/briefing/pass')).data as { pass: string };
+      const url = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/pg/owner/briefing/live?pass=${encodeURIComponent(pass)}`;
+      if (!(await voice.start(undefined, url))) setVoiceError('Voice briefing is not available right now. The written brief is above.');
+    } catch (failure) {
+      setVoiceError(apiErrorMessage(failure, 'Voice briefing is not available right now. The written brief is above.'));
+    }
+  };
+  const endBriefing = () => {
+    voice.end();
+    setVoiceError('');
+    setFollowUp('');
+  };
+  const sendFollowUp = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!followUp.trim()) return;
+    if (voice.sendText(followUp)) setFollowUp('');
+  };
   const pulse = useQuery({ queryKey: ['owner', 'pulse'], queryFn: async () => (await api.get('/pg/owner/pulse')).data as { timeline: Entry[]; stats: Stats | null } });
   const brief = useQuery({
     queryKey: ['owner', 'pulse', 'brief'],
@@ -69,6 +96,47 @@ export default function PgPulse({ onGo }: { onGo: (target: PulseTarget) => void 
           </>
         ) : (
           <p className="mt-3 text-white/80">The brief isn't available right now. Your numbers are below.</p>
+        )}
+      </section>
+
+      <section aria-labelledby="voice-heading" className="rounded-[14px] border border-hairline bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 id="voice-heading" className="text-base font-semibold">Brief me by voice</h2>
+            <p className="text-sm text-muted">Hear today's priorities and ask questions hands-free, in Tamil, Hindi or English.</p>
+          </div>
+          {!voiceOpen || voice.status === 'ended' || voice.status === 'failed' ? (
+            <button type="button" onClick={() => void startBriefing()} className="btn-secondary inline-flex items-center gap-1.5"><Mic className="h-4 w-4" aria-hidden="true" /> Brief me</button>
+          ) : (
+            <button type="button" onClick={endBriefing} className="inline-flex min-h-10 items-center gap-1.5 rounded-full px-3 font-medium text-negative hover:bg-negative-bg"><PhoneOff className="h-4 w-4" aria-hidden="true" /> End</button>
+          )}
+        </div>
+        {voiceOpen && (
+          <div className="mt-3 space-y-2" aria-live="polite">
+            <p className="inline-flex items-center gap-2 text-sm text-muted">
+              {voice.status === 'connecting' && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+              {voice.status === 'connecting' ? 'Getting your briefing ready…' : voice.status === 'speaking' ? 'Speaking' : voice.status === 'listening' ? 'Listening, ask anything about your PGs' : voice.status === 'ended' ? 'Briefing ended' : ''}
+            </p>
+            {voice.turns.map((turn, index) => (
+              <p key={index} className={`w-fit max-w-[90%] rounded-[12px] px-3 py-2 text-[15px] ${turn.role === 'assistant' ? 'bg-surface text-ink' : 'ml-auto bg-navy-900 text-white'}`}>{turn.text}</p>
+            ))}
+            {(voice.status === 'listening' || voice.status === 'speaking') && (
+              <form onSubmit={sendFollowUp} className="flex gap-2 pt-1">
+                <input
+                  type="text"
+                  aria-label="Ask a follow-up"
+                  value={followUp}
+                  onChange={(event) => setFollowUp(event.target.value)}
+                  placeholder="Or type a follow-up question…"
+                  className="min-h-10 flex-1 rounded-full border border-hairline bg-surface px-4 text-sm text-ink outline-none focus:border-navy-900"
+                />
+                <button type="submit" disabled={!followUp.trim()} aria-label="Send follow-up" className="btn-secondary inline-flex min-h-10 items-center gap-1.5 disabled:opacity-50">
+                  <Send className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </form>
+            )}
+            {(voice.error || voiceError) && <p role="alert" className="text-sm text-attention">{voice.error || voiceError}</p>}
+          </div>
         )}
       </section>
 

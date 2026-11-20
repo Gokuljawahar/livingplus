@@ -69,6 +69,7 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
   const playChunk = (base64: string) => {
     const play = playRef.current;
     if (!play) return;
+    if (play.ctx.state === 'suspended') void play.ctx.resume();
     const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
     const samples = new Int16Array(bytes.buffer, 0, Math.floor(bytes.length / 2));
     const buffer = play.ctx.createBuffer(1, samples.length, OUT_RATE);
@@ -106,7 +107,7 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
   useEffect(() => stop, [stop]);
 
   /** Opens the live session. Resolves false if it could not start (caller falls back). */
-  const start = useCallback(async (propertyId?: string): Promise<boolean> => {
+  const start = useCallback(async (propertyId?: string, url?: string): Promise<boolean> => {
     setError('');
     setTurns([]);
     doneRef.current = false;
@@ -117,11 +118,12 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
     } catch {
       setStatus('failed');
-      setError('Microphone access was blocked. Type your answers instead.');
+      setError('Microphone access was blocked. Allow microphone access in your browser and try again.');
       return false;
     }
     const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     const playCtx = new Ctor();
+    void playCtx.resume();
     playRef.current = { ctx: playCtx, next: 0, sources: [] };
     const micCtx = new Ctor();
     const source = micCtx.createMediaStreamSource(stream);
@@ -134,7 +136,7 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     micRef.current = { stream, ctx: micCtx, node };
 
     const opened = await new Promise<boolean>((resolve) => {
-      const socket = new WebSocket(liveUrl(propertyId));
+      const socket = new WebSocket(url ?? liveUrl(propertyId));
       socketRef.current = socket;
       const timeout = window.setTimeout(() => resolve(false), 12000);
       socket.onmessage = (event) => {
