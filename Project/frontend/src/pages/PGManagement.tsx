@@ -24,7 +24,9 @@ import StatusPill from '../components/ui/StatusPill';
 import { statusLabel } from '../utils/status';
 import PgPulse from '../components/PgPulse';
 import KitchenForecast from '../components/KitchenForecast';
-import DepositCompare from '../components/DepositCompare';
+import TenantEditForm, { type TenantEditValues } from '../features/owner/TenantEditForm';
+import TenantCheckoutForm from '../features/owner/TenantCheckoutForm';
+import RecordPaymentForm, { type RecordPaymentValues } from '../features/owner/RecordPaymentForm';
 
 type Activity = { id: string; action: string; entityType?: string | null; entityId?: string | null; detail?: string | null; actorName?: string | null; createdAt: string; propertyId: string };
 type Property = { id: string; slug?: string | null; name: string; description?: string | null; address: string; locality: string; contactPhone?: string | null; upiId?: string | null; city: string; latitude?: number | null; longitude?: number | null; genderPolicy: string; status?: string; bookingLockMinutes?: number; rentDay?: number; rentDueDay?: number; amenities: string[]; houseRules: string[]; photoUrls: string[]; rooms: { id: string; roomNumber: string; monthlyRent: number; depositAmount: number; maintenanceFee: number; utilitiesSurcharge: number; foodCharge: number; roomType: string; beds: { id: string; label: string; status: string; maintenanceNote?: string | null }[] }[] };
@@ -279,10 +281,7 @@ export default function PGManagement() {
     }
   };
 
-  const updateTenant = async (event: React.FormEvent<HTMLFormElement>, tenantId: string) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const document = form.get('kycDocument') as File | null;
+  const updateTenant = async (tenantId: string, values: TenantEditValues, document: File | null) => {
     setSaving(true);
     try {
       let kycDocumentUrl: string | undefined;
@@ -293,12 +292,12 @@ export default function PGManagement() {
         kycDocumentUrl = result.data.fileKey;
       }
       await api.patch(`/pg/owner/tenants/${tenantId}`, {
-        permanentAddress: form.get('permanentAddress'),
-        bloodGroup: form.get('bloodGroup'),
-        institutionOrEmployer: form.get('institutionOrEmployer'),
-        emergencyName: form.get('emergencyName'),
-        emergencyPhone: form.get('emergencyPhone'),
-        kycType: form.get('kycType'),
+        permanentAddress: values.permanentAddress,
+        bloodGroup: values.bloodGroup,
+        institutionOrEmployer: values.institutionOrEmployer,
+        emergencyName: values.emergencyName,
+        emergencyPhone: values.emergencyPhone,
+        kycType: values.kycType,
         ...(kycDocumentUrl ? { kycDocumentUrl } : {})
       });
       toast.success('Tenant profile updated');
@@ -402,14 +401,12 @@ export default function PGManagement() {
     }
   };
 
-  const recordPayment = async (event: React.FormEvent<HTMLFormElement>, entryId: string) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
+  const recordPayment = async (entryId: string, values: RecordPaymentValues) => {
     try {
       await api.patch(`/pg/owner/rent/${entryId}/payment`, {
-        amount: form.get('amount'),
-        method: form.get('method'),
-        reference: form.get('reference')
+        amount: values.amount,
+        method: values.method,
+        reference: values.reference
       });
       toast.success('Payment recorded');
       refresh();
@@ -970,24 +967,17 @@ export default function PGManagement() {
                     </div>
                   </div>
                   {recordsFor === tenant.id && <ConditionRecords tenantId={tenant.id} viewer="staff" />}
-                  {editingTenantId === tenant.id && <form onSubmit={(event) => void updateTenant(event, tenant.id)} className="grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <input name="permanentAddress" defaultValue={tenant.permanentAddress || ''} placeholder="Permanent address" className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white" />
-                    <input name="institutionOrEmployer" defaultValue={tenant.institutionOrEmployer || ''} placeholder="College / employer" className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white" />
-                    <input name="emergencyName" defaultValue={tenant.emergencyName || ''} placeholder="Emergency contact name" className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white" />
-                    <input name="emergencyPhone" defaultValue={tenant.emergencyPhone || ''} placeholder="Emergency contact phone" className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white" />
-                    <select name="bloodGroup" defaultValue={tenant.bloodGroup || ''} className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white"><option value="">Blood group</option>{['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((group) => <option key={group}>{group}</option>)}</select>
-                    <select name="kycType" defaultValue={tenant.kycType || ''} className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white"><option value="">KYC document type</option>{['AADHAAR', 'PAN', 'PASSPORT', 'DRIVING_LICENSE', 'STUDENT_ID', 'WORK_ID'].map((type) => <option key={type}>{type}</option>)}</select>
-                    <input name="kycDocument" type="file" accept="image/*,application/pdf" className="rounded-xl border border-slate-200 bg-slate-50/50 px-2 py-1.5 text-xs sm:col-span-2 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-200 file:px-2.5 file:py-1 file:text-[11px] file:font-semibold" />
-                    <button disabled={saving} className="rounded-xl bg-navy-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 transition-colors shadow-xs disabled:opacity-60">Save resident record</button>
-                  </form>}
-                  {checkoutTenantId === tenant.id && tenant.status === 'ACTIVE' && <form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void updateTenantStay(tenant.id, 'check-out', { depositDeductions: Number(form.get('depositDeductions') || 0), checkoutNote: String(form.get('checkoutNote') || '') }); }} className="grid gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-4 sm:grid-cols-[1fr_1.5fr_auto_auto]">
-                    {tenant.depositReceived > 0 && <DepositCompare tenantId={tenant.id} />}
-                    <label className="text-xs font-bold text-slate-700">Deposit deductions (₹, max {(tenant.depositReceived || 0).toLocaleString('en-IN')})<input name="depositDeductions" type="number" min="0" max={tenant.depositReceived || 0} defaultValue="0" className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900" /></label>
-                    <label className="text-xs font-bold text-slate-700">Inspection / checkout note<input name="checkoutNote" placeholder="Room condition, damages…" className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900" /></label>
-                    <button className="self-end rounded-xl bg-rose-700 px-4 py-2 text-xs font-bold text-white hover:bg-rose-800 transition-colors">Confirm check-out</button>
-                    <button type="button" onClick={() => setCheckoutTenantId('')} className="self-end rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors">Cancel</button>
-                    <p className="text-[11px] text-slate-500 font-medium sm:col-span-4">Refund due = deposit received − deductions. It stays Pending until you mark it refunded below.</p>
-                  </form>}
+                  {editingTenantId === tenant.id && (
+                    <TenantEditForm initial={tenant} saving={saving} onSubmit={(values, file) => updateTenant(tenant.id, values, file)} />
+                  )}
+                  {checkoutTenantId === tenant.id && tenant.status === 'ACTIVE' && (
+                    <TenantCheckoutForm
+                      tenantId={tenant.id}
+                      depositReceived={tenant.depositReceived || 0}
+                      onConfirm={(payload) => updateTenantStay(tenant.id, 'check-out', payload)}
+                      onCancel={() => setCheckoutTenantId('')}
+                    />
+                  )}
                   {tenant.status === 'CHECKED_OUT' && (tenant.depositDeductions || tenant.checkoutNote) ? <p className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-xl p-3">Check-out: deductions ₹{(tenant.depositDeductions || 0).toLocaleString('en-IN')}{tenant.checkoutNote ? ` · ${tenant.checkoutNote}` : ''} · Refund {tenant.depositRefundStatus?.toLowerCase().replace('_', ' ')}{(tenant.depositRefundAmount ?? 0) > 0 ? ` ₹${(tenant.depositRefundAmount || 0).toLocaleString('en-IN')}` : ''}{tenant.depositRefundReference ? ` · Ref ${tenant.depositRefundReference}` : ''}</p> : null}
                   {tenant.status === 'CHECKED_OUT' && tenant.depositRefundStatus === 'PENDING' && summary.canManageStaff && <form onSubmit={(event) => { event.preventDefault(); void markDepositRefunded(tenant.id); }} className="flex flex-col gap-2 sm:flex-row">
                     <input value={refundReference} onChange={(event) => setRefundReference(event.target.value)} placeholder="Refund UPI / transaction reference" className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 sm:w-80" />
@@ -1017,12 +1007,9 @@ export default function PGManagement() {
                         <p className="mt-1 text-xs font-semibold text-slate-800">₹{entry.paidAmount.toLocaleString('en-IN')} paid of ₹{entry.amount.toLocaleString('en-IN')}{entry.method ? ` · ${entry.method}` : ''}{entry.reference ? ` · Ref ${entry.reference}` : ''}</p>
                       </div>
                     </div>
-                    {entry.status !== 'PAID' && <form onSubmit={(event) => void recordPayment(event, entry.id)} className="grid gap-2 sm:grid-cols-[1fr_1fr_1.5fr_auto] pt-2 border-t border-slate-100">
-                      <input required name="amount" type="number" min="1" max={entry.amount - entry.paidAmount} defaultValue={entry.amount - entry.paidAmount} aria-label="Payment amount" className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white" />
-                      <select name="method" className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white"><option value="CASH">Cash</option><option value="NEFT">NEFT</option><option value="UPI">UPI</option><option value="OTHER">Other</option></select>
-                      <input name="reference" placeholder="Receipt / transaction reference" className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white" />
-                      <button className="rounded-xl bg-emerald-700 px-4 py-1.5 text-xs font-bold text-white hover:bg-emerald-800 transition-colors shadow-xs">Record payment</button>
-                    </form>}
+                    {entry.status !== 'PAID' && (
+                      <RecordPaymentForm remaining={entry.amount - entry.paidAmount} onSubmit={(values) => recordPayment(entry.id, values)} />
+                    )}
                   </article>)}
                   {!rentEntries.length && <div className="rounded-2xl border border-slate-200 bg-white py-12 text-center text-xs text-slate-500 font-medium shadow-xs">No rent entries yet.</div>}
                 </div>

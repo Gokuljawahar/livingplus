@@ -2,7 +2,7 @@
 // tick what to charge, and fill in the deductions with an itemised note the
 // resident will see. Normal wear is listed but never charged. The owner
 // can still edit the amount and note before confirming.
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import api from '../api/axios';
 import { apiErrorMessage } from '../utils/api-error';
@@ -11,13 +11,17 @@ import { rupees } from '../utils/money';
 type Change = { item: string; change: string; kind: 'DAMAGE' | 'MISSING' | 'CLEANING' | 'WEAR'; suggested: number };
 type Review = { changes: Change[]; summary: string; suggestedTotal: number; photos: { moveIn: number; moveOut: number } };
 
-export default function DepositCompare({ tenantId }: { tenantId: string }) {
+export interface DepositApplyValues {
+  depositDeductions: string;
+  checkoutNote: string;
+}
+
+export default function DepositCompare({ tenantId, onApply }: { tenantId: string; onApply: (values: DepositApplyValues) => void }) {
   const [review, setReview] = useState<Review | null>(null);
   const [chosen, setChosen] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [applied, setApplied] = useState(false);
-  const wrapper = useRef<HTMLDivElement | null>(null);
 
   const compare = async () => {
     setLoading(true);
@@ -38,17 +42,15 @@ export default function DepositCompare({ tenantId }: { tenantId: string }) {
   const total = picked.reduce((sum, change) => sum + change.suggested, 0);
 
   const apply = () => {
-    const form = wrapper.current?.closest('form');
-    if (!form) return;
-    const amount = form.elements.namedItem('depositDeductions') as HTMLInputElement | null;
-    const note = form.elements.namedItem('checkoutNote') as HTMLInputElement | null;
-    if (amount) amount.value = String(total);
-    if (note) note.value = picked.length ? picked.map((change) => `${change.item}: ${change.change} (${rupees(change.suggested)})`).join('; ') : 'Room returned in the same condition';
+    const checkoutNote = picked.length
+      ? picked.map((change) => `${change.item}: ${change.change} (${rupees(change.suggested)})`).join('; ')
+      : 'Room returned in the same condition';
+    onApply({ depositDeductions: String(total), checkoutNote });
     setApplied(true);
   };
 
   return (
-    <div ref={wrapper} className="rounded-[10px] bg-white p-3 sm:col-span-4">
+    <div className="rounded-[10px] bg-white p-3 sm:col-span-4">
       {!review ? (
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" onClick={() => void compare()} disabled={loading} className="btn-secondary min-h-9 px-3 py-1.5 text-sm">
