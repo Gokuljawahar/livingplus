@@ -58,6 +58,29 @@ const demoProperties = [
 // Ananya's VibeCheck: early sleeper, tidy, quiet (so guests see real match reasons).
 const DEMO_VIBE = { sleep: 0, wake: 0, tidiness: 0, noise: 0, guests: 0, kitchen: 1, schedule: 0, cooling: 1 };
 
+const HARBOUR_PG_ID = 'pg-demo-thoraipakkam-men';
+const NORTHSTAR_PG_ID = 'pg-demo-anna-nagar';
+
+// Habits: sleep, wake, tidiness, noise, guests, kitchen, schedule, cooling (0-2 each).
+const LIVELY_RESIDENTS = [
+  { id: 'pg-demo-hp-arjun', name: 'Arjun Kumar', phone: '9000000101', pg: HARBOUR_PG_ID, room: '203', bed: 'Bed 1', rent: 8000, optOut: false, vibe: { sleep: 0, wake: 0, tidiness: 1, noise: 0, guests: 0, kitchen: 0, schedule: 0, cooling: 1 } },
+  { id: 'pg-demo-hp-karthik', name: 'Karthik S', phone: '9000000102', pg: HARBOUR_PG_ID, room: '203', bed: 'Bed 2', rent: 8000, optOut: false, vibe: { sleep: 2, wake: 2, tidiness: 1, noise: 1, guests: 0, kitchen: 0, schedule: 2, cooling: 1 } },
+  { id: 'pg-demo-hp-rahul', name: 'Rahul Menon', phone: '9000000103', pg: HARBOUR_PG_ID, room: '203', bed: 'Bed 3', rent: 8000, optOut: false, vibe: { sleep: 2, wake: 2, tidiness: 2, noise: 2, guests: 1, kitchen: 1, schedule: 1, cooling: 0 } },
+  { id: 'pg-demo-hp-vikram', name: 'Vikram Rao', phone: '9000000104', pg: HARBOUR_PG_ID, room: '203', bed: 'Bed 4', rent: 8000, optOut: false, vibe: { sleep: 0, wake: 0, tidiness: 0, noise: 0, guests: 0, kitchen: 0, schedule: 0, cooling: 1 } },
+  { id: 'pg-demo-hp-sanjay', name: 'Sanjay P', phone: '9000000105', pg: HARBOUR_PG_ID, room: '201', bed: 'Bed 1', rent: 8800, optOut: false, vibe: { sleep: 1, wake: 1, tidiness: 1, noise: 1, guests: 1, kitchen: 0, schedule: 0, cooling: 1 } },
+  { id: 'pg-demo-hp-imran', name: 'Imran Ali', phone: '9000000106', pg: HARBOUR_PG_ID, room: '202', bed: 'Bed 1', rent: 7600, optOut: true, vibe: { sleep: 1, wake: 1, tidiness: 1, noise: 0, guests: 0, kitchen: 0, schedule: 1, cooling: 1 } },
+  { id: 'pg-demo-ns-priya', name: 'Priya Nair', phone: '9000000107', pg: NORTHSTAR_PG_ID, room: '402', bed: 'Bed 1', rent: 8200, optOut: false, vibe: { sleep: 0, wake: 0, tidiness: 0, noise: 0, guests: 0, kitchen: 2, schedule: 0, cooling: 1 } },
+  { id: 'pg-demo-ns-dev', name: 'Dev Shah', phone: '9000000108', pg: NORTHSTAR_PG_ID, room: '401', bed: 'Bed 2', rent: 9200, optOut: false, vibe: { sleep: 2, wake: 2, tidiness: 2, noise: 2, guests: 2, kitchen: 1, schedule: 2, cooling: 0 } }
+] as const;
+
+const bedKey = (propertyId: string, roomNumber: string, label: string) => `${propertyId}:${roomNumber}:${label}`;
+const OCCUPIED_DEMO_BEDS = new Set<string>([
+  bedKey(demoProperties[0]!.id, '101', 'Bed 1'),
+  ...LIVELY_RESIDENTS.map((person) => bedKey(person.pg, person.room, person.bed))
+]);
+const demoBedStatus = (propertyId: string, roomNumber: string, label: string) =>
+  OCCUPIED_DEMO_BEDS.has(bedKey(propertyId, roomNumber, label)) ? 'OCCUPIED' : 'AVAILABLE';
+
 async function main() {
   // Optional demo owner for the demo PGs (DEMO_OWNER_PHONE + DEMO_OWNER_PASSWORD).
   // There is no platform super admin: every PG belongs to its owner's workspace.
@@ -131,11 +154,11 @@ async function main() {
       });
 
       for (const label of ['Bed 1', 'Bed 2']) {
-        const isOccupiedDemoBed = item.id === demoProperties[0]?.id && roomData.number === '101' && label === 'Bed 1';
+        const status = demoBedStatus(item.id, roomData.number, label);
         await prisma.pGBed.upsert({
           where: { roomId_label: { roomId: room.id, label } },
-          update: { status: isOccupiedDemoBed ? 'OCCUPIED' : 'AVAILABLE' },
-          create: { roomId: room.id, label, status: isOccupiedDemoBed ? 'OCCUPIED' : 'AVAILABLE' }
+          update: { status },
+          create: { roomId: room.id, label, status }
         });
       }
     }
@@ -250,8 +273,8 @@ const isoDay = (offset: number) => new Date(Date.now() + offset * DAY_MS).toISOS
  * append-only activity log.
  */
 async function seedLivelyDemo(ownerId: string | null) {
-  const harbour = 'pg-demo-thoraipakkam-men';
-  const northstar = 'pg-demo-anna-nagar';
+  const harbour = HARBOUR_PG_ID;
+  const northstar = NORTHSTAR_PG_ID;
   await prisma.pGProperty.update({
     where: { id: harbour },
     data: { serviceSettings: { mealOrders: { enabled: true, prices: { BREAKFAST: 50, LUNCH: 90, DINNER: 80 } }, housekeeping: { enabled: true, price: 150 }, vibeCheck: true, kycAi: true } }
@@ -262,27 +285,16 @@ async function seedLivelyDemo(ownerId: string | null) {
     create: { propertyId: harbour, roomNumber: '203', floor: 2, roomType: 'SHARED', monthlyRent: 8000, foodIncluded: true, foodCharge: 1500 }
   });
   for (const label of ['Bed 1', 'Bed 2', 'Bed 3', 'Bed 4']) {
-    await prisma.pGBed.upsert({ where: { roomId_label: { roomId: room203.id, label } }, update: {}, create: { roomId: room203.id, label, status: 'AVAILABLE' } });
+    const status = demoBedStatus(harbour, '203', label);
+    await prisma.pGBed.upsert({ where: { roomId_label: { roomId: room203.id, label } }, update: { status }, create: { roomId: room203.id, label, status } });
   }
   const bedIn = async (propertyId: string, roomNumber: string, label: string) => {
     const room = await prisma.pGRoom.findUnique({ where: { propertyId_roomNumber: { propertyId, roomNumber } } });
     return room ? prisma.pGBed.findUnique({ where: { roomId_label: { roomId: room.id, label } } }) : null;
   };
-  // Habits: sleep, wake, tidiness, noise, guests, kitchen, schedule, cooling (0-2 each).
-  const people = [
-    { id: 'pg-demo-hp-arjun', name: 'Arjun Kumar', phone: '9000000101', pg: harbour, room: '203', bed: 'Bed 1', rent: 8000, optOut: false, vibe: { sleep: 0, wake: 0, tidiness: 1, noise: 0, guests: 0, kitchen: 0, schedule: 0, cooling: 1 } },
-    { id: 'pg-demo-hp-karthik', name: 'Karthik S', phone: '9000000102', pg: harbour, room: '203', bed: 'Bed 2', rent: 8000, optOut: false, vibe: { sleep: 2, wake: 2, tidiness: 1, noise: 1, guests: 0, kitchen: 0, schedule: 2, cooling: 1 } },
-    { id: 'pg-demo-hp-rahul', name: 'Rahul Menon', phone: '9000000103', pg: harbour, room: '203', bed: 'Bed 3', rent: 8000, optOut: false, vibe: { sleep: 2, wake: 2, tidiness: 2, noise: 2, guests: 1, kitchen: 1, schedule: 1, cooling: 0 } },
-    { id: 'pg-demo-hp-vikram', name: 'Vikram Rao', phone: '9000000104', pg: harbour, room: '203', bed: 'Bed 4', rent: 8000, optOut: false, vibe: { sleep: 0, wake: 0, tidiness: 0, noise: 0, guests: 0, kitchen: 0, schedule: 0, cooling: 1 } },
-    { id: 'pg-demo-hp-sanjay', name: 'Sanjay P', phone: '9000000105', pg: harbour, room: '201', bed: 'Bed 1', rent: 8800, optOut: false, vibe: { sleep: 1, wake: 1, tidiness: 1, noise: 1, guests: 1, kitchen: 0, schedule: 0, cooling: 1 } },
-    { id: 'pg-demo-hp-imran', name: 'Imran Ali', phone: '9000000106', pg: harbour, room: '202', bed: 'Bed 1', rent: 7600, optOut: true, vibe: { sleep: 1, wake: 1, tidiness: 1, noise: 0, guests: 0, kitchen: 0, schedule: 1, cooling: 1 } },
-    { id: 'pg-demo-ns-priya', name: 'Priya Nair', phone: '9000000107', pg: northstar, room: '402', bed: 'Bed 1', rent: 8200, optOut: false, vibe: { sleep: 0, wake: 0, tidiness: 0, noise: 0, guests: 0, kitchen: 2, schedule: 0, cooling: 1 } },
-    { id: 'pg-demo-ns-dev', name: 'Dev Shah', phone: '9000000108', pg: northstar, room: '401', bed: 'Bed 2', rent: 9200, optOut: false, vibe: { sleep: 2, wake: 2, tidiness: 2, noise: 2, guests: 2, kitchen: 1, schedule: 2, cooling: 0 } }
-  ];
-  for (const person of people) {
+  for (const person of LIVELY_RESIDENTS) {
     const bed = await bedIn(person.pg, person.room, person.bed);
     if (!bed) continue;
-    await prisma.pGBed.update({ where: { id: bed.id }, data: { status: 'OCCUPIED' } });
     const tenant = await prisma.pGTenant.upsert({
       where: { id: person.id },
       update: { bedId: bed.id, status: 'ACTIVE', vibeAnswers: person.vibe, foodOptOut: person.optOut, depositAmount: person.rent, depositReceived: person.rent },
