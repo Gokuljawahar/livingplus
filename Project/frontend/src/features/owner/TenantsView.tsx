@@ -120,7 +120,7 @@ export default function TenantsView({ tenants, canManageStaff, onStayAction, onC
             <button
               key={status}
               onClick={() => setTenantFilter(status)}
-              className={`rounded-[var(--radius-chip)] px-3 py-1.5 text-xs font-bold transition-all ${
+              className={`rounded-[var(--radius-field)] px-3 py-1.5 text-xs font-bold transition-all ${
                 tenantFilter === status ? 'bg-canvas text-navy-900 shadow-xs' : 'text-muted hover:text-ink'
               }`}
             >
@@ -217,7 +217,7 @@ export default function TenantsView({ tenants, canManageStaff, onStayAction, onC
                 />
               )}
               {tenant.status === 'CHECKED_OUT' && (tenant.depositDeductions || tenant.checkoutNote) ? (
-                <p className="rounded-[var(--radius-chip)] border border-hairline bg-surface p-3 text-xs text-muted">
+                <p className="rounded-[var(--radius-field)] border border-hairline bg-surface p-3 text-xs text-muted">
                   Check-out: deductions ₹{(tenant.depositDeductions || 0).toLocaleString('en-IN')}
                   {tenant.checkoutNote ? ` · ${tenant.checkoutNote}` : ''} · Refund {tenant.depositRefundStatus?.toLowerCase().replace('_', ' ')}
                   {(tenant.depositRefundAmount ?? 0) > 0 ? ` ₹${(tenant.depositRefundAmount || 0).toLocaleString('en-IN')}` : ''}

@@ -309,5 +309,5 @@ export const showFirstError = (errors: FieldErrors<FieldValues>) => {
 };
 
 export const ownerInputClass =
-  'w-full rounded-[var(--radius-input)] border border-hairline bg-surface/60 px-3 py-2 text-xs text-ink outline-none focus:border-navy-900 focus:bg-canvas';
+  'w-full rounded-[var(--radius-field)] border border-hairline bg-surface/60 px-3 py-2 text-xs text-ink outline-none focus:border-navy-900 focus:bg-canvas';
 export const ownerLabelClass = 'mb-1 block text-xs font-semibold text-muted';

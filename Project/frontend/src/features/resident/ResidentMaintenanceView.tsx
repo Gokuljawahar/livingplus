@@ -80,7 +80,7 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
                     <p className="mt-1 text-xs font-medium text-muted">
                       {ticket.category.charAt(0) + ticket.category.slice(1).toLowerCase()} · Reported {shortDate(ticket.createdAt)}
                     </p>
-                    <p className="mt-2 whitespace-pre-wrap rounded-[var(--radius-chip)] border border-hairline bg-surface p-2.5 text-xs leading-relaxed text-ink">
+                    <p className="mt-2 whitespace-pre-wrap rounded-[var(--radius-field)] border border-hairline bg-surface p-2.5 text-xs leading-relaxed text-ink">
                       {ticket.description}
                     </p>
                   </article>
@@ -94,7 +94,7 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
               <form onSubmit={submitTicket} className="mt-5 space-y-3.5 rounded-[var(--radius-card)] border border-hairline bg-surface p-5">
                 <h4 className="text-xs font-bold text-ink">New issue details</h4>
                 <label className="block text-xs font-semibold text-ink">Issue category
-                  <select {...ticketFormApi.register('category')} className="mt-1 block w-full rounded-[var(--radius-input)] border border-hairline bg-canvas px-3 py-2 text-xs font-medium text-ink outline-none focus:border-navy-900">
+                  <select {...ticketFormApi.register('category')} className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline bg-canvas px-3 py-2 text-xs font-medium text-ink outline-none focus:border-navy-900">
                     <option value="PLUMBING">Plumbing (Tap, Pipe, Flush, Leakage)</option>
                     <option value="ELECTRICAL">Electrical (Fan, Light, Switch, Geyser)</option>
                     <option value="APPLIANCE">Appliance (AC, Washing Machine, Fridge)</option>
@@ -105,13 +105,13 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
                   </select>
                 </label>
                 <label className="block text-sm font-medium text-navy-900">What needs fixing?
-                  <input required maxLength={120} {...ticketFormApi.register('title')} placeholder="e.g. Geyser not heating in 2nd floor bathroom" className="mt-1 block w-full rounded-[var(--radius-input)] border border-hairline bg-canvas px-3 py-2 text-xs font-medium text-ink outline-none focus:border-navy-900" />
+                  <input required maxLength={120} {...ticketFormApi.register('title')} placeholder="e.g. Geyser not heating in 2nd floor bathroom" className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline bg-canvas px-3 py-2 text-xs font-medium text-ink outline-none focus:border-navy-900" />
                 </label>
                 <label className="block text-sm font-medium text-navy-900">Where is it, and what's wrong?
-                  <textarea required maxLength={2000} rows={3} {...ticketFormApi.register('description')} placeholder="Please describe the problem and exact location so staff can fix it quickly…" className="mt-1 block w-full resize-y rounded-[var(--radius-input)] border border-hairline bg-canvas px-3 py-2 text-xs font-medium text-ink outline-none focus:border-navy-900" />
+                  <textarea required maxLength={2000} rows={3} {...ticketFormApi.register('description')} placeholder="Please describe the problem and exact location so staff can fix it quickly…" className="mt-1 block w-full resize-y rounded-[var(--radius-field)] border border-hairline bg-canvas px-3 py-2 text-xs font-medium text-ink outline-none focus:border-navy-900" />
                 </label>
                 {Object.values(ticketFormApi.formState.errors)[0]?.message && (
-                  <p role="alert" className="text-xs font-medium text-danger">{Object.values(ticketFormApi.formState.errors)[0]?.message}</p>
+                  <p role="alert" className="text-xs font-medium text-negative">{Object.values(ticketFormApi.formState.errors)[0]?.message}</p>
                 )}
                 <div className="flex flex-wrap gap-2 pt-1">
                   <Button type="submit" size="sm" disabled={submittingTicket}>

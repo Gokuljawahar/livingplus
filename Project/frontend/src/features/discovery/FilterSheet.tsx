@@ -146,7 +146,7 @@ export default function FilterSheet({
                   value={minRent}
                   onChange={(event) => setMinRent(event.target.value)}
                   placeholder="Min"
-                  className="w-full rounded-[var(--radius-input)] border border-hairline bg-surface py-1.5 pl-6 pr-2 text-xs font-medium outline-none transition-all focus:border-navy-900 focus:bg-canvas"
+                  className="w-full rounded-[var(--radius-field)] border border-hairline bg-surface py-1.5 pl-6 pr-2 text-xs font-medium outline-none transition-all focus:border-navy-900 focus:bg-canvas"
                 />
               </div>
               <span className="text-xs font-bold text-muted">–</span>
@@ -159,7 +159,7 @@ export default function FilterSheet({
                   value={maxRent}
                   onChange={(event) => setMaxRent(event.target.value)}
                   placeholder="Max"
-                  className="w-full rounded-[var(--radius-input)] border border-hairline bg-surface py-1.5 pl-6 pr-2 text-xs font-medium outline-none transition-all focus:border-navy-900 focus:bg-canvas"
+                  className="w-full rounded-[var(--radius-field)] border border-hairline bg-surface py-1.5 pl-6 pr-2 text-xs font-medium outline-none transition-all focus:border-navy-900 focus:bg-canvas"
                 />
               </div>
             </div>
@@ -223,7 +223,7 @@ export default function FilterSheet({
                 {amenityCounts.map(([amenity, count]) => {
                   const isChecked = amenities.includes(amenity);
                   return (
-                    <label key={amenity} className="flex cursor-pointer items-center gap-2 rounded-[var(--radius-chip)] px-2.5 py-1.5 text-xs text-ink transition-colors hover:bg-surface">
+                    <label key={amenity} className="flex cursor-pointer items-center gap-2 rounded-[var(--radius-field)] px-2.5 py-1.5 text-xs text-ink transition-colors hover:bg-surface">
                       <input
                         type="checkbox"
                         checked={isChecked}

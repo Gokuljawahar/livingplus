@@ -71,7 +71,7 @@ export function PaymentsView({ paymentClaims, onChanged }: { paymentClaims: Paym
               <p className="mt-0.5 text-xs text-muted">
                 UPI reference: {claim.reference} · Submitted {new Date(claim.createdAt).toLocaleString()}
               </p>
-              {claim.responseNote && <p className="mt-1 text-xs font-semibold text-danger">{claim.responseNote}</p>}
+              {claim.responseNote && <p className="mt-1 text-xs font-semibold text-negative">{claim.responseNote}</p>}
             </div>
             {claim.status === 'PENDING' && rejectingClaimId !== claim.id && (
               <div className="flex gap-2">
@@ -287,7 +287,7 @@ export function ExpensesView({
               <div>
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-bold text-ink">₹{entry.amount.toLocaleString('en-IN')}</p>
-                  <span className="rounded-[var(--radius-chip)] bg-surface px-2 py-0.5 text-xs font-semibold text-muted">{entry.category}</span>
+                  <span className="rounded-[var(--radius-field)] bg-surface px-2 py-0.5 text-xs font-semibold text-muted">{entry.category}</span>
                 </div>
                 <p className="mt-0.5 text-xs text-muted">
                   {entry.property.name} · {shortDate(entry.spentOn)}
@@ -391,7 +391,7 @@ export function UtilitiesView({
                 <div>
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-bold text-ink">₹{bill.totalAmount.toLocaleString('en-IN')}</p>
-                    <span className="rounded-[var(--radius-chip)] bg-surface px-2 py-0.5 text-xs font-semibold text-muted">{bill.period}</span>
+                    <span className="rounded-[var(--radius-field)] bg-surface px-2 py-0.5 text-xs font-semibold text-muted">{bill.period}</span>
                   </div>
                   <p className="mt-0.5 text-xs text-muted">
                     {bill.property.name} · <span className="font-bold text-amber-600">{bill.status}</span>
@@ -403,7 +403,7 @@ export function UtilitiesView({
               </div>
               <div className="flex flex-wrap gap-1.5 border-t border-hairline pt-2">
                 {JSON.parse(bill.splitJson || '[]').map((row: { tenantName: string; roomNumber: string; share: number }) => (
-                  <span key={row.tenantName} className="rounded-[var(--radius-chip)] border border-hairline bg-surface px-2.5 py-1 text-xs font-medium text-muted">
+                  <span key={row.tenantName} className="rounded-[var(--radius-field)] border border-hairline bg-surface px-2.5 py-1 text-xs font-medium text-muted">
                     {row.tenantName} · Room {row.roomNumber} · ₹{row.share.toLocaleString('en-IN')}
                   </span>
                 ))}

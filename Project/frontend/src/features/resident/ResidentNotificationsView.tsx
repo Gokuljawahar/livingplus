@@ -34,7 +34,7 @@ export default function ResidentNotificationsView({ notifications, onMarkRead }:
                   onClick={() => void onMarkRead(notification.id)}
                   aria-label="Mark notification as read"
                   title="Mark as read"
-                  className="shrink-0 rounded-[var(--radius-chip)] p-2 text-muted transition-colors hover:bg-surface hover:text-success"
+                  className="shrink-0 rounded-[var(--radius-field)] p-2 text-muted transition-colors hover:bg-surface hover:text-positive"
                 >
                   <Check className="h-4 w-4" />
                 </button>

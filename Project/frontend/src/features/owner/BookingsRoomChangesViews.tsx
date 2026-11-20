@@ -74,7 +74,7 @@ export function BookingsView({ bookings, properties, onCheckIn, onChanged }: Boo
                 </p>
               )}
               {booking.status === 'REJECTED' && booking.rejectionReason && (
-                <p className="mt-1 rounded-[var(--radius-chip)] border border-danger/30 bg-danger/10 px-3 py-1.5 text-xs font-semibold text-danger">
+                <p className="mt-1 rounded-[var(--radius-field)] border border-negative/30 bg-negative-bg px-3 py-1.5 text-xs font-semibold text-negative">
                   Declined: {booking.rejectionReason}
                 </p>
               )}
@@ -106,7 +106,7 @@ export function BookingsView({ bookings, properties, onCheckIn, onChanged }: Boo
                   aria-label="Reassign bed"
                   value={reassignBed[booking.id] || ''}
                   onChange={(event) => setReassignBed({ ...reassignBed, [booking.id]: event.target.value })}
-                  className="rounded-[var(--radius-input)] border border-hairline bg-surface px-3 py-2 text-xs font-medium text-ink outline-none focus:border-navy-900"
+                  className="rounded-[var(--radius-field)] border border-hairline bg-surface px-3 py-2 text-xs font-medium text-ink outline-none focus:border-navy-900"
                 >
                   <option value="">Keep {booking.bed ? `Room ${booking.bed.room.roomNumber}, ${booking.bed.label}` : 'bed'}</option>
                   {properties

@@ -223,13 +223,13 @@ export default function PropertiesView({ properties, selectedPropertyId, setSele
                         <div key={room.id} className="space-y-2 rounded-[var(--radius-card)] border border-hairline bg-surface p-3.5">
                           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                             <span className="font-bold text-ink">Room {room.roomNumber} · {room.roomType}</span>
-                            <span className="rounded-[var(--radius-chip)] border border-hairline bg-canvas px-2 py-0.5 font-semibold text-muted">
+                            <span className="rounded-[var(--radius-field)] border border-hairline bg-canvas px-2 py-0.5 font-semibold text-muted">
                               ₹{room.monthlyRent.toLocaleString('en-IN')} / mo
                             </span>
                           </div>
                           <div className="flex flex-wrap gap-1.5">
                             {room.beds.map((bed) => (
-                              <span key={bed.id} className="inline-flex items-center gap-1.5 rounded-[var(--radius-chip)] border border-hairline bg-canvas px-2.5 py-1 text-xs font-medium text-ink">
+                              <span key={bed.id} className="inline-flex items-center gap-1.5 rounded-[var(--radius-field)] border border-hairline bg-canvas px-2.5 py-1 text-xs font-medium text-ink">
                                 <span className={`h-2 w-2 rounded-full ${bed.status === 'AVAILABLE' ? 'bg-positive' : bed.status === 'OCCUPIED' ? 'bg-info' : bed.status === 'MAINTENANCE' ? 'bg-negative' : 'bg-attention'}`} />
                                 {bed.label} · {bed.status.toLowerCase().replace('_', ' ')}
                                 {canManageStaff && ['AVAILABLE', 'MAINTENANCE'].includes(bed.status) && (
@@ -378,7 +378,7 @@ export default function PropertiesView({ properties, selectedPropertyId, setSele
               {existingPhotoUrls.length > 0 && (
                 <div className="flex gap-2 overflow-x-auto pt-1">
                   {existingPhotoUrls.map((photo) => (
-                    <SecureImage key={photo} srcKey={photo} alt="Property" className="h-16 w-20 shrink-0 rounded-[var(--radius-chip)] border border-hairline object-cover" />
+                    <SecureImage key={photo} srcKey={photo} alt="Property" className="h-16 w-20 shrink-0 rounded-[var(--radius-field)] border border-hairline object-cover" />
                   ))}
                 </div>
               )}

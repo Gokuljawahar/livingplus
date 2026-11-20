@@ -177,7 +177,7 @@ function ResidentPortalView({ site }: { site: PgSite }) {
               <Menu className="h-6 w-6" />
             </button>
             <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-chip)] bg-navy-900 text-amber-500">
+              <div className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-field)] bg-navy-900 text-amber-500">
                 <Building2 className="h-4.5 w-4.5" />
               </div>
               <span className="text-sm font-bold text-ink sm:text-base">{site.name}</span>
@@ -200,7 +200,7 @@ function ResidentPortalView({ site }: { site: PgSite }) {
             </button>
             <button
               onClick={logout}
-              className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] border border-hairline bg-surface px-3 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-danger/30 hover:text-danger"
+              className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] border border-hairline bg-surface px-3 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-negative/30 hover:text-negative"
             >
               <LogOut className="h-4 w-4" />
               <span className="hidden sm:inline">Sign out</span>

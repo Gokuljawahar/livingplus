@@ -203,7 +203,7 @@ export default function PGDiscovery() {
 
   return (
     <main className="flex min-h-screen flex-col bg-surface text-ink">
-      <a href="#results" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-2 focus:z-50 focus:rounded-[var(--radius-input)] focus:bg-canvas focus:px-3 focus:py-2">
+      <a href="#results" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-2 focus:z-50 focus:rounded-[var(--radius-field)] focus:bg-canvas focus:px-3 focus:py-2">
         Skip to results
       </a>
       <header className="sticky top-0 z-40 bg-navy-900 text-white">
@@ -389,7 +389,7 @@ export default function PGDiscovery() {
               <select
                 value={sort}
                 onChange={(event) => setSort(event.target.value)}
-                className="rounded-[var(--radius-input)] bg-transparent py-1 font-medium text-navy-900 outline-none"
+                className="rounded-[var(--radius-field)] bg-transparent py-1 font-medium text-navy-900 outline-none"
               >
                 {SORTS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>

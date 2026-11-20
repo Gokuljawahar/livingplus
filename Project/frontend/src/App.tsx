@@ -123,31 +123,31 @@ function App() {
   return (
     <AuthProvider>
       <Toaster
-          position="top-center"
-          toastOptions={{
-            className: 'text-sm font-medium',
-            duration: 4000,
-            style: {
-              background: 'var(--color-canvas)',
-              color: 'var(--color-ink)',
-              borderRadius: 'var(--radius-card)',
-              border: '1px solid var(--color-hairline)',
-              boxShadow: 'var(--shadow-float)',
+        position="top-center"
+        toastOptions={{
+          className: 'text-sm font-medium',
+          duration: 4000,
+          style: {
+            background: 'var(--color-canvas)',
+            color: 'var(--color-ink)',
+            borderRadius: 'var(--radius-card)',
+            border: '1px solid var(--color-hairline)',
+            boxShadow: 'var(--shadow-float)',
+          },
+          success: {
+            iconTheme: {
+              primary: 'var(--color-navy-900)',
+              secondary: 'var(--color-canvas)',
             },
-            success: {
-              iconTheme: {
-                primary: 'var(--color-navy-900)',
-                secondary: 'var(--color-canvas)',
-              },
-            },
-          }}
-          containerStyle={{
-            top: isMobile ? 12 : 20,
-            left: 20,
-            right: 20,
-            bottom: 20,
-            zIndex: 999999,
-          }}
+          },
+        }}
+        containerStyle={{
+          top: isMobile ? 12 : 20,
+          left: 20,
+          right: 20,
+          bottom: 20,
+          zIndex: 999999,
+        }}
       />
       <BrowserRouter>
         <AppRoutes />

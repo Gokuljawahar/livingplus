@@ -144,27 +144,27 @@ export default function ResidentStaysView({ stays, tickets, paymentClaims, onNav
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {stay.bed && (
-                    <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-chip)] bg-surface px-3 py-1 text-xs font-semibold text-ink">
+                    <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-field)] bg-surface px-3 py-1 text-xs font-semibold text-ink">
                       <Building2 className="h-3.5 w-3.5 text-navy-900" />
                       Room {stay.bed.room.roomNumber} · {stay.bed.label} ({stay.bed.room.roomType})
                     </span>
                   )}
-                  <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-chip)] border border-hairline bg-surface px-3 py-1 text-xs font-bold text-navy-900">
+                  <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-field)] border border-hairline bg-surface px-3 py-1 text-xs font-bold text-navy-900">
                     ₹{stay.monthlyRent.toLocaleString('en-IN')} / month
                   </span>
-                  <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-chip)] border border-hairline bg-surface px-3 py-1 text-xs font-medium text-muted">
+                  <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-field)] border border-hairline bg-surface px-3 py-1 text-xs font-medium text-muted">
                     {stay.depositAmount > 0 ? `Deposit ₹${(stay.depositReceived || 0).toLocaleString('en-IN')} paid of ₹${stay.depositAmount.toLocaleString('en-IN')}` : 'No deposit'}
                   </span>
                 </div>
 
                 {isNotice && stay.noticeDate && (
-                  <p className="mt-2 inline-block rounded-[var(--radius-chip)] border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-600">
+                  <p className="mt-2 inline-block rounded-[var(--radius-field)] border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-600">
                     Vacating notice active since {shortDate(stay.noticeDate)}
                   </p>
                 )}
 
                 {stay.depositRefundStatus === 'PENDING' && (
-                  <p className="mt-2 inline-block rounded-[var(--radius-chip)] border border-success/30 bg-success/10 px-2.5 py-1 text-xs font-bold text-success">
+                  <p className="mt-2 inline-block rounded-[var(--radius-field)] border border-positive/30 bg-positive-bg px-2.5 py-1 text-xs font-bold text-positive">
                     Deposit refund due: ₹{(stay.depositRefundAmount || 0).toLocaleString('en-IN')}
                   </p>
                 )}
@@ -221,7 +221,7 @@ export default function ResidentStaysView({ stays, tickets, paymentClaims, onNav
                             Pay with UPI
                           </a>
                           {paymentClaims.some((claim) => claim.rentEntryId === entry.id && claim.status === 'PENDING') ? (
-                            <span className="rounded-[var(--radius-chip)] border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-bold text-amber-600">
+                            <span className="rounded-[var(--radius-field)] border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-bold text-amber-600">
                               Verification pending
                             </span>
                           ) : (
@@ -243,7 +243,7 @@ export default function ResidentStaysView({ stays, tickets, paymentClaims, onNav
                               max={balance}
                               step="0.01"
                               {...paymentFormApi.register('amount')}
-                              className="mt-1 block w-full rounded-[var(--radius-input)] border border-hairline bg-canvas px-3 py-1.5 text-xs font-medium outline-none focus:border-navy-900"
+                              className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline bg-canvas px-3 py-1.5 text-xs font-medium outline-none focus:border-navy-900"
                             />
                           </label>
                           <label className="text-xs font-semibold text-ink">
@@ -254,11 +254,11 @@ export default function ResidentStaysView({ stays, tickets, paymentClaims, onNav
                               maxLength={80}
                               {...paymentFormApi.register('reference')}
                               placeholder="e.g. 331234567890"
-                              className="mt-1 block w-full rounded-[var(--radius-input)] border border-hairline bg-canvas px-3 py-1.5 text-xs font-medium outline-none focus:border-navy-900"
+                              className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline bg-canvas px-3 py-1.5 text-xs font-medium outline-none focus:border-navy-900"
                             />
                           </label>
                           {Object.values(paymentFormApi.formState.errors)[0]?.message && (
-                            <p role="alert" className="text-xs font-medium text-danger sm:col-span-3">
+                            <p role="alert" className="text-xs font-medium text-negative sm:col-span-3">
                               {Object.values(paymentFormApi.formState.errors)[0]?.message}
                             </p>
                           )}
@@ -291,7 +291,7 @@ export default function ResidentStaysView({ stays, tickets, paymentClaims, onNav
                           <p className="mt-0.5 text-muted">
                             Ref {claim.reference} · Submitted {shortDate(claim.createdAt)}
                           </p>
-                          {claim.responseNote && <p className="mt-1 font-medium text-danger">{claim.responseNote}</p>}
+                          {claim.responseNote && <p className="mt-1 font-medium text-negative">{claim.responseNote}</p>}
                         </div>
                         <StatusPill status={claim.status} />
                       </article>

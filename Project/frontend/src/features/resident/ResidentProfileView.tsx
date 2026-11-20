@@ -98,7 +98,7 @@ export default function ResidentProfileView({ stays, onChanged }: Props) {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="flex items-center gap-2 font-bold text-ink">
-                  <ShieldCheck className="h-4 w-4 text-success" /> Resident verification & identity
+                  <ShieldCheck className="h-4 w-4 text-positive" /> Resident verification & identity
                 </h3>
                 <p className="mt-0.5 text-xs text-muted">Government KYC documents remain confidential and protected under privacy policies.</p>
               </div>
@@ -124,7 +124,7 @@ export default function ResidentProfileView({ stays, onChanged }: Props) {
               </div>
               <div>
                 <span className="block font-medium text-muted">KYC verification status</span>
-                <span className={`inline-flex items-center gap-1 font-bold ${stay.kycVerified ? 'text-success' : stay.kycDocumentUrl ? 'text-amber-600' : 'text-muted'}`}>
+                <span className={`inline-flex items-center gap-1 font-bold ${stay.kycVerified ? 'text-positive' : stay.kycDocumentUrl ? 'text-amber-600' : 'text-muted'}`}>
                   {stay.kycVerified ? 'Verified by your PG owner' : stay.kycDocumentUrl ? 'Waiting for owner review' : 'Not uploaded yet'}
                 </span>
                 {!stay.kycVerified && <KycAiSummary check={stay.kycAiCheck} audience="resident" />}
@@ -134,31 +134,31 @@ export default function ResidentProfileView({ stays, onChanged }: Props) {
             {profileEditingFor === stay.id && (
               <form onSubmit={saveProfile(stay.id)} className="mt-5 grid gap-3.5 border-t border-hairline pt-5 sm:grid-cols-2">
                 <label className="text-xs font-bold text-muted">Permanent address
-                  <input maxLength={200} {...profileFormApi.register('permanentAddress')} className="mt-1 block w-full rounded-[var(--radius-input)] border border-hairline px-3 py-2 text-sm font-medium text-ink outline-none focus:border-navy-900" />
+                  <input maxLength={200} {...profileFormApi.register('permanentAddress')} className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline px-3 py-2 text-sm font-medium text-ink outline-none focus:border-navy-900" />
                 </label>
                 <label className="text-xs font-bold text-muted">College / employer
-                  <input maxLength={200} {...profileFormApi.register('institutionOrEmployer')} className="mt-1 block w-full rounded-[var(--radius-input)] border border-hairline px-3 py-2 text-sm font-medium text-ink outline-none focus:border-navy-900" />
+                  <input maxLength={200} {...profileFormApi.register('institutionOrEmployer')} className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline px-3 py-2 text-sm font-medium text-ink outline-none focus:border-navy-900" />
                 </label>
                 <label className="text-xs font-bold text-muted">Emergency contact name
-                  <input maxLength={200} {...profileFormApi.register('emergencyName')} className="mt-1 block w-full rounded-[var(--radius-input)] border border-hairline px-3 py-2 text-sm font-medium text-ink outline-none focus:border-navy-900" />
+                  <input maxLength={200} {...profileFormApi.register('emergencyName')} className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline px-3 py-2 text-sm font-medium text-ink outline-none focus:border-navy-900" />
                 </label>
                 <label className="text-xs font-bold text-muted">Emergency contact phone
-                  <input type="tel" maxLength={20} {...profileFormApi.register('emergencyPhone')} className="mt-1 block w-full rounded-[var(--radius-input)] border border-hairline px-3 py-2 text-sm font-medium text-ink outline-none focus:border-navy-900" />
+                  <input type="tel" maxLength={20} {...profileFormApi.register('emergencyPhone')} className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline px-3 py-2 text-sm font-medium text-ink outline-none focus:border-navy-900" />
                 </label>
                 <label className="text-xs font-bold text-muted">Blood group
-                  <select {...profileFormApi.register('bloodGroup')} className="mt-1 block w-full rounded-[var(--radius-input)] border border-hairline bg-canvas px-3 py-2 text-sm font-medium text-ink outline-none focus:border-navy-900">
+                  <select {...profileFormApi.register('bloodGroup')} className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline bg-canvas px-3 py-2 text-sm font-medium text-ink outline-none focus:border-navy-900">
                     <option value="">Not provided</option>
                     {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((group) => <option key={group} value={group}>{group}</option>)}
                   </select>
                 </label>
                 <label className="text-xs font-bold text-muted">KYC document type
-                  <select {...profileFormApi.register('kycType')} className="mt-1 block w-full rounded-[var(--radius-input)] border border-hairline bg-canvas px-3 py-2 text-sm font-medium text-ink outline-none focus:border-navy-900">
+                  <select {...profileFormApi.register('kycType')} className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline bg-canvas px-3 py-2 text-sm font-medium text-ink outline-none focus:border-navy-900">
                     <option value="">Select document</option>
                     {[['AADHAAR', 'Aadhaar Card'], ['PAN', 'PAN Card'], ['PASSPORT', 'Passport'], ['DRIVING_LICENSE', 'Driving License'], ['STUDENT_ID', 'Student College ID'], ['WORK_ID', 'Work Employee ID']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 </label>
                 <label className="text-xs font-bold text-muted sm:col-span-2">Replace KYC document
-                  <input type="file" accept="image/*,application/pdf" onChange={(event) => setProfileFile(event.target.files?.[0] || null)} className="mt-1 block w-full rounded-[var(--radius-input)] border border-hairline px-3 py-2 text-xs text-ink file:mr-3 file:rounded-[var(--radius-chip)] file:border-0 file:bg-surface file:px-3 file:py-1 file:font-semibold" />
+                  <input type="file" accept="image/*,application/pdf" onChange={(event) => setProfileFile(event.target.files?.[0] || null)} className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline px-3 py-2 text-xs text-ink file:mr-3 file:rounded-[var(--radius-field)] file:border-0 file:bg-surface file:px-3 file:py-1 file:font-semibold" />
                 </label>
                 <label className="flex items-center gap-2 text-xs font-semibold text-ink sm:col-span-2">
                   <input type="checkbox" {...profileFormApi.register('foodOptOut')} className="h-4 w-4 rounded accent-navy-900" />

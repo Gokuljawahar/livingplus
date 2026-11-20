@@ -88,7 +88,7 @@ export default function ResidentSignIn({ site, onAuthenticated }: Props) {
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               placeholder="Phone number"
-              className="w-full rounded-[var(--radius-input)] border border-hairline px-3 py-2.5 text-sm text-ink"
+              className="w-full rounded-[var(--radius-field)] border border-hairline px-3 py-2.5 text-sm text-ink"
             />
             <Button type="submit" disabled={loading || cooldown > 0} className="w-full">
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -111,7 +111,7 @@ export default function ResidentSignIn({ site, onAuthenticated }: Props) {
             onChange={(e) => setCode(e.target.value)}
             placeholder="6-digit code"
             inputMode="numeric"
-            className="w-full rounded-[var(--radius-input)] border border-hairline px-3 py-2.5 text-sm text-ink"
+            className="w-full rounded-[var(--radius-field)] border border-hairline px-3 py-2.5 text-sm text-ink"
           />
           <Button type="submit" disabled={loading} className="w-full">
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}

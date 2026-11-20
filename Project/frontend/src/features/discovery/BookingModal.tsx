@@ -29,7 +29,7 @@ interface Props {
   onSubmitted: () => Promise<void>;
 }
 
-const fieldClass = 'mt-1.5 block w-full rounded-[var(--radius-input)] border border-field-border bg-canvas px-3 py-2.5 text-ink outline-none focus:border-navy-900';
+const fieldClass = 'mt-1.5 block w-full rounded-[var(--radius-field)] border border-field-border bg-canvas px-3 py-2.5 text-ink outline-none focus:border-navy-900';
 const labelClass = 'block text-sm font-medium text-navy-900';
 
 export default function BookingModal({ property, matchesRoom, guest, defaultName, onGuestChange, onClose, onSubmitted }: Props) {
