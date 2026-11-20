@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, Building2, Loader2, MapPin, Search } from 'lucide-react';
 import api from '../api/axios';
+import { queryKeys } from '../api/query-keys';
 import { ROUTES } from '../utils/app-areas';
 import { RESIDENT_SITE_KEY, RESIDENT_TOKEN_KEY } from '../utils/session';
 
@@ -22,7 +23,7 @@ export default function ResidentFinder() {
   const [search, setSearch] = useState('');
   const term = search.trim();
   const { data: sites = [], isPending } = useQuery({
-    queryKey: ['pg-sites', term],
+    queryKey: queryKeys.pgSites(term),
     queryFn: async (): Promise<PgSite[]> => (await api.get('/pg/sites', { params: term ? { search: term } : {} })).data,
     placeholderData: (previous) => previous
   });

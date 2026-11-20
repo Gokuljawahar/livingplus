@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Leaf, Loader2 } from 'lucide-react';
 import api from '../api/axios';
+import { queryKeys } from '../api/query-keys';
 import { rupees } from '../utils/money';
 
 type Forecast = {
@@ -20,7 +21,7 @@ export default function KitchenForecast({ properties }: { properties: { id: stri
   const [propertyId, setPropertyId] = useState(properties[0]?.id ?? '');
   const [date, setDate] = useState(tomorrow);
   const forecast = useQuery({
-    queryKey: ['owner', 'kitchen', propertyId, date],
+    queryKey: queryKeys.owner.kitchen(propertyId, date),
     queryFn: async () => (await api.get('/pg/owner/kitchen-forecast', { params: { propertyId, date } })).data as Forecast,
     enabled: Boolean(propertyId),
     staleTime: 5 * 60 * 1000,

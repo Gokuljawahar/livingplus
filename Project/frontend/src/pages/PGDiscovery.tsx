@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
+import { queryKeys } from '../api/query-keys';
 import { useAuth } from '../context/auth';
 import { RESIDENT_TOKEN_KEY } from '../utils/session';
 import { ROUTES } from '../utils/app-areas';
@@ -123,7 +124,7 @@ export default function PGDiscovery() {
   const signedIn = Boolean(user || guest);
   const queryClient = useQueryClient();
   const { data: properties = [], isPending: propertiesPending } = useQuery({
-    queryKey: ['properties'],
+    queryKey: queryKeys.properties(),
     queryFn: async (): Promise<PGProperty[]> => (await api.get('/pg/properties')).data,
     meta: { errorMessage: 'Could not load PG listings' }
   });
@@ -131,7 +132,7 @@ export default function PGDiscovery() {
   // Onboarded residents see their profile strip above search. Only attempted
   // when a resident token actually exists so guests never hit a 401.
   const { data: stays = [] } = useQuery({
-    queryKey: ['tenant', 'stays', user?.id ?? null],
+    queryKey: queryKeys.resident.stays(user?.id ?? null),
     queryFn: async (): Promise<ResidentStay[]> => (await api.get('/pg/tenant/stays')).data || [],
     enabled: Boolean(localStorage.getItem(RESIDENT_TOKEN_KEY))
   });
@@ -215,7 +216,7 @@ export default function PGDiscovery() {
   // (or semantic search being off) leaves plain keyword search in place.
   const searchText = useDebouncedValue(query.trim(), 350);
   const { data: semanticScores = null } = useQuery({
-    queryKey: ['search', searchText],
+    queryKey: queryKeys.search(searchText),
     queryFn: async (): Promise<Map<string, number> | null> => {
       const data = (await api.get('/pg/search', { params: { q: searchText } })).data as { semantic?: boolean; results?: { propertyId: string; score: number }[] };
       return data.semantic ? new Map((data.results || []).map((r) => [r.propertyId, r.score])) : null;
@@ -381,7 +382,7 @@ export default function PGDiscovery() {
       setPhoneToken('');
       updateGuestToken('');
       setGuest(getGuestSession());
-      await queryClient.invalidateQueries({ queryKey: ['properties'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.properties() });
       closeRequest();
       if (getGuestSession()) {
         setRequestsRefresh((key) => key + 1);

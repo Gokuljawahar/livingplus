@@ -7,6 +7,7 @@ import { Bot, Loader2, Mic, PhoneOff, RefreshCw, Send } from 'lucide-react';
 import { useVibeLive } from '../hooks/useVibeLive';
 import { apiErrorMessage } from '../utils/api-error';
 import api from '../api/axios';
+import { queryKeys } from '../api/query-keys';
 import { rupees } from '../utils/money';
 
 type Stats = {
@@ -59,9 +60,9 @@ export default function PgPulse({ onGo }: { onGo: (target: PulseTarget) => void 
     if (!followUp.trim()) return;
     if (voice.sendText(followUp)) setFollowUp('');
   };
-  const pulse = useQuery({ queryKey: ['owner', 'pulse'], queryFn: async () => (await api.get('/pg/owner/pulse')).data as { timeline: Entry[]; stats: Stats | null } });
+  const pulse = useQuery({ queryKey: queryKeys.owner.pulse(), queryFn: async () => (await api.get('/pg/owner/pulse')).data as { timeline: Entry[]; stats: Stats | null } });
   const brief = useQuery({
-    queryKey: ['owner', 'pulse', 'brief'],
+    queryKey: queryKeys.owner.pulseBrief(),
     queryFn: async () => (await api.post('/pg/owner/pulse/brief', {})).data as { brief: Brief },
     staleTime: 10 * 60 * 1000,
     retry: false

@@ -6,6 +6,7 @@ import { ROUTES } from '../utils/app-areas';
 import { shortDate } from '../utils/money';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
+import { queryKeys } from '../api/query-keys';
 import { apiErrorMessage, apiErrorStatus } from '../utils/api-error';
 
 export interface GuestBooking {
@@ -43,7 +44,7 @@ export default function MyRequests({ guestToken, refreshKey = 0, onSessionExpire
     return true;
   };
   const { data: bookings = [], isPending: loading } = useQuery({
-    queryKey: ['bookings', 'mine', guestToken, refreshKey],
+    queryKey: queryKeys.guestBookings(guestToken, refreshKey),
     queryFn: async (): Promise<GuestBooking[]> => {
       try {
         return (await api.get('/pg/bookings/mine', { headers })).data || [];
@@ -59,7 +60,7 @@ export default function MyRequests({ guestToken, refreshKey = 0, onSessionExpire
     mutationFn: (booking: GuestBooking) => api.post(`/pg/bookings/${encodeURIComponent(booking.bookingRef)}/cancel`, {}, { headers }),
     onSuccess: () => {
       toast.success('Booking request cancelled');
-      return queryClient.invalidateQueries({ queryKey: ['bookings', 'mine', guestToken] });
+      return queryClient.invalidateQueries({ queryKey: queryKeys.guestBookings(guestToken) });
     },
     onError: (error) => {
       if (!expired(error)) toast.error(apiErrorMessage(error, 'Could not cancel request'));

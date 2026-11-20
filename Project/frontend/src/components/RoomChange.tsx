@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeftRight, Check, Loader2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
+import { queryKeys } from '../api/query-keys';
 import { apiErrorMessage } from '../utils/api-error';
 
 type BedView = {
@@ -60,7 +61,7 @@ export default function RoomChange() {
   const [form, setForm] = useState({ type: 'SWAP', bedId: '', floor: '', note: '', reason: '' });
 
   const { data, isPending: loading } = useQuery({
-    queryKey: ['room-changes'],
+    queryKey: queryKeys.resident.roomChanges(),
     queryFn: fetchRoomChangeData,
     meta: { errorMessage: 'Could not load room changes' }
   });
@@ -68,12 +69,12 @@ export default function RoomChange() {
   const matches = data?.matchData ?? null;
   // Vacant beds are only needed while the resident is choosing a move.
   const { data: vacantBeds = [] } = useQuery({
-    queryKey: ['room-changes', 'vacant-beds'],
+    queryKey: queryKeys.resident.vacantBeds(),
     queryFn: async (): Promise<BedView[]> => (await api.get('/pg/tenant/vacant-beds')).data || [],
     enabled: form.type === 'MOVE',
     meta: { errorMessage: 'Could not load vacant beds' }
   });
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['room-changes'] });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: queryKeys.resident.roomChanges() });
 
   const pickType = (type: 'SWAP' | 'MOVE') => {
     setForm((current) => ({ ...current, type }));

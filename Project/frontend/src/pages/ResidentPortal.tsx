@@ -6,6 +6,7 @@ import { paymentClaimSchema, residentProfileSchema, residentTicketSchema, type P
 import { AlertCircle, ArrowLeftRight, Bell, Building2, Check, Download, History, Loader2, LogOut, Menu, Plus, ReceiptIndianRupee, Send, ShieldCheck, UserRound, UtensilsCrossed, Wallet, Wrench, ShoppingBag } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
+import { queryKeys } from '../api/query-keys';
 import { useAuth } from '../context/auth';
 import { SidebarProvider } from '../context/SidebarContext';
 import { useSidebar } from '../context/sidebar';
@@ -74,7 +75,7 @@ type PgSite = { slug: string; name: string; locality: string | null; city: strin
 export default function ResidentPortal() {
   const slug = String(useParams().slug || '').toLowerCase();
   const { data: site, isPending, isError } = useQuery({
-    queryKey: ['pg-site', slug],
+    queryKey: queryKeys.pgSite(slug),
     queryFn: async (): Promise<PgSite> => (await api.get(`/pg/sites/${encodeURIComponent(slug)}`)).data,
     retry: false
   });
@@ -118,7 +119,7 @@ function ResidentPortalView({ site }: { site: PgSite }) {
   // Portal data: one query (polled every 30s while signed in), refreshed after actions.
   const queryClient = useQueryClient();
   const { data: portal } = useQuery({
-    queryKey: ['resident', 'portal'],
+    queryKey: queryKeys.resident.portal(),
     queryFn: async () => {
       const [stayResponse, ticketResponse, notificationResponse, claimResponse] = await Promise.all([
         api.get('/pg/tenant/stays'),
@@ -141,7 +142,7 @@ function ResidentPortalView({ site }: { site: PgSite }) {
   const tickets = portal?.tickets ?? NO_TICKETS;
   const notifications = portal?.notifications ?? NO_NOTIFICATIONS;
   const paymentClaims = portal?.paymentClaims ?? NO_CLAIMS;
-  const refreshResidentData = () => queryClient.invalidateQueries({ queryKey: ['resident', 'portal'] });
+  const refreshResidentData = () => queryClient.invalidateQueries({ queryKey: queryKeys.resident.portal() });
 
   const ticketFormApi = useForm<ResidentTicketForm>({ resolver: zodResolver(residentTicketSchema), defaultValues: EMPTY_TICKET });
   const submittingTicket = ticketFormApi.formState.isSubmitting;
@@ -316,7 +317,7 @@ function ResidentPortalView({ site }: { site: PgSite }) {
   const logout = () => {
     clearSession('PG_TENANT');
     localStorage.removeItem(RESIDENT_SITE_KEY);
-    queryClient.removeQueries({ queryKey: ['resident'] });
+    queryClient.removeQueries({ queryKey: queryKeys.resident.all() });
     setStep('phone');
   };
 

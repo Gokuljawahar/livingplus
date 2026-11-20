@@ -9,6 +9,7 @@ import {
 import { ArrowLeftRight, BedDouble, Building2, Check, ClipboardList, Clock, Download, FileText, IndianRupee, Loader2, Plus, Users, Wallet, Wrench, X, Zap, UtensilsCrossed } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
+import { queryKeys } from '../api/query-keys';
 import ResidentSiteLink from '../components/ResidentSiteLink';
 import ConditionRecords from '../components/ConditionRecords';
 import { STAFF_ROLES, STAFF_ROLE_HINTS, STAFF_ROLE_LABELS, viewsForRoles } from '@livingplus/shared';
@@ -145,7 +146,7 @@ export default function PGManagement() {
   // only for owners). refresh() re-fetches it after any change.
   const queryClient = useQueryClient();
   const { data: workspace, isPending: loading } = useQuery({
-    queryKey: ['owner', 'workspace'],
+    queryKey: queryKeys.owner.workspace(),
     queryFn: fetchWorkspace,
     meta: { errorMessage: 'Could not load PG operations' }
   });
@@ -153,7 +154,7 @@ export default function PGManagement() {
     properties, bookings, tickets, summary, tenants, roomChanges,
     rentEntries, expenses, expenseTotal, bills, report, staff, paymentClaims
   } = workspace ?? EMPTY_WORKSPACE;
-  const refresh = () => { void queryClient.invalidateQueries({ queryKey: ['owner', 'workspace'] }); };
+  const refresh = () => { void queryClient.invalidateQueries({ queryKey: queryKeys.owner.workspace() }); };
   // Default the property pickers to the first property once it is known.
   if (!selectedPropertyId && properties[0]) setSelectedPropertyId(properties[0].id);
 
