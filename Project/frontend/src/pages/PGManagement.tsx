@@ -14,7 +14,7 @@ import ConditionRecords from '../components/ConditionRecords';
 import { STAFF_ROLES, STAFF_ROLE_HINTS, STAFF_ROLE_LABELS, viewsForRoles } from '@livingplus/shared';
 import OwnerServices from '../components/OwnerServices';
 import KycAiSummary, { type KycAiCheck } from '../components/KycAiSummary';
-import { rupees, shortDate } from '../utils/money';
+import { rupees, shortDate, billName } from '../utils/money';
 import { SecureImage } from '../components/SecureImage';
 import { MapPicker } from '../components/MapPicker';
 import { downloadXlsx } from '../utils/xlsx';
@@ -24,6 +24,7 @@ import StatusPill from '../components/ui/StatusPill';
 import { statusLabel } from '../utils/status';
 import PgPulse from '../components/PgPulse';
 import KitchenForecast from '../components/KitchenForecast';
+import DepositCompare from '../components/DepositCompare';
 
 type Activity = { id: string; action: string; entityType?: string | null; entityId?: string | null; detail?: string | null; actorName?: string | null; createdAt: string; propertyId: string };
 type Property = { id: string; slug?: string | null; name: string; description?: string | null; address: string; locality: string; contactPhone?: string | null; upiId?: string | null; city: string; latitude?: number | null; longitude?: number | null; genderPolicy: string; status?: string; bookingLockMinutes?: number; rentDay?: number; rentDueDay?: number; amenities: string[]; houseRules: string[]; photoUrls: string[]; rooms: { id: string; roomNumber: string; monthlyRent: number; depositAmount: number; maintenanceFee: number; utilitiesSurcharge: number; foodCharge: number; roomType: string; beds: { id: string; label: string; status: string; maintenanceNote?: string | null }[] }[] };
@@ -327,11 +328,11 @@ export default function PGManagement() {
     setKycChecking(tenantId);
     try {
       const check = (await api.post(`/pg/owner/tenants/${tenantId}/kyc-check`)).data as KycAiCheck;
-      if (check.flags.length) toast.error(`AI flagged: ${check.flags[0]}`);
-      else toast.success('AI check found no problems');
+      if (check.flags.length) toast.error(`ID check: ${check.flags[0]}`);
+      else toast.success('ID check found no problems');
       refresh();
     } catch (error) {
-      toast.error(apiErrorMessage(error, 'Could not run the AI check'));
+      toast.error(apiErrorMessage(error, 'Could not check the ID just now'));
     } finally {
       setKycChecking('');
     }
@@ -494,7 +495,7 @@ export default function PGManagement() {
     if (!report) return;
     const rows = [
       ['Period', 'Property', 'Resident', 'Entry Type', 'Amount', 'Paid', 'Status', 'Due Date'],
-      ...report.entries.map((entry) => [entry.period, entry.tenant.property.name, entry.tenant.name, entry.entryType, entry.amount, entry.paidAmount, entry.status, new Date(entry.dueDate).toLocaleDateString()])
+      ...report.entries.map((entry) => [entry.period, entry.tenant.property.name, entry.tenant.name, entry.entryType, entry.amount, entry.paidAmount, entry.status, shortDate(entry.dueDate)])
     ];
     const csv = rows.map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -514,7 +515,7 @@ export default function PGManagement() {
       ['New booking requests', report.newBookings], ['Rent charged', report.rentCharged], ['Rent collected', report.rentCollected], ['Outstanding', report.outstanding],
       [],
       ['Period', 'Property', 'Resident', 'Entry Type', 'Amount', 'Paid', 'Status', 'Due Date'],
-      ...report.entries.map((entry) => [entry.period, entry.tenant.property.name, entry.tenant.name, entry.entryType, entry.amount, entry.paidAmount, entry.status, new Date(entry.dueDate).toLocaleDateString()])
+      ...report.entries.map((entry) => [entry.period, entry.tenant.property.name, entry.tenant.name, entry.entryType, entry.amount, entry.paidAmount, entry.status, shortDate(entry.dueDate)])
     ]);
   };
 
@@ -864,7 +865,7 @@ export default function PGManagement() {
                       <StatusPill status={booking.status} />
                     </div>
                     <p className="text-xs text-slate-600 font-medium">{booking.property.name} · {booking.property.locality}</p>
-                    <p className="text-xs text-slate-500">{booking.phone} · Move-in {new Date(booking.moveInDate).toLocaleDateString()}{booking.bed ? ` · Room ${booking.bed.room.roomNumber}, ${booking.bed.label}` : ''}</p>
+                    <p className="text-xs text-slate-500">{booking.phone} · Move-in {shortDate(booking.moveInDate)}{booking.bed ? ` · Room ${booking.bed.room.roomNumber}, ${booking.bed.label}` : ''}</p>
                     <p className="text-[11px] text-slate-400">Ref {booking.bookingRef}</p>
                     {booking.vibe && (
                       <p className="mt-1 text-sm text-ink">
@@ -883,7 +884,7 @@ export default function PGManagement() {
                   {booking.status === 'PENDING' && rejectingBookingId !== booking.id && <div className="flex flex-wrap items-center gap-2">
                     <select aria-label="Reassign bed" value={reassignBed[booking.id] || ''} onChange={(event) => setReassignBed({ ...reassignBed, [booking.id]: event.target.value })} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 outline-none focus:ring-1 focus:ring-navy-900">
                       <option value="">Keep {booking.bed ? `Room ${booking.bed.room.roomNumber}, ${booking.bed.label}` : 'bed'}</option>
-                      {properties.flatMap((property) => property.rooms.flatMap((room) => room.beds.filter((bed) => bed.status === 'AVAILABLE').map((bed) => <option key={bed.id} value={bed.id}>{property.name} · Room {room.roomNumber}, {bed.label}</option>)))}
+                      {properties.filter((property) => property.name === booking.property.name).flatMap((property) => property.rooms.flatMap((room) => room.beds.filter((bed) => bed.status === 'AVAILABLE').map((bed) => <option key={bed.id} value={bed.id}>Move to Room {room.roomNumber}, {bed.label}</option>)))}
                     </select>
                     <button onClick={() => { setRejectingBookingId(booking.id); setRejectionReason(''); }} className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 px-3.5 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 transition-colors">
                       <X className="h-4 w-4" />Decline
@@ -962,7 +963,7 @@ export default function PGManagement() {
                       <button type="button" aria-expanded={editingTenantId === tenant.id} onClick={() => setEditingTenantId(editingTenantId === tenant.id ? '' : tenant.id)} className="btn-secondary min-h-9 px-3 py-1.5 text-xs">Edit details</button>
                       <button type="button" aria-expanded={recordsFor === tenant.id} onClick={() => setRecordsFor(recordsFor === tenant.id ? '' : tenant.id)} className="btn-secondary min-h-9 px-3 py-1.5 text-xs">Condition records</button>
                       {tenant.kycDocumentUrl && <button type="button" onClick={() => void viewKycDocument(tenant.kycDocumentUrl!)} className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors">View KYC</button>}
-                      {tenant.kycDocumentUrl && !tenant.kycVerified && <button type="button" disabled={kycChecking === tenant.id} onClick={() => void runKycCheck(tenant.id)} className="btn-secondary min-h-9 px-3 py-1.5 text-xs">{kycChecking === tenant.id ? 'Reading…' : tenant.kycAiCheck ? 'Re-run AI check' : 'AI check'}</button>}
+                      {tenant.kycDocumentUrl && !tenant.kycVerified && <button type="button" disabled={kycChecking === tenant.id} onClick={() => void runKycCheck(tenant.id)} className="btn-secondary min-h-9 px-3 py-1.5 text-xs">{kycChecking === tenant.id ? 'Checking…' : tenant.kycAiCheck ? 'Check ID again' : 'Check ID'}</button>}
                       {tenant.kycDocumentUrl && !tenant.kycVerified && <button type="button" onClick={() => void verifyKyc(tenant.id, true)} className="rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 transition-colors">Verify KYC</button>}
                       {tenant.kycVerified && <button type="button" onClick={() => void verifyKyc(tenant.id, false)} className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-medium text-slate-500 hover:bg-slate-100 transition-colors">KYC verified · revoke</button>}
                       {tenant.foodOptOut ? <button type="button" onClick={() => void setFoodOptOut(tenant.id, false)} className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-medium text-slate-500 hover:bg-slate-100 transition-colors">Food off · turn on</button> : <button type="button" onClick={() => void setFoodOptOut(tenant.id, true)} className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors">Food on · opt out</button>}
@@ -980,6 +981,7 @@ export default function PGManagement() {
                     <button disabled={saving} className="rounded-xl bg-navy-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 transition-colors shadow-xs disabled:opacity-60">Save resident record</button>
                   </form>}
                   {checkoutTenantId === tenant.id && tenant.status === 'ACTIVE' && <form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void updateTenantStay(tenant.id, 'check-out', { depositDeductions: Number(form.get('depositDeductions') || 0), checkoutNote: String(form.get('checkoutNote') || '') }); }} className="grid gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-4 sm:grid-cols-[1fr_1.5fr_auto_auto]">
+                    {tenant.depositReceived > 0 && <DepositCompare tenantId={tenant.id} />}
                     <label className="text-xs font-bold text-slate-700">Deposit deductions (₹, max {(tenant.depositReceived || 0).toLocaleString('en-IN')})<input name="depositDeductions" type="number" min="0" max={tenant.depositReceived || 0} defaultValue="0" className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900" /></label>
                     <label className="text-xs font-bold text-slate-700">Inspection / checkout note<input name="checkoutNote" placeholder="Room condition, damages…" className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900" /></label>
                     <button className="self-end rounded-xl bg-rose-700 px-4 py-2 text-xs font-bold text-white hover:bg-rose-800 transition-colors">Confirm check-out</button>
@@ -1008,10 +1010,10 @@ export default function PGManagement() {
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="font-bold text-slate-900 text-sm">{entry.tenant.name}</h3>
-                          <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{entry.entryType} · {entry.period}</span>
+                          <span className="text-xs font-medium text-muted first-letter:uppercase">{billName(entry.period, entry.entryType)}</span>
                           <StatusPill status={entry.status} />
                         </div>
-                        <p className="mt-1 text-xs text-slate-500">{entry.tenant.property.name}{entry.tenant.bed ? ` · Room ${entry.tenant.bed.room.roomNumber}, ${entry.tenant.bed.label}` : ''} · Due {new Date(entry.dueDate).toLocaleDateString()}</p>
+                        <p className="mt-1 text-xs text-slate-500">{entry.tenant.property.name}{entry.tenant.bed ? ` · Room ${entry.tenant.bed.room.roomNumber}, ${entry.tenant.bed.label}` : ''} · Due {shortDate(entry.dueDate)}</p>
                         <p className="mt-1 text-xs font-semibold text-slate-800">₹{entry.paidAmount.toLocaleString('en-IN')} paid of ₹{entry.amount.toLocaleString('en-IN')}{entry.method ? ` · ${entry.method}` : ''}{entry.reference ? ` · Ref ${entry.reference}` : ''}</p>
                       </div>
                     </div>
@@ -1062,7 +1064,7 @@ export default function PGManagement() {
                         <p className="font-bold text-sm text-slate-900">₹{entry.amount.toLocaleString('en-IN')}</p>
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">{entry.category}</span>
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">{entry.property.name} · {new Date(entry.spentOn).toLocaleDateString()}{entry.note ? ` · ${entry.note}` : ''}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{entry.property.name} · {shortDate(entry.spentOn)}{entry.note ? ` · ${entry.note}` : ''}</p>
                     </div>
                     <button onClick={() => void removeExpense(entry.id)} className="rounded-xl border border-rose-200 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-50 transition-colors self-start sm:self-auto">Remove</button>
                   </article>)}
@@ -1078,7 +1080,7 @@ export default function PGManagement() {
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold text-slate-500 mb-1">Category</label>
-                    <select {...expenseFormApi.register('category')} className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white">{['FOOD', 'STAFF', 'MAINTENANCE', 'UTILITIES', 'OTHER'].map((category) => <option key={category} value={category}>{category}</option>)}</select>
+                    <select {...expenseFormApi.register('category')} className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white">{['FOOD', 'STAFF', 'MAINTENANCE', 'UTILITIES', 'OTHER'].map((category) => <option key={category} value={category}>{category.charAt(0) + category.slice(1).toLowerCase()}</option>)}</select>
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold text-slate-500 mb-1">Amount</label>
@@ -1237,7 +1239,7 @@ export default function PGManagement() {
                         <StatusPill status={ticket.priority} />
                         <StatusPill status={ticket.status} />
                       </div>
-                      <p className="text-xs text-slate-500">{ticket.property.name} · {ticket.category}{ticket.tenant ? ` · ${ticket.tenant.name}` : ''}{ticket.assignedName ? ` · Assigned to ${ticket.assignedName}` : ''}</p>
+                      <p className="text-xs text-slate-500">{ticket.property.name} · {ticket.category.charAt(0) + ticket.category.slice(1).toLowerCase()}{ticket.tenant ? ` · ${ticket.tenant.name}` : ''}{ticket.assignedName ? ` · Assigned to ${ticket.assignedName}` : ''}</p>
                       <p className="text-xs text-slate-700 pt-1">{ticket.description}</p>
                       {ticket.imageUrl && <p className="text-[11px] text-slate-400 font-medium">Photo attached</p>}
                     </div>
@@ -1247,18 +1249,18 @@ export default function PGManagement() {
                 </div>
               </div>
               <form onSubmit={createTicket} className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm h-fit">
-                <h2 className="font-bold text-slate-900 text-sm pb-3 border-b border-slate-100">Log maintenance</h2>
+                <h2 className="font-bold text-slate-900 text-sm pb-3 border-b border-slate-100">Report an issue</h2>
                 <div className="mt-4 space-y-3">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-500 mb-1">Property</label>
                     <select required value={selectedPropertyId} onChange={(event) => { setSelectedPropertyId(event.target.value); ticketFormApi.setValue('assignedTo', ''); }} className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white"><option value="">Select property</option>{properties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}</select>
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Assign Warden</label>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Assign to</label>
                     <select {...ticketFormApi.register('assignedTo')} className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white"><option value="">Unassigned</option>{staff.filter((member) => member.property.id === selectedPropertyId).map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select>
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Issue Title</label>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">What's wrong</label>
                     <input required placeholder="Issue title" {...ticketFormApi.register('title')} className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white" />
                   </div>
                   <div>
@@ -1266,8 +1268,8 @@ export default function PGManagement() {
                     <textarea required rows={3} placeholder="Describe the issue" {...ticketFormApi.register('description')} className="w-full resize-y rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <select {...ticketFormApi.register('category')} className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white"><option>PLUMBING</option><option>ELECTRICAL</option><option>APPLIANCE</option><option>CLEANING</option><option>OTHER</option></select>
-                    <select {...ticketFormApi.register('priority')} className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white"><option>LOW</option><option>NORMAL</option><option>HIGH</option><option>URGENT</option></select>
+                    <select {...ticketFormApi.register('category')} className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white"><option value="PLUMBING">Plumbing</option><option value="ELECTRICAL">Electrical</option><option value="APPLIANCE">Appliance</option><option value="CLEANING">Cleaning</option><option value="OTHER">Other</option></select>
+                    <select {...ticketFormApi.register('priority')} className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white"><option value="LOW">Low</option><option value="NORMAL">Normal</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select>
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">Photo</label>

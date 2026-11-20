@@ -48,7 +48,7 @@ const demoProperties = [
         longitude: 80.218,
         address: '31, 100 Feet Road',
         genderPolicy: 'ANY',
-        amenities: ['Wi-Fi', 'Meals', 'Study area'],
+        amenities: ['Wi-Fi', 'Shared kitchen', 'Study area'],
         rooms: [{ number: '401', rent: 9200, foodIncluded: false, foodCharge: 0 }, { number: '402', rent: 8200, foodIncluded: false, foodCharge: 0 }]
     }
 ];
@@ -163,7 +163,7 @@ async function main() {
     });
     const tenant = await prisma.pGTenant.upsert({
         where: { id: 'pg-demo-tenant-ananya' },
-        update: { bookingId: booking.id, status: 'ACTIVE', vibeAnswers: DEMO_VIBE },
+        update: { bookingId: booking.id, status: 'ACTIVE', vibeAnswers: DEMO_VIBE, depositAmount: 9800, depositReceived: 9800 },
         create: {
             id: 'pg-demo-tenant-ananya',
             propertyId: demoProperties[0].id,
@@ -174,6 +174,8 @@ async function main() {
             phone: '9000000001',
             moveInDate: new Date('2026-10-01T00:00:00.000Z'),
             monthlyRent: 9800,
+            depositAmount: 9800,
+            depositReceived: 9800,
             status: 'ACTIVE'
         }
     });
@@ -267,8 +269,8 @@ async function seedLivelyDemo(ownerId) {
         await prisma.pGBed.update({ where: { id: bed.id }, data: { status: 'OCCUPIED' } });
         const tenant = await prisma.pGTenant.upsert({
             where: { id: person.id },
-            update: { bedId: bed.id, status: 'ACTIVE', vibeAnswers: person.vibe, foodOptOut: person.optOut },
-            create: { id: person.id, propertyId: person.pg, bedId: bed.id, name: person.name, phone: person.phone, moveInDate: new Date(Date.now() - 40 * DAY_MS), monthlyRent: person.rent, status: 'ACTIVE', vibeAnswers: person.vibe, foodOptOut: person.optOut }
+            update: { bedId: bed.id, status: 'ACTIVE', vibeAnswers: person.vibe, foodOptOut: person.optOut, depositAmount: person.rent, depositReceived: person.rent },
+            create: { id: person.id, propertyId: person.pg, bedId: bed.id, name: person.name, phone: person.phone, moveInDate: new Date(Date.now() - 40 * DAY_MS), monthlyRent: person.rent, status: 'ACTIVE', vibeAnswers: person.vibe, foodOptOut: person.optOut, depositAmount: person.rent, depositReceived: person.rent }
         });
         await prisma.pGRentEntry.upsert({
             where: { tenantId_period_entryType: { tenantId: tenant.id, period: '2026-11', entryType: 'RENT' } },

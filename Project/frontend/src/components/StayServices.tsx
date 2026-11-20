@@ -18,7 +18,7 @@ export type ServiceStay = {
 function formatDate(value?: string | null): string | null {
   if (!value) return null;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString();
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function stayMonths(moveIn: string, moveOut?: string | null): string {

@@ -135,7 +135,7 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
     const failure = (error as { response?: { status?: number; data?: { message?: string } } })?.response;
     if (failure?.status === 503) {
       setUnavailable(true);
-      setMessages((current) => [...current, { from: 'assistant', text: 'The AI assistant is not connected yet. The owner can enable it by configuring an AI model.' }]);
+      setMessages((current) => [...current, { from: 'assistant', text: 'The assistant isn\'t available right now. Everything else works as usual.' }]);
     } else {
       toast.error(failure?.data?.message || 'Assistant failed to answer');
     }

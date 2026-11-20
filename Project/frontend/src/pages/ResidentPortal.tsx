@@ -36,6 +36,7 @@ const periodLabel = (period: string) => {
 };
 import { apiErrorMessage } from '../utils/api-error';
 import { phoneOtpErrorMessage, startPhoneVerification, type PhoneChallenge } from '../utils/phone-otp';
+import { shortDate } from '../utils/money';
 
 type Stay = {
   id: string; name: string; status: string; monthlyRent: number; depositAmount: number;
@@ -486,13 +487,13 @@ function ResidentPortalView({ site }: { site: PgSite }) {
                         ₹{stay.monthlyRent.toLocaleString('en-IN')} / month
                       </span>
                       <span className="inline-flex items-center gap-1.5 bg-slate-50 text-slate-600 px-3 py-1 rounded-lg text-xs font-medium border border-slate-200">
-                        Deposit: ₹{(stay.depositReceived || 0).toLocaleString('en-IN')} / ₹{(stay.depositAmount || 0).toLocaleString('en-IN')}
+                        {stay.depositAmount > 0 ? `Deposit ₹${(stay.depositReceived || 0).toLocaleString('en-IN')} paid of ₹${stay.depositAmount.toLocaleString('en-IN')}` : 'No deposit'}
                       </span>
                     </div>
 
                     {isNotice && stay.noticeDate && (
                       <p className="mt-2 text-xs font-semibold text-amber-800 bg-amber-50/80 px-2.5 py-1 rounded-lg border border-amber-200 inline-block">
-                        Vacating notice active since {new Date(stay.noticeDate).toLocaleDateString()}
+                        Vacating notice active since {shortDate(stay.noticeDate)}
                       </p>
                     )}
 
@@ -524,7 +525,7 @@ function ResidentPortalView({ site }: { site: PgSite }) {
                       onClick={() => exportReceipts(stay)}
                       className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors shadow-xs"
                     >
-                      <Download className="h-3.5 w-3.5" /> Download Receipts
+                      <Download className="h-3.5 w-3.5" /> Download receipts
                     </button>
                   </div>
                 </div>
@@ -639,7 +640,7 @@ function ResidentPortalView({ site }: { site: PgSite }) {
                               ₹{claim.amount.toLocaleString('en-IN')} · {claim.rentEntry.entryType} {claim.rentEntry.period}
                             </p>
                             <p className="text-slate-500 mt-0.5">
-                              Ref {claim.reference} · Submitted {new Date(claim.createdAt).toLocaleDateString()}
+                              Ref {claim.reference} · Submitted {shortDate(claim.createdAt)}
                             </p>
                             {claim.responseNote && <p className="mt-1 text-red-700 font-medium">{claim.responseNote}</p>}
                           </div>
@@ -779,9 +780,8 @@ function ResidentPortalView({ site }: { site: PgSite }) {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                      <Wrench className="h-4 w-4 text-navy-900" /> Maintenance & Requests
+                      <Wrench className="h-4 w-4 text-navy-900" /> Your requests
                     </h3>
-                    <p className="mt-0.5 text-xs text-slate-500">Fast reporting direct to PG staff and wardens.</p>
                   </div>
                   {['ACTIVE', 'NOTICE_PERIOD'].includes(stay.status) && ticketFormFor !== stay.id && (
                     <button
@@ -798,12 +798,10 @@ function ResidentPortalView({ site }: { site: PgSite }) {
                     <article key={ticket.id} className="p-4 hover:bg-slate-50/50 transition-colors">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="font-bold text-slate-900 text-sm">{ticket.title}</p>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-800">
-                          {ticket.status.replace('_', ' ')}
-                        </span>
+                        <StatusPill status={ticket.status} />
                       </div>
                       <p className="mt-1 text-xs text-slate-400 font-medium">
-                        {ticket.category} · Reported {new Date(ticket.createdAt).toLocaleDateString()}
+                        {ticket.category.charAt(0) + ticket.category.slice(1).toLowerCase()} · Reported {shortDate(ticket.createdAt)}
                       </p>
                       <p className="mt-2 whitespace-pre-wrap text-xs text-slate-600 leading-relaxed bg-slate-50/70 p-2.5 rounded-lg border border-slate-150">
                         {ticket.description}

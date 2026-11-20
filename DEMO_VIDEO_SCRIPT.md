@@ -15,6 +15,7 @@ The script follows the judging criteria in order: SPARK (significance, potential
   3. **Resident:** `/stay/palm-grove-womens-residence`, signed in as Ananya (`9000000001`; the code shows on screen)
 - [ ] Test the microphone once: allow it in the browser and do one short VibeCheck call to warm up the server.
 - [ ] Do the owner assistant steps once beforehand so replies come back quickly.
+- [ ] For Deposit Shield: on one resident, add a move-in and a move-out condition record with a photo each (for example, a desk with and without a lamp).
 - [ ] Record at 1080p, with the cursor visible and notifications off.
 - [ ] Keep the pitch deck open for the opening and closing slides.
 
@@ -22,7 +23,7 @@ The script follows the judging criteria in order: SPARK (significance, potential
 
 ## 0:00–0:25 · Hook (significance)
 
-**Screen:** Pitch deck, slide 1, then slide 2.
+**Screen:** Pitch deck, slide 1, then slide 3 (the four moments where a PG stay breaks).
 
 **Say:**
 > Every year, lakhs of students and young professionals move to cities like Chennai and into a PG. They pick one from WhatsApp forwards, pay a deposit, and get a bed next to whoever is in the room. If the roommate sleeps at 4 am and plays music, they leave early and lose money. And the PG itself runs on notebooks.
@@ -63,7 +64,7 @@ The script follows the judging criteria in order: SPARK (significance, potential
 **Screen:** Tap **See my matches**. The beds are sorted with reasons.
 
 **Say:**
-> Now every free bed has a match score with plain reasons, like "you both sleep before 11". Gemini judges each room, but it can only move a rule-based score by fifteen points either way, so it can't invent a fit. And if it doesn't work out after moving in, there's a thirty-day rematch window.
+> Now every free bed shows how well I'd fit, with plain reasons like "you both sleep before 11". The match stays grounded in real habits, so it can't promise a fit that isn't there. And if it doesn't work out after moving in, there's a thirty-day rematch window.
 
 **Screen:** Pick the best bed → move-in date → **Next** → enter a phone number → the code shows on screen → **Send request**.
 
@@ -82,7 +83,7 @@ The script follows the judging criteria in order: SPARK (significance, potential
 **Screen:** Open **Ask the assistant** and type: *"Who owes rent right now?"*
 
 **Say:**
-> The assistant is built with Google's Agent Development Kit. It has about thirty tools, each limited to this owner's PGs.
+> The owner's copilot, built with Google's Agent Development Kit, handles everyday requests and only ever sees this owner's PGs.
 
 **Screen:** Type: *"Post a notice to Palm Grove residents: water is off this Sunday from 10 to 1 for tank cleaning."* Show the draft, reply "post it", and show the confirmation card. Click **Confirm**.
 
@@ -93,6 +94,11 @@ The script follows the judging criteria in order: SPARK (significance, potential
 
 **Say:**
 > This one saves real money. The kitchen forecast uses who is on the food plan, who opted out, booked orders, and residents' routines from VibeCheck. Tomorrow is Saturday: late risers skip breakfast, so the cook makes three plates, not five. That's food saved every day, and around nine thousand rupees a month for this PG.
+
+**Screen:** **Residents & KYC** → **Check out** on a resident with move-in and move-out photos → **Compare move-in and move-out photos**.
+
+**Say:**
+> When someone moves out, Deposit Shield compares the move-in and move-out photos and lists what changed, with a fair charge for each item. Normal wear is never charged, and the resident sees the same breakdown with the photos. I decide what to charge.
 
 **Screen:** **PG pulse**. Show the brief, then click the **Done by the assistant** filter.
 
@@ -110,25 +116,25 @@ The script follows the judging criteria in order: SPARK (significance, potential
 
 ---
 
-## 3:55–4:30 · Built on Google, and it's real (use of tech, realistic)
+## 3:55–4:30 · Google tech, and why it's realistic
 
-**Screen:** Deck, slide 9 (Google tech), then slide 11 (realistic).
+**Screen:** Deck, slide 7 (Google tech), then slide 8 (realistic).
 
 **Say:**
-> Everything runs on Google Cloud. Gemini on Vertex AI powers the assistant, KYC checks, VibeCheck matching, the kitchen forecast and the weekly brief, and the voice runs on the Gemini Live API. The app runs on Cloud Run, with Cloud SQL, where row-level security keeps each owner's data apart, plus Cloud Storage with signed links, Firebase sign-in, Secret Manager and Cloud Scheduler. One script deploys the whole thing.
+> Google's AI runs through the whole experience. Gemini Live is the voice of VibeCheck. Gemini matches roommates, reads move-out photos and IDs, forecasts the kitchen and writes the owner's weekly brief. And it all runs on Google Cloud, with each owner's information kept private.
 >
-> It's tested, too: 249 backend tests, including the AI agent's role limits, and seven end-to-end browser journeys. When the AI is busy, every feature falls back to a working path.
+> It's live today, it works on any phone, and people stay in control: the AI suggests, but bookings, money and notices always wait for a person's yes. If the AI is ever busy, every feature still works the simple way.
 
 ---
 
 ## 4:30–5:00 · Business and close (potential, key feature)
 
-**Screen:** Deck, slide 12, then slide 15.
+**Screen:** Deck, slide 4 (who pays), then slide 12 (pilot), then slide 13 (close).
 
 **Say:**
 > Residents use it free. Owners pay a small fee per bed, plus add-ons like VibeCheck and AI ID checks, a commission on bookings, and a share of meals and cleaning booked through the app. For an owner, one empty bed for a month costs more than the subscription.
 >
-> We start with owner clusters near Chennai's campuses and IT corridors, and next we're building Deposit Shield, where Gemini compares move-in and move-out photos to settle deposits fairly.
+> We start with a 90-day pilot on Chennai's OMR corridor, measuring four numbers owners care about: days to fill a bed, early exits, food wasted and deposit disputes.
 >
 > VibeCheck gets you in with the right people. Living Plus runs the rest.
 

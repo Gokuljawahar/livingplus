@@ -7,6 +7,7 @@ export type MoneyStay = {
   id: string; name: string; status: string;
   monthlyRent: number; depositAmount: number; depositReceived: number;
   depositRefundAmount?: number | null; depositRefundStatus?: string;
+  depositDeductions?: number | null; checkoutNote?: string | null;
   property: { name: string };
   bed?: { label: string; room: { roomNumber: string } } | null;
   rentEntries: {
@@ -99,7 +100,7 @@ export default function MoneyOverview({ stays, claims }: { stays: MoneyStay[]; c
           {stays.map((stay) => {
             const refund = stay.depositRefundStatus && stay.depositRefundStatus !== 'NOT_APPLICABLE';
             return (
-              <li key={stay.id} className="flex items-center justify-between gap-3 px-5 py-4 sm:px-6">
+              <li key={stay.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-6">
                 <div className="min-w-0">
                   <p className="font-medium text-navy-900">{stay.property.name}</p>
                   <p className="text-sm text-muted">
@@ -110,6 +111,17 @@ export default function MoneyOverview({ stays, claims }: { stays: MoneyStay[]; c
                   </p>
                 </div>
                 <StatusPill status={stay.status} />
+                {(stay.depositDeductions ?? 0) > 0 && (
+                  <div className="w-full rounded-[10px] bg-surface px-3 py-2 text-sm">
+                    <p className="font-medium text-navy-900">Deducted <span className="tabular">{rupees(stay.depositDeductions ?? 0)}</span> from your deposit</p>
+                    {stay.checkoutNote && (
+                      <ul className="mt-1 space-y-0.5 text-ink">
+                        {stay.checkoutNote.split('; ').map((line) => <li key={line}>{line}</li>)}
+                      </ul>
+                    )}
+                    <p className="mt-1 text-muted">Based on your move-in and move-out condition records. Ask your PG owner if something looks wrong.</p>
+                  </div>
+                )}
               </li>
             );
           })}

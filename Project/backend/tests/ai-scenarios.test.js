@@ -864,6 +864,46 @@ describe('owner insights: PG pulse and kitchen forecast', () => {
         }
     });
 });
+describe('Deposit Shield: settle deposits from condition photos', () => {
+    it('never charges normal wear, stays within the deposit, and needs both records', async () => {
+        const shield = await import('../src/controllers/deposit-shield.controller.js');
+        const settled = shield.settleReview({
+            changes: [
+                { item: 'Wardrobe door', change: 'Hinge broken', kind: 'DAMAGE', suggested: 400.6 },
+                { item: 'Walls', change: 'Paint slightly faded', kind: 'WEAR', suggested: 900 },
+                { item: 'Room', change: 'Needs a deep clean', kind: 'CLEANING', suggested: 5000 }
+            ],
+            summary: 'Two real changes and some normal wear.'
+        }, 2000);
+        assert.equal(settled.changes[0].suggested, 401);
+        assert.equal(settled.changes[1].suggested, 0, 'wear is free');
+        assert.equal(settled.changes[2].suggested, 1599, 'capped at what is left of the deposit');
+        assert.equal(settled.suggestedTotal, 2000);
+        const respond = () => ({ statusCode: 200, body: undefined, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
+        await prisma.pGTenant.update({ where: { id: ids.tenant.id }, data: { depositReceived: 3000 } });
+        shield.setDepositReviewerForTests(async () => ({ changes: [{ item: 'Desk lamp', change: 'Missing', kind: 'MISSING', suggested: 350 }], summary: 'The desk lamp is missing.' }));
+        try {
+            const early = respond();
+            await shield.reviewDeposit({ ...userReq(ids.owner), params: { tenantId: ids.tenant.id } }, early);
+            assert.equal(early.statusCode, 409);
+            assert.match(early.body.message, /move-in/);
+            const moveIn = await prisma.pGConditionReport.create({ data: { propertyId: ids.prop.id, tenantId: ids.tenant.id, kind: 'MOVE_IN', notes: 'Lamp on the desk', photoUrls: [] } });
+            const moveOut = await prisma.pGConditionReport.create({ data: { propertyId: ids.prop.id, tenantId: ids.tenant.id, kind: 'MOVE_OUT', notes: 'No lamp', photoUrls: [] } });
+            const res = respond();
+            await shield.reviewDeposit({ ...userReq(ids.owner), params: { tenantId: ids.tenant.id } }, res);
+            assert.equal(res.statusCode, 200);
+            assert.equal(res.body.suggestedTotal, 350);
+            const outsider = respond();
+            await shield.reviewDeposit({ ...userReq(ids.tenantUser), params: { tenantId: ids.tenant.id } }, outsider);
+            assert.equal(outsider.statusCode, 404, 'residents cannot run it on themselves');
+            await prisma.pGConditionReport.deleteMany({ where: { id: { in: [moveIn.id, moveOut.id] } } });
+        }
+        finally {
+            shield.setDepositReviewerForTests(null);
+            await prisma.pGTenant.update({ where: { id: ids.tenant.id }, data: { depositReceived: 0 } });
+        }
+    });
+});
 describe('owner sign-in forgives copy-paste slips', () => {
     it('accepts a pasted trailing space and local number formats, but not a wrong password', async () => {
         const bcrypt = (await import('bcryptjs')).default;

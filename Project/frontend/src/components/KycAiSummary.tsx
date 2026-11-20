@@ -25,7 +25,7 @@ export default function KycAiSummary({ check, audience }: { check: KycAiCheck | 
       <p className="flex items-center gap-1.5 font-medium">
         {clean ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : <AlertTriangle className="h-4 w-4" aria-hidden="true" />}
         <ScanText className="h-4 w-4" aria-hidden="true" />
-        AI read a {TYPE_LABELS[check.documentType] ?? check.documentType}
+        Looks like {/^[AEIOU]/i.test(TYPE_LABELS[check.documentType] ?? check.documentType) ? 'an' : 'a'} {TYPE_LABELS[check.documentType] ?? check.documentType}
         {check.idNumberLast4 ? ` ending ${check.idNumberLast4}` : ''}
         {check.nameMatch === 'match' ? ', name matches' : ''}
       </p>
@@ -35,7 +35,7 @@ export default function KycAiSummary({ check, audience }: { check: KycAiCheck | 
         </ul>
       )}
       <p className="mt-1 text-[13px] opacity-90">
-        {audience === 'owner' ? 'A check to help you. Look at the document before marking KYC verified.' : 'Your PG owner still reviews the document before verifying it.'}
+        {audience === 'owner' ? 'A first check to save you time. Look at the document before marking it verified.' : 'Your PG owner still reviews the document before verifying it.'}
       </p>
     </div>
   );

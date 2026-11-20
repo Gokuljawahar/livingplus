@@ -180,7 +180,8 @@ export const postWeeklyBrief = async (req: Request, res: Response): Promise<any>
       const raw = briefOverride ? await briefOverride(stats) : await generateStructured({
         system: [
           'You write a short weekly brief for the owner of a paying-guest (PG) housing business in India.',
-          'Use only the numbers given. Be warm, plain and specific; no jargon, no emojis, no invented facts.',
+          'Use only the numbers given. Be warm, plain and specific, like a good manager talking to the owner; no jargon, no emojis, no invented facts.',
+          'Write money with the rupee sign and Indian grouping, e.g. ₹21,100. The headline and each point must say different things; never repeat a fact.',
           'Pick the single most useful next step. Never mention residents by name.'
         ].join(' '),
         parts: [{ text: `This week's numbers (null means not available to this person):\n${JSON.stringify(stats, null, 2)}` }],

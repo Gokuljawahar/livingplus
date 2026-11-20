@@ -95,7 +95,7 @@ export default function LoginPage() {
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8">
           <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-6">
             <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2">Mobile Number</label>
+              <label className="block text-xs font-bold text-slate-400 mb-2">Mobile number</label>
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
@@ -155,7 +155,7 @@ export default function LoginPage() {
               ) : (
                 <>
                   <LogIn className="w-5 h-5" />
-                  Sign In
+                  Sign in
                 </>
               )}
             </button>
@@ -193,10 +193,10 @@ export default function LoginPage() {
 
           <div className="mt-8 pt-6 border-t border-slate-100 text-center">
               <p className="mb-3 text-sm text-slate-600">
-                New to LivingPlus? <Link to={ROUTES.ownerRegister} className="text-navy-900 font-bold hover:underline">Register your PG</Link>
+                New to Living Plus? <Link to={ROUTES.ownerRegister} className="text-navy-900 font-bold hover:underline">Register your PG</Link>
               </p>
             <p className="text-xs text-slate-500 font-medium">
-              Need help? <button onClick={() => setShowSupportModal(true)} className="text-navy-900 font-bold hover:underline">Contact Support</button>
+              Need help? <button onClick={() => setShowSupportModal(true)} className="text-navy-900 font-bold hover:underline">Contact support</button>
             </p>
             <p className="mt-3 text-xs text-slate-500">
               Looking for a PG? <a href={ROUTES.guestHome} className="font-bold text-navy-900 hover:underline">Browse PGs</a>
@@ -222,7 +222,7 @@ export default function LoginPage() {
                 <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
                   <MessageCircle className="w-8 h-8 text-navy-900" />
                 </div>
-                <h3 className="text-xl font-bold text-slate-900">Contact Support</h3>
+                <h3 className="text-xl font-bold text-slate-900">Contact support</h3>
                 <p className="text-sm text-slate-500 mt-2 leading-relaxed">
                   Please reach out to your administrator to reset your password or for any account assistance.
                 </p>

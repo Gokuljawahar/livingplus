@@ -3,7 +3,7 @@
 // residents' routines; plate counts only, never names.
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Leaf, Loader2, Sparkles } from 'lucide-react';
+import { Leaf, Loader2 } from 'lucide-react';
 import api from '../api/axios';
 import { rupees } from '../utils/money';
 
@@ -34,9 +34,7 @@ export default function KitchenForecast({ properties }: { properties: { id: stri
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 id="kitchen-heading" className="text-lg font-semibold">Kitchen forecast</h2>
-          <p className="inline-flex items-center gap-1.5 text-sm text-muted">
-            <Sparkles className="h-4 w-4 text-amber-600" aria-hidden="true" /> How many will actually eat, so nothing goes to waste
-          </p>
+          <p className="text-sm text-muted">How many will actually eat, so less food goes to waste</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {properties.length > 1 && (
@@ -55,14 +53,14 @@ export default function KitchenForecast({ properties }: { properties: { id: stri
       </div>
 
       {forecast.isPending ? (
-        <p className="mt-4 inline-flex items-center gap-2 text-muted"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Working out tomorrow's plates…</p>
+        <p className="mt-4 inline-flex items-center gap-2 text-muted"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Working out the plates…</p>
       ) : forecast.isError || !data ? (
         <p className="mt-4 text-muted">The forecast isn't available right now.</p>
       ) : data.planResidents === 0 && data.meals.every((meal) => meal.orders === 0) ? (
         <p className="mt-4 text-muted">No one at this PG is on the food plan or has ordered meals for {data.weekday}.</p>
       ) : (
         <>
-          <p className="mt-3 text-sm text-muted">{data.weekday} · {data.planResidents} on the food plan{data.ai ? ' · forecast by Gemini' : ''}</p>
+          <p className="mt-3 text-sm text-muted">{data.weekday} · {data.planResidents} on the food plan</p>
           <ul className="mt-3 grid gap-3 sm:grid-cols-3">
             {data.meals.map((meal) => (
               <li key={meal.meal} className="rounded-[10px] bg-surface p-4">

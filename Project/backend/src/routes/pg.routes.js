@@ -1,3 +1,4 @@
+import { reviewDeposit } from '../controllers/deposit-shield.controller.js';
 import { getKitchenForecast, getPulse, postWeeklyBrief } from '../controllers/insights.controller.js';
 import { Router } from 'express';
 import { systemRoute } from '../db/context.js';
@@ -79,6 +80,7 @@ router.post('/owner/room-changes/:requestId/decision', authenticate, decideRoomC
 router.patch('/owner/bookings/:bookingId/status', authenticate, updateBookingStatus);
 router.post('/owner/tenants/:tenantId/check-in', authenticate, checkInTenant);
 router.post('/owner/tenants/:tenantId/check-out', authenticate, checkOutTenant);
+router.post('/owner/tenants/:tenantId/deposit-review', authenticate, aiChatLimiter, reviewDeposit);
 router.patch('/owner/tenants/:tenantId/deposit-refund', authenticate, markDepositRefunded);
 router.get('/owner/tenants', authenticate, listOwnerTenants);
 router.patch('/owner/tenants/:tenantId', authenticate, updateTenantProfile);

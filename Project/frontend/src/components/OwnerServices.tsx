@@ -61,7 +61,7 @@ function SettingsCard({ property, onSaved }: { property: Data['properties'][numb
           {draft.housekeeping.enabled && <div className="w-40 pb-3 pl-8">{priceInput('Price per clean', draft.housekeeping.price, (price) => setDraft({ ...draft, housekeeping: { ...draft.housekeeping, price } }))}</div>}
         </div>
         {toggle('VibeCheck', draft.vibeCheck, (vibeCheck) => setDraft({ ...draft, vibeCheck }), 'Guests compare lifestyle habits with residents before requesting a bed.')}
-        {toggle('AI ID checks', draft.kycAi, (kycAi) => setDraft({ ...draft, kycAi }), 'Uploaded IDs are read by AI to flag problems. You still verify.')}
+        {toggle('ID checks', draft.kycAi, (kycAi) => setDraft({ ...draft, kycAi }), 'Uploaded IDs are read automatically to flag problems like a name mismatch or a blurry photo. You still verify.')}
       </div>
       <button type="button" disabled={saving} onClick={() => void save()} className="btn-secondary mt-3">{saving && <Loader2 className="h-4 w-4 animate-spin" />} Save services</button>
     </article>

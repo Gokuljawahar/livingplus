@@ -225,7 +225,7 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
             <Mic className="h-7 w-7 text-amber-500" aria-hidden="true" />
           </button>
           <p className="font-medium text-navy-900">Chat with your PG buddy</p>
-          <p className="text-sm text-muted">Just talk, in Tamil, Hindi or English. We\u2019ll find roommates like you.</p>
+          <p className="text-sm text-muted">Just talk, in Tamil, Hindi or English. We’ll find roommates like you.</p>
           <button type="button" onClick={() => { setMode('tap'); begin(false); setTyping(true); }} className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-navy-700 hover:underline">
             <Keyboard className="h-4 w-4" aria-hidden="true" /> Type instead
           </button>

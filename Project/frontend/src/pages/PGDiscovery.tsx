@@ -13,7 +13,6 @@ import {
   MessageCircle,
   Search,
   SlidersHorizontal,
-  Sparkles,
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -672,7 +671,7 @@ export default function PGDiscovery() {
               title="Ask the assistant about this search"
               className="flex h-10 w-10 items-center justify-center rounded-full text-navy-700 hover:bg-surface"
             >
-              <Sparkles className="h-5 w-5" />
+              <MessageCircle className="h-5 w-5" />
             </button>
             <button type="submit" aria-label="Search" className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500 text-navy-900 hover:bg-amber-600">
               <Search className="h-5 w-5" />
@@ -977,20 +976,24 @@ export default function PGDiscovery() {
                     ))}
                   </dl>
                   {selectedProperty.description && <p className="mt-4 max-w-prose text-ink">{selectedProperty.description}</p>}
-                  <h3 className="mt-5 font-sans text-base font-semibold">What we've checked</h3>
-                  <ul className="mt-2 space-y-1">
-                    {[
-                      [Boolean(selectedProperty.ownerVerified), "Owner's phone number verified with a code"],
+                  {(() => {
+                    const checked = [
+                      [Boolean(selectedProperty.ownerVerified), "Owner's phone number verified"],
                       [selectedProperty.latitude != null && selectedProperty.longitude != null, 'Location pinned on the map'],
-                      [(selectedProperty.photoUrls?.length ?? 0) > 0, (selectedProperty.photoUrls?.length ?? 0) > 0 ? `${selectedProperty.photoUrls.length} photo${selectedProperty.photoUrls.length === 1 ? '' : 's'} from the owner` : 'Photos from the owner'],
+                      [(selectedProperty.photoUrls?.length ?? 0) > 0, `${selectedProperty.photoUrls?.length ?? 0} photo${(selectedProperty.photoUrls?.length ?? 0) === 1 ? '' : 's'} from the owner`],
                       [(selectedProperty.houseRules?.length ?? 0) > 0, 'House rules shared up front']
-                    ].map(([ok, label]) => (
-                      <li key={String(label)} className={`flex items-center gap-2 ${ok ? 'text-ink' : 'text-muted'}`}>
-                        {ok ? <Check className="h-4 w-4 shrink-0 text-positive" aria-hidden="true" /> : <span className="h-4 w-4 shrink-0 text-center" aria-hidden="true">–</span>}
-                        <span>{label}{ok ? '' : ': not yet'}</span>
-                      </li>
-                    ))}
-                  </ul>
+                    ].filter(([ok]) => ok).map(([, label]) => String(label));
+                    return checked.length > 0 && (
+                      <>
+                        <h3 className="mt-5 font-sans text-base font-semibold">What we've checked</h3>
+                        <ul className="mt-2 space-y-1">
+                          {checked.map((label) => (
+                            <li key={label} className="flex items-center gap-2 text-ink"><Check className="h-4 w-4 shrink-0 text-positive" aria-hidden="true" /><span>{label}</span></li>
+                          ))}
+                        </ul>
+                      </>
+                    );
+                  })()}
                   {selectedProperty.amenities?.length > 0 && (
                     <>
                       <h3 className="mt-5 font-sans text-base font-semibold">What's here</h3>

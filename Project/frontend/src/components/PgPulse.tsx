@@ -3,7 +3,7 @@
 // who confirmed it.
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Bot, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { Bot, Loader2, RefreshCw } from 'lucide-react';
 import api from '../api/axios';
 import { rupees } from '../utils/money';
 
@@ -48,14 +48,14 @@ export default function PgPulse({ onGo }: { onGo: (target: PulseTarget) => void 
       <section aria-labelledby="brief-heading" className="rounded-[14px] bg-navy-900 p-5 text-white sm:p-6">
         <div className="flex items-center justify-between gap-3">
           <p id="brief-heading" className="inline-flex items-center gap-2 text-sm font-medium text-white/80">
-            <Sparkles className="h-4 w-4 text-amber-500" aria-hidden="true" /> Your week{brief.data?.brief.ai ? ', written by Gemini' : ''}
+            This week
           </p>
           <button type="button" onClick={() => void brief.refetch()} disabled={brief.isFetching} aria-label="Rewrite the brief" className="flex h-9 w-9 items-center justify-center rounded-full text-white/80 hover:bg-white/10 disabled:opacity-50">
             <RefreshCw className={`h-4 w-4 ${brief.isFetching ? 'animate-spin' : ''}`} />
           </button>
         </div>
         {brief.isPending ? (
-          <p className="mt-3 inline-flex items-center gap-2 text-white/80"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Reading this week…</p>
+          <p className="mt-3 inline-flex items-center gap-2 text-white/80"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Putting your week together…</p>
         ) : brief.data ? (
           <>
             <h2 className="mt-2 font-display text-xl font-bold text-white sm:text-2xl">{brief.data.brief.headline}</h2>

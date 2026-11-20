@@ -49,7 +49,7 @@ export const postChat = async (req: Request, res: Response): Promise<any> => {
   } catch (error: any) {
     if (String(error?.message || '').startsWith('MODEL_API_FAILED')) {
       logger.error({ err: error }, 'PG AI model call failed');
-      return res.status(502).json({ message: 'The AI service failed. Your data was not changed. Please retry.' });
+      return res.status(502).json({ message: 'The assistant couldn\'t answer just now. Nothing was changed. Please try again.' });
     }
     logger.error({ err: error }, 'PG AI chat error');
     res.status(500).json({ message: 'The assistant could not answer right now' });

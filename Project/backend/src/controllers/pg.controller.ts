@@ -875,8 +875,8 @@ async function runKycCheck(tenant: any): Promise<any> {
 
 function kycCheckError(res: Response, error: any): any {
   const message = String(error?.message || '');
-  if (message.startsWith('AI_ORCHESTRATOR_NOT_CONFIGURED')) return res.status(503).json({ message: 'AI checks are not available right now. The owner will review your document.' });
-  if (message === 'KYC_AI_OFF') return res.status(409).json({ message: 'AI ID checks are switched off for this PG. The owner will review your document.' });
+  if (message.startsWith('AI_ORCHESTRATOR_NOT_CONFIGURED')) return res.status(503).json({ message: 'Automatic ID checks are not available right now. The owner will review your document.' });
+  if (message === 'KYC_AI_OFF') return res.status(409).json({ message: 'Automatic ID checks are off at this PG. The owner will review your document.' });
   if (message === 'KYC_FILE_INVALID') return res.status(400).json({ message: 'That file could not be read. Upload a clear photo or PDF under 8 MB.' });
   logger.error({ err: error }, 'KYC AI check error');
   return res.status(502).json({ message: 'The document check failed. Your document is saved; try the check again later.' });
