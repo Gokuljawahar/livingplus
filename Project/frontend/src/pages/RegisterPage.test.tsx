@@ -6,17 +6,28 @@ const api = vi.hoisted(() => ({ post: vi.fn() }));
 vi.mock('../api/axios', () => ({ default: api }));
 vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('../components/LogoLoader', () => ({ default: () => null }));
+const otp = vi.hoisted(() => ({ verify: vi.fn() }));
+vi.mock('../utils/phone-otp', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../utils/phone-otp')>()),
+  startPhoneVerification: vi.fn(async () => ({ devCode: '123456', verify: otp.verify }))
+}));
 
 import RegisterPage from './RegisterPage';
 import { renderWithProviders } from '../test/render';
 
-beforeEach(() => api.post.mockReset());
+beforeEach(() => {
+  api.post.mockReset();
+  otp.verify.mockReset().mockResolvedValue({ phoneToken: 'vrf_owner', guestToken: 'gst' });
+});
 
 async function toStepTwo() {
   const user = userEvent.setup();
   renderWithProviders(<RegisterPage />);
   await user.type(screen.getByPlaceholderText('Phone number'), '9876543210');
-  await user.click(screen.getByRole('button', { name: 'Continue' }));
+  // The owner proves the phone number first, so listings can show "Verified owner".
+  await user.click(screen.getByRole('button', { name: 'Send code' }));
+  await user.type(await screen.findByLabelText('6-digit verification code'), '123456');
+  await user.click(screen.getByRole('button', { name: 'Verify and continue' }));
   await screen.findByLabelText('Owner name');
   return user;
 }
@@ -45,7 +56,7 @@ describe('RegisterPage', () => {
     await user.type(screen.getByLabelText('Confirm password'), 'Strong@123');
     await user.click(screen.getByRole('button', { name: /create pg owner account/i }));
     expect(api.post).toHaveBeenCalledWith('/auth/register', expect.objectContaining({
-      name: 'Asha Rao', propertyName: 'Cedar House', phone: '919876543210', locality: 'Sholinganallur', city: 'Chennai', genderPolicy: 'ANY', password: 'Strong@123'
+      name: 'Asha Rao', propertyName: 'Cedar House', phone: '919876543210', locality: 'Sholinganallur', city: 'Chennai', genderPolicy: 'ANY', password: 'Strong@123', phoneToken: 'vrf_owner'
     }));
   });
 });

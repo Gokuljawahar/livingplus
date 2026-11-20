@@ -1,46 +1,65 @@
-// Durable LangGraph state for the assistant: conversation threads and paused
-// confirmations survive restarts and work across Cloud Run instances.
-// Stored in PostgreSQL in its own "langgraph" schema, so Prisma migrations
-// (which manage "public") never see or drop these tables.
-import pg from 'pg';
-import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
-import type { BaseCheckpointSaver } from '@langchain/langgraph';
+// Durable assistant threads: conversation history and paused confirmations
+// survive restarts and work across Cloud Run instances. Stored as JSON in
+// ConversationSession.stateJson (PostgreSQL), so threads need no extra tables,
+// schemas or connection pools. Rows left by earlier versions hold a bare
+// history array (or the "[]" default) and load as threads without pauses.
+import type { Content } from '@google/genai';
+import { prisma } from '../app.js';
 
-const CHECKPOINT_SCHEMA = 'langgraph';
+const db = new Proxy({} as Record<string, any>, {
+  get: (_target, property) => (prisma as any)[property]
+});
 
-// Query parameters only Prisma understands; node-postgres would reject them.
-const PRISMA_ONLY_PARAMS = ['schema', 'connection_limit', 'pool_timeout', 'pgbouncer', 'statement_cache_size', 'socket_timeout', 'sslaccept'];
-
-/** Converts a Prisma DATABASE_URL into a node-postgres connection string. */
-export function pgConnectionString(databaseUrl: string): string {
-  const url = new URL(databaseUrl);
-  for (const param of PRISMA_ONLY_PARAMS) url.searchParams.delete(param);
-  return url.toString();
+/** A sensitive call the thread is paused on, bound to who may confirm it. */
+export interface PendingAction {
+  nonce: string;
+  callId: string;
+  tool: string;
+  args: any;
+  preview: string;
+  /** Later calls from the same model turn, answered once this one resolves. */
+  laterCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>;
+  userKey: string;
+  role: string;
+  propertyId: string | null;
+  expiresAt: number;
 }
 
-let saverPromise: Promise<PostgresSaver> | null = null;
-let pool: pg.Pool | null = null;
+export interface ChatThreadState {
+  history: Content[];
+  pending: PendingAction | null;
+}
 
-export function getCheckpointer(): Promise<BaseCheckpointSaver> {
-  if (!saverPromise) {
-    saverPromise = (async () => {
-      const url = process.env.DATABASE_URL;
-      if (!url) throw new Error('DATABASE_URL is not configured');
-      pool = new pg.Pool({ connectionString: pgConnectionString(url), max: Number(process.env.CHECKPOINT_POOL_MAX) || 5 });
-      const saver = new PostgresSaver(pool, undefined, { schema: CHECKPOINT_SCHEMA });
-      await saver.setup();
-      return saver;
-    })().catch((error) => {
-      saverPromise = null;
-      throw error;
-    });
+const freshState = (): ChatThreadState => ({ history: [], pending: null });
+
+function isContent(value: unknown): value is Content {
+  return Boolean(value) && typeof value === 'object' && Array.isArray((value as Content).parts);
+}
+
+/** Reads a thread's durable state; missing or corrupt rows start empty. */
+export async function loadThreadState(sessionId: string): Promise<ChatThreadState> {
+  const row = await db.conversationSession.findUnique({ where: { id: sessionId }, select: { stateJson: true } }).catch(() => null);
+  if (!row || typeof row.stateJson !== 'string' || !row.stateJson) return freshState();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.stateJson);
+  } catch {
+    return freshState();
   }
-  return saverPromise;
+  if (Array.isArray(parsed)) return { history: parsed.filter(isContent), pending: null };
+  if (!parsed || typeof parsed !== 'object') return freshState();
+  const state = parsed as Partial<ChatThreadState>;
+  return {
+    history: Array.isArray(state.history) ? state.history.filter(isContent) : [],
+    pending: state.pending && typeof state.pending === 'object' ? (state.pending as PendingAction) : null
+  };
 }
 
+/** Persists a thread's durable state. */
+export async function saveThreadState(sessionId: string, state: ChatThreadState): Promise<void> {
+  await db.conversationSession.update({ where: { id: sessionId }, data: { stateJson: JSON.stringify(state) } });
+}
+
+/** No pools to drain; state lives in PostgreSQL behind Prisma. Kept for shutdown callers. */
 export async function closeCheckpointer(): Promise<void> {
-  const current = pool;
-  saverPromise = null;
-  pool = null;
-  await current?.end().catch(() => undefined);
 }

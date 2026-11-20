@@ -121,7 +121,7 @@ function App() {
   return (
     <AuthProvider>
       <Toaster
-          position={isMobile ? "top-center" : "top-right"}
+          position="top-center"
           toastOptions={{
             className: 'text-sm font-medium',
             duration: 4000,

@@ -13,9 +13,21 @@
 #   REGION               default: asia-south1 (Mumbai)
 #   GOOGLE_API_KEY       optional Gemini API key. Not needed: chat and semantic
 #                        search embeddings use Vertex AI with the service account.
+#   WHATSAPP_TOKEN, WHATSAPP_APP_SECRET, WHATSAPP_PHONE_NUMBER_ID
+#                        Meta WhatsApp Cloud API: outbound updates and the inbound
+#                        assistant (webhook: <service URL>/webhooks/whatsapp). The
+#                        verify token is generated into Secret Manager and printed.
 #   ALERT_EMAIL          email for Cloud Monitoring alerts (site down, server errors);
 #                        without it, incidents still show in the Cloud Console.
-#   AI_MODEL             default: google:gemini-3.8-flash
+#   AI_MODEL             default: google:gemini-4-hydrogen (newest GA Gemini with
+#                        tool calling and structured output, Nov 2026)
+#   AI_MODEL_OPTIONS     default: {"thinkingConfig":{"thinkingLevel":"MEDIUM"}} (Gemini 4
+#                        thinks at HIGH by default; MEDIUM keeps chat responsive)
+#   AI_BACKEND=vertex|studio  default vertex (Vertex AI with the service account,
+#                        billed to the project). studio uses a Google AI Studio key
+#                        instead: set GOOGLE_API_KEY too (stored in Secret Manager).
+#   SKIP_FIREBASE=1      don't look up Firebase; use OTP demo mode (codes on screen).
+#                        Use it on a fresh project without Firebase set up.
 #   FIREBASE_PROJECT_ID, FIREBASE_WEB_API_KEY, FIREBASE_APP_ID
 #                        Firebase Phone Auth. Read automatically from the project's
 #                        Firebase web app when not set; with no Firebase app, OTP demo
@@ -32,7 +44,6 @@
 #
 # There is no platform super admin: every PG is its owner's workspace, isolated
 # by PostgreSQL Row-Level Security.
-#   LANGSMITH_API_KEY    trace the agent in LangSmith (project: livingplus)
 set -euo pipefail
 # Never wait for interactive answers (e.g. "enable this API?"): fail clearly instead.
 export CLOUDSDK_CORE_DISABLE_PROMPTS=1
@@ -47,7 +58,16 @@ DB_NAME="${DB_NAME:-livingplus}"
 DB_USER="${DB_USER:-livingplus}"
 BUCKET="${BUCKET:-${PROJECT_ID}-livingplus-uploads}"
 SA_NAME="${SA_NAME:-livingplus-run}"
-AI_MODEL="${AI_MODEL:-google:gemini-3.8-flash}"
+AI_MODEL="${AI_MODEL:-google:gemini-4-hydrogen}"
+if [ -z "${AI_MODEL_OPTIONS:-}" ]; then AI_MODEL_OPTIONS='{"thinkingConfig":{"thinkingLevel":"MEDIUM"}}'; fi
+# Gemini models are served from the "global" Vertex AI location; not every model is in every region.
+AI_LOCATION="${AI_LOCATION:-global}"
+AI_BACKEND="${AI_BACKEND:-vertex}"
+case "$AI_BACKEND" in
+  vertex) ;;
+  studio) [ -n "${GOOGLE_API_KEY:-}" ] || { echo "AI_BACKEND=studio needs GOOGLE_API_KEY (from https://aistudio.google.com/apikey)." >&2; exit 1; } ;;
+  *) echo "AI_BACKEND must be vertex or studio." >&2; exit 1 ;;
+esac
 DEMO_OWNER_PHONE="${DEMO_OWNER_PHONE:-9555500001}"
 DRY_RUN="${DRY_RUN:-0}"
 
@@ -115,7 +135,11 @@ ensure_secret livingplus-jwt-secret "$(random_hex)"
 ensure_secret livingplus-demo-owner-password "$(random_secret 20)"
 ensure_secret livingplus-db-password "$(random_secret 32)"
 if [ -n "${GOOGLE_API_KEY:-}" ]; then ensure_secret livingplus-google-api-key "$GOOGLE_API_KEY"; fi
-if [ -n "${LANGSMITH_API_KEY:-}" ]; then ensure_secret livingplus-langsmith-api-key "$LANGSMITH_API_KEY"; fi
+if [ -n "${WHATSAPP_TOKEN:-}" ]; then
+  ensure_secret livingplus-whatsapp-token "$WHATSAPP_TOKEN"
+  ensure_secret livingplus-whatsapp-app-secret "${WHATSAPP_APP_SECRET:?Set WHATSAPP_APP_SECRET with WHATSAPP_TOKEN}"
+  ensure_secret livingplus-whatsapp-verify-token "$(random_secret 24)"
+fi
 
 step "Cloud SQL for PostgreSQL ${SQL_INSTANCE} (${SQL_TIER}; first creation takes several minutes)"
 exists gcloud sql instances describe "$SQL_INSTANCE" --project "$PROJECT_ID" \
@@ -142,7 +166,10 @@ firebase_get() {
   curl -fsS -H "Authorization: Bearer $(gcloud auth print-access-token 2>/dev/null)" \
     -H "x-goog-user-project: ${PROJECT_ID}" "$1" 2>/dev/null
 }
-if [ -z "${FIREBASE_PROJECT_ID:-}" ]; then
+if [ "${SKIP_FIREBASE:-0}" = "1" ]; then
+  echo "  SKIP_FIREBASE=1: not using Firebase."
+  FIREBASE_PROJECT_ID=""; FIREBASE_WEB_API_KEY=""
+elif [ -z "${FIREBASE_PROJECT_ID:-}" ]; then
   # A failed lookup must stop the deploy: falling back to OTP demo mode would
   # silently switch a live site to on-screen codes. Only "no Firebase app" means demo mode.
   if ! FB_APPS_JSON="$(firebase_get "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}/webApps")"; then
@@ -166,14 +193,21 @@ fi
 
 step "Deploying Cloud Run service ${SERVICE}"
 ENV_VARS="APP_TIMEZONE=Asia/Kolkata,UPLOAD_STORAGE=gcs,GCS_BUCKET=${BUCKET},LOG_LEVEL=info"
-ENV_VARS+=",ENABLE_AI_ORCHESTRATOR=true,AI_MODEL=${AI_MODEL}"
-# Semantic search: Vertex AI embeddings with the service account (no API key).
-ENV_VARS+=",ENABLE_SEMANTIC_SEARCH=true,AI_EMBEDDING_MODEL=google-vertexai:gemini-embedding-001"
+ENV_VARS+=",ENABLE_AI_ORCHESTRATOR=true,AI_MODEL=${AI_MODEL},AI_MODEL_OPTIONS=${AI_MODEL_OPTIONS}"
+if [ "$AI_BACKEND" = "vertex" ]; then
+  # Chat, voice, KYC, VibeCheck and search embeddings on Vertex AI with the service account (no API key).
+  ENV_VARS+=",GOOGLE_GENAI_USE_ENTERPRISE=true,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${AI_LOCATION}"
+  ENV_VARS+=",ENABLE_SEMANTIC_SEARCH=true,AI_EMBEDDING_MODEL=google-vertexai:gemini-embedding-001"
+else
+  # The same features on the Gemini API with the AI Studio key (GOOGLE_API_KEY secret below).
+  ENV_VARS+=",GOOGLE_GENAI_USE_ENTERPRISE=false"
+  ENV_VARS+=",ENABLE_SEMANTIC_SEARCH=true,AI_EMBEDDING_MODEL=google-genai:gemini-embedding-001"
+fi
 SECRETS="DATABASE_URL=livingplus-database-url:latest,JWT_SECRET=livingplus-jwt-secret:latest"
 if [ -n "${GOOGLE_API_KEY:-}" ]; then SECRETS+=",GOOGLE_API_KEY=livingplus-google-api-key:latest"; fi
-if [ -n "${LANGSMITH_API_KEY:-}" ]; then
-  ENV_VARS+=",LANGSMITH_TRACING=true,LANGSMITH_PROJECT=livingplus,LANGCHAIN_CALLBACKS_BACKGROUND=false"
-  SECRETS+=",LANGSMITH_API_KEY=livingplus-langsmith-api-key:latest"
+if [ -n "${WHATSAPP_TOKEN:-}" ]; then
+  ENV_VARS+=",ENABLE_WHATSAPP_CLOUD_API=true,WHATSAPP_PHONE_NUMBER_ID=${WHATSAPP_PHONE_NUMBER_ID:?Set WHATSAPP_PHONE_NUMBER_ID}"
+  SECRETS+=",WHATSAPP_TOKEN=livingplus-whatsapp-token:latest,WHATSAPP_APP_SECRET=livingplus-whatsapp-app-secret:latest,WHATSAPP_VERIFY_TOKEN=livingplus-whatsapp-verify-token:latest"
 fi
 if [ -n "${FIREBASE_PROJECT_ID:-}" ] && [ -n "${FIREBASE_WEB_API_KEY:-}" ]; then
   ENV_VARS+=",OTP_PROVIDER=firebase,FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID},FIREBASE_WEB_API_KEY=${FIREBASE_WEB_API_KEY},FIREBASE_APP_ID=${FIREBASE_APP_ID:-}"
@@ -249,6 +283,10 @@ for phone in ("+919000000001", "+919000000002"):
 fi
 
 step "Cloud Monitoring: uptime check and alerts"
+# Optional: the app is already live, so a monitoring problem (API still enabling,
+# missing permission) only warns instead of failing the deploy.
+setup_monitoring() {
+  set +e +o pipefail
 UPTIME_NAME="${SERVICE} health"
 CHECK_ID="$(gcloud monitoring uptime list-configs --project "$PROJECT_ID" --filter "displayName=\"${UPTIME_NAME}\"" --format 'value(name.basename())' 2>/dev/null | head -1)"
 if [ -z "$CHECK_ID" ]; then
@@ -310,6 +348,10 @@ POLICY
   run gcloud monitoring policies create --project "$PROJECT_ID" --policy-from-file "$POLICY_FILE"
   rm -f "$POLICY_FILE"
 fi
+}
+if ! (setup_monitoring); then
+  echo "  warning: monitoring setup did not finish; the site is deployed. Re-run later to add alerts." >&2
+fi
 
 cat <<EOF
 
@@ -318,5 +360,6 @@ LivingPlus is deployed: ${URL}
   Residents:           ${URL}/stay
   Owner sign-in:       ${URL}/owner/login   (demo owner, if seeded: ${DEMO_OWNER_PHONE})
   Demo owner password: gcloud secrets versions access latest --secret livingplus-demo-owner-password --project ${PROJECT_ID}
+  WhatsApp webhook:    ${URL}/webhooks/whatsapp   (verify token: gcloud secrets versions access latest --secret livingplus-whatsapp-verify-token --project ${PROJECT_ID})
   Logs:                gcloud run services logs read ${SERVICE} --project ${PROJECT_ID} --region ${REGION}
 EOF

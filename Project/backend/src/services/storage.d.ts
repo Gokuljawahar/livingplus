@@ -14,6 +14,7 @@ export interface GcsFileLike {
         expires: number;
         contentType?: string;
     }): Promise<[string]>;
+    download?(): Promise<[Buffer]>;
 }
 export interface GcsBucketLike {
     file(name: string): GcsFileLike;
@@ -22,6 +23,11 @@ export interface GcsBucketLike {
 export declare function setGcsBucketForTests(bucket: GcsBucketLike | null): void;
 /** Stores a validated file under fileKey. Local writes never overwrite. */
 export declare function putFile(fileKey: string, data: Buffer, contentType: string): Promise<void>;
+/** Reads a stored file back (for server-side checks such as AI KYC reading). */
+export declare function readStoredFile(fileKey: string): Promise<{
+    data: Buffer;
+    contentType: string;
+}>;
 /**
  * A short-lived URL to view an already-authorized file, or null when the file
  * does not exist (local storage) or cannot be signed.

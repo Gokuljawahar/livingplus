@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { paymentClaimSchema, residentProfileSchema, residentTicketSchema, type PaymentClaimForm, type ResidentProfileForm, type ResidentTicketForm } from '../validation/forms';
-import { AlertCircle, ArrowLeftRight, Bell, Building2, Check, Download, History, Loader2, LogOut, Menu, Plus, ReceiptIndianRupee, Send, ShieldCheck, UserRound, UtensilsCrossed, Wallet, Wrench } from 'lucide-react';
+import { AlertCircle, ArrowLeftRight, Bell, Building2, Check, Download, History, Loader2, LogOut, Menu, Plus, ReceiptIndianRupee, Send, ShieldCheck, UserRound, UtensilsCrossed, Wallet, Wrench, ShoppingBag } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
 import { useAuth } from '../context/auth';
@@ -21,6 +21,10 @@ import MoneyOverview from '../components/MoneyOverview';
 import StayServices from '../components/StayServices';
 import SplitAuthLayout from '../components/SplitAuthLayout';
 import ResidentHome from '../components/ResidentHome';
+import ResidentVibeCard from '../components/ResidentVibeCard';
+import ConditionRecords from '../components/ConditionRecords';
+import ServiceOrders from '../components/ServiceOrders';
+import KycAiSummary, { type KycAiCheck } from '../components/KycAiSummary';
 import StatusPill from '../components/ui/StatusPill';
 import { statusLabel } from '../utils/status';
 
@@ -41,7 +45,7 @@ type Stay = {
   checkedInAt?: string | null; checkedOutAt?: string | null; checkoutNote?: string | null;
   permanentAddress?: string | null; bloodGroup?: string | null; institutionOrEmployer?: string | null;
   emergencyName?: string | null; emergencyPhone?: string | null; kycType?: string | null;
-  kycDocumentUrl?: string | null; kycVerified?: boolean; foodOptOut?: boolean;
+  kycDocumentUrl?: string | null; kycVerified?: boolean; foodOptOut?: boolean; kycAiCheck?: KycAiCheck | null;
   property: { id: string; name: string; address: string; locality: string; city: string; contactPhone?: string | null; upiId?: string | null };
   bed?: { label: string; room: { roomNumber: string; roomType: string; foodIncluded?: boolean; foodCharge?: number | null } } | null;
   rentEntries: { id: string; period: string; entryType: string; amount: number; paidAmount: number; status: string; method?: string | null; reference?: string | null; dueDate: string }[];
@@ -104,7 +108,7 @@ function ResidentPortalView({ site }: { site: PgSite }) {
   const challenge = useRef<PhoneChallenge<'TENANT_LOGIN'> | null>(null);
   const [loading, setLoading] = useState(false);
   const { cooldown, startCooldown } = useOtpCooldown();
-  const [activeTab, setActiveTab] = useState<'stays' | 'money' | 'food' | 'services' | 'maintenance' | 'roomchange' | 'notifications' | 'profile'>('stays');
+  const [activeTab, setActiveTab] = useState<'stays' | 'money' | 'food' | 'orders' | 'services' | 'maintenance' | 'roomchange' | 'notifications' | 'profile'>('stays');
   const [ticketFormFor, setTicketFormFor] = useState('');
   const [profileEditingFor, setProfileEditingFor] = useState('');
   const [profileFile, setProfileFile] = useState<File | null>(null);
@@ -245,7 +249,18 @@ function ResidentPortalView({ site }: { site: PgSite }) {
         kycDocumentUrl = result.data.fileKey;
       }
       await api.patch(`/pg/tenant/${stayId}/profile`, { ...form, ...(kycDocumentUrl ? { kycDocumentUrl } : {}) });
-      toast.success('Profile saved. New KYC documents need owner verification.');
+      if (kycDocumentUrl) {
+        // Read the new ID with AI straight away, so problems show before the owner looks.
+        try {
+          const check = (await api.post(`/pg/tenant/${stayId}/kyc-check`)).data as KycAiCheck;
+          if (check.flags.length) toast.error(`Check your document: ${check.flags[0]}`);
+          else toast.success('Profile saved. Your ID looks clear; the owner will verify it.');
+        } catch {
+          toast.success('Profile saved. Your PG owner will review your ID.');
+        }
+      } else {
+        toast.success('Profile saved.');
+      }
       setProfileEditingFor('');
       setProfileFile(null);
       await refreshResidentData();
@@ -308,6 +323,7 @@ function ResidentPortalView({ site }: { site: PgSite }) {
     { id: 'stays', label: 'Home', icon: Building2 },
     { id: 'money', label: 'Money', icon: Wallet },
     { id: 'food', label: 'Food', icon: UtensilsCrossed },
+    { id: 'orders', label: 'Meals & cleaning', icon: ShoppingBag },
     { id: 'services', label: 'Services', icon: History },
     { id: 'maintenance', label: 'Maintenance', icon: Wrench },
     { id: 'roomchange', label: 'Room change', icon: ArrowLeftRight },
@@ -405,6 +421,12 @@ function ResidentPortalView({ site }: { site: PgSite }) {
 
         <main className="flex-1 overflow-y-auto p-4 pb-24 md:p-8 lg:pb-8">
           <div className="mx-auto max-w-5xl">
+        {activeTab === 'orders' && (() => {
+          const current = stays.find((stay) => ['ACTIVE', 'NOTICE_PERIOD'].includes(stay.status));
+          return current
+            ? <ServiceOrders tenantId={current.id} />
+            : <p className="rounded-[14px] border border-hairline bg-white p-5 text-muted">Meal and cleaning orders open once you have checked in.</p>;
+        })()}
         {activeTab === 'stays' && (<div className="space-y-6">
           {stays[0] && (
             <ResidentHome
@@ -415,6 +437,10 @@ function ResidentPortalView({ site }: { site: PgSite }) {
               onReport={() => setActiveTab('maintenance')}
             />
           )}
+          {(() => {
+            const current = stays.find((stay) => ['ACTIVE', 'NOTICE_PERIOD', 'RESERVED'].includes(stay.status));
+            return current ? <ResidentVibeCard tenantId={current.id} onRoomChange={() => setActiveTab('roomchange')} /> : null;
+          })()}
           {stays.length > 0 && <h2 className="pt-2 text-xl font-semibold">Your stay</h2>}
           {!stays.length && (
             <div className="rounded-2xl border border-slate-200 bg-white py-16 text-center shadow-sm">
@@ -503,10 +529,12 @@ function ResidentPortalView({ site }: { site: PgSite }) {
                   </div>
                 </div>
 
+                <ConditionRecords tenantId={stay.id} viewer="resident" />
+
                 {/* Invoices and Payments Section */}
                 <div className="mt-6 border-t border-slate-100 pt-5">
                   <h3 className="text-xs font-bold text-slate-500 mb-3">
-                    Invoices & Payment Records
+                    Invoices and payments
                   </h3>
                   <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-slate-50/40 overflow-hidden">
                     {stay.rentEntries.map((entry) => {
@@ -682,8 +710,9 @@ function ResidentPortalView({ site }: { site: PgSite }) {
                   <div>
                     <span className="text-slate-400 block font-medium">KYC Verification Status</span>
                     <span className={`font-bold inline-flex items-center gap-1 ${stay.kycVerified ? 'text-emerald-700' : stay.kycDocumentUrl ? 'text-amber-700' : 'text-slate-500'}`}>
-                      {stay.kycVerified ? '✓ Verified by PG Owner' : stay.kycDocumentUrl ? 'Awaiting Owner Review' : 'Document not yet uploaded'}
+                      {stay.kycVerified ? 'Verified by your PG owner' : stay.kycDocumentUrl ? 'Waiting for owner review' : 'Not uploaded yet'}
                     </span>
+                    {!stay.kycVerified && <KycAiSummary check={stay.kycAiCheck} audience="resident" />}
                   </div>
                 </div>
 

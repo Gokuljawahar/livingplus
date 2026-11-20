@@ -1,11 +1,9 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-// Brand type (DESIGN.md §3.2): Anek Latin for headings, Mukta for text. Latin subsets only.
-import '@fontsource-variable/anek-latin/wght.css'
-import '@fontsource/mukta/latin-400.css'
-import '@fontsource/mukta/latin-500.css'
-import '@fontsource/mukta/latin-600.css'
-import '@fontsource/mukta/latin-700.css'
+// Brand type (DESIGN.md §3.2): Plus Jakarta Sans for headings, Inter for text.
+// Self-hosted variable fonts; browsers fetch only the subsets a page uses.
+import '@fontsource-variable/plus-jakarta-sans/wght.css'
+import '@fontsource-variable/inter/wght.css'
 import './index.css'
 import { QueryClientProvider } from '@tanstack/react-query'
 import App from './App.tsx'

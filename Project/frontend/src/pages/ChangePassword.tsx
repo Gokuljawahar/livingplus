@@ -10,6 +10,7 @@ import PasswordInput from '../components/PasswordInput';
 import { apiErrorMessage } from '../utils/api-error';
 import { changePasswordSchema, type ChangePasswordForm } from '../validation/forms';
 import GoogleLinkSection from '../components/GoogleLinkSection';
+import PhoneVerifySection from '../components/PhoneVerifySection';
 
 function FieldError({ message }: { message?: string | undefined }) {
   return message ? <p role="alert" className="mt-1 text-xs font-medium text-red-600">{message}</p> : null;
@@ -114,7 +115,8 @@ export default function ChangePassword() {
         </form>
       </div>
 
-      <GoogleLinkSection />
+      <PhoneVerifySection />
+        <GoogleLinkSection />
     </div>
   );
 }

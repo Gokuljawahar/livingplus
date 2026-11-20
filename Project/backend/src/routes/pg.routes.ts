@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { systemRoute } from '../db/context.js';
+import { cancelMyServiceOrder, createServiceOrder, listMyServiceOrders, listStaffServiceOrders, updateServiceOrderStatus, updateServiceSettings } from '../controllers/services.controller.js';
 import {
   cancelBookingRequest,
   checkInTenant,
@@ -43,6 +44,14 @@ import {
   reviewPaymentClaim,
   markDepositRefunded,
   listProperties,
+  vibeCheckProperty,
+  buildVibeProfileFromText,
+  saveTenantVibe,
+  getTenantVibeMatch,
+  checkMyKyc,
+  checkTenantKyc,
+  listConditionReports,
+  createConditionReport,
   listPgSites,
   getPgSite,
   searchPropertiesSemantic,
@@ -107,6 +116,22 @@ router.get('/owner/activity', authenticate, listAuditLogs);
 router.get('/sites', systemRoute('directory of PG resident sites (name and place only)', listPgSites));
 router.get('/sites/:slug', systemRoute('resident sites of unpublished PGs still resolve', getPgSite));
 router.get('/properties', optionalAuthenticate, listProperties);
+// VibeCheck compares a visitor with residents of any published PG, so it reads across RLS by design;
+// it returns only scores and habit-level reasons.
+router.post('/properties/:propertyId/vibecheck', aiChatLimiter, systemRoute('VibeCheck scores a visitor against a published PG', vibeCheckProperty));
+router.post('/vibecheck/profile', aiChatLimiter, buildVibeProfileFromText);
+router.put('/tenant/:tenantId/vibe', authenticate, saveTenantVibe);
+router.get('/tenant/:tenantId/vibe-match', authenticate, getTenantVibeMatch);
+router.post('/tenant/:tenantId/kyc-check', authenticate, aiChatLimiter, checkMyKyc);
+router.post('/owner/tenants/:tenantId/kyc-check', authenticate, aiChatLimiter, checkTenantKyc);
+router.get('/condition-reports', authenticate, listConditionReports);
+router.put('/owner/properties/:propertyId/services', authenticate, updateServiceSettings);
+router.get('/owner/service-orders', authenticate, listStaffServiceOrders);
+router.patch('/owner/service-orders/:orderId', authenticate, updateServiceOrderStatus);
+router.get('/tenant/:tenantId/service-orders', authenticate, listMyServiceOrders);
+router.post('/tenant/:tenantId/service-orders', authenticate, createServiceOrder);
+router.post('/tenant/:tenantId/service-orders/:orderId/cancel', authenticate, cancelMyServiceOrder);
+router.post('/condition-reports', authenticate, createConditionReport);
 router.get('/search', optionalAuthenticate, semanticSearchLimiter, searchPropertiesSemantic);
 router.get('/bookings/mine', systemRoute('guest booking lookup by phone', listGuestBookings));
 router.post('/bookings', optionalAuthenticate, systemRoute('a verified guest holds a bed in any published PG', createBookingRequest));

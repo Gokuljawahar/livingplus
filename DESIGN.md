@@ -96,28 +96,30 @@ ideally an icon too. Never rely on colour alone.
 
 ### 3.2 Typography
 
-Two families from **Ek Type**, an Indian type foundry, served from Google
-Fonts. They suit a Chennai product, and their wider families already cover
-Indian scripts (Anek Tamil, Mukta's Devanagari) if we add regional languages.
-I checked the font files: both include the rupee sign `₹` and tabular figures
-(the `tnum` feature).
+Changed 20 Nov 2026. The first pair, Anek Latin with Mukta, looked cramped and
+uneven in English UI text: Anek is condensed, and Mukta's spacing and letter
+shapes are tuned for Devanagari. We switched to two widely used, very legible
+screen faces, self-hosted through `@fontsource` (variable fonts; browsers fetch
+only the subsets a page uses). Rupee amounts render cleanly in both; check the
+screenshots after any type change. Tamil and Hindi text (the assistant's
+languages) falls back to the system's Noto Sans Tamil and Devanagari.
 
 | Role | Family | Weights | Notes |
 |---|---|---|---|
-| Display: page titles, PG names, big money figures | **Anek Latin** (variable) | 600–700 | Slightly condensed and warm. Use it for headings only, never paragraphs. |
-| Text: everything else | **Mukta** | 400, 500, 600 | Open, highly legible at small sizes on low-end screens |
+| Display: page titles, PG names, big money figures | **Plus Jakarta Sans** (variable) | 600–800 | Modern and warm, with open shapes. Headings only, never paragraphs. Letter spacing −0.015em. |
+| Text: everything else | **Inter** (variable) | 400, 500, 600 | Built for screens; clear figures for money and tabular numbers. |
 
 **Type scale** (rem at a 16 px root; line height in parentheses):
 
 | Token | Size | Family / weight | Use |
 |---|---|---|---|
-| `display` | 2rem / 32 px (1.15) | Anek 700 | Resident money hero ("₹8,200 due"), Today count |
-| `title-1` | 1.5rem / 24 px (1.2) | Anek 700 | Page titles |
-| `title-2` | 1.25rem / 20 px (1.25) | Anek 600 | Section headings, PG name on its detail page |
-| `title-3` | 1.0625rem / 17 px (1.3) | Mukta 600 | Card titles (PG name on a listing card) |
-| `body` | 1rem / 16 px (1.5) | Mukta 400 | Body text. Inputs are always 16 px, so iOS doesn't zoom. |
-| `body-sm` | 0.875rem / 14 px (1.45) | Mukta 400/500 | Meta lines, table cells |
-| `caption` | 0.8125rem / 13 px (1.4) | Mukta 500 | Helper text, badges |
+| `display` | 2rem / 32 px (1.15) | Jakarta 700 | Resident money hero ("₹8,200 due"), Today count |
+| `title-1` | 1.5rem / 24 px (1.2) | Jakarta 700 | Page titles |
+| `title-2` | 1.25rem / 20 px (1.25) | Jakarta 600 | Section headings, PG name on its detail page |
+| `title-3` | 1.0625rem / 17 px (1.3) | Inter 600 | Card titles (PG name on a listing card) |
+| `body` | 1rem / 16 px (1.5) | Inter 400 | Body text. Inputs are always 16 px, so iOS doesn't zoom. |
+| `body-sm` | 0.875rem / 14 px (1.45) | Inter 400/500 | Meta lines, table cells |
+| `caption` | 0.8125rem / 13 px (1.4) | Inter 500 | Helper text, badges |
 
 **Rules:**
 - **Sentence case everywhere.** No ALL-CAPS labels and no tracked-out eyebrow
@@ -279,16 +281,16 @@ owners work in daylight on phones.
 
 | Component | Spec |
 |---|---|
-| **Primary button** | Amber 500 fill, navy-900 text, Mukta 600 16 px, 10 px radius, 44–48 px tall, full width in sheets on phones. **At most one per view.** |
+| **Primary button** | Amber 500 fill, navy-900 text, Inter 600 16 px, 10 px radius, 44–48 px tall, full width in sheets on phones. **At most one per view.** |
 | **Secondary button** | White fill, 1 px `field-border`, navy-900 text. For Cancel, Back, and secondary actions. |
 | **Text button** | navy-700, underlined on hover. For tertiary links. No "→" glyph on links. |
 | **Destructive** | White fill with negative text, or a negative fill only in the confirm step of an irreversible action. Always asks to confirm with a specific verb ("Cancel request" / "Keep request"). |
 | **Input** | 48 px tall, 16 px text, 6 px radius, 1 px `field-border`, a label above it (never placeholder-only), helper or error text below. Errors in negative colour with an icon, saying how to fix it. |
 | **Search bar** | Pill shape, white, with a locality select and a free-text field. The search button is a 40 px amber circle with a navy icon. |
 | **Filter chip** | Pill, 36 px tall, white with a hairline border. Selected: `amber-50` fill with a navy-900 border and text. Show 6 chips at most, then "More filters". |
-| **Listing card** | 4:3 photo (14 px radius) with a policy badge top-left (white pill, caption) and an availability line. Below it: name (title-3), locality, price line (`₹8,200/mo` in Mukta 600, tabular, plus a muted "incl. food"). The whole card is one link, with no separate "Request a bed" button on the grid. |
+| **Listing card** | 4:3 photo (14 px radius) with a policy badge top-left (white pill, caption) and an availability line. Below it: name (title-3), locality, price line (`₹8,200/mo` in Inter 600, tabular, plus a muted "incl. food"). The whole card is one link, with no separate "Request a bed" button on the grid. |
 | **Status pill** | Caption, 6 px radius inside tables, full pill elsewhere, with a status colour pair, a word and an optional 14 px icon. |
-| **Money summary** | Anek 700 display figure, a muted breakdown line below, the due date in words ("due by 5 Dec"), and one primary action. |
+| **Money summary** | Jakarta 700 display figure, a muted breakdown line below, the due date in words ("due by 5 Dec"), and one primary action. |
 | **Step indicator** | "Step 2 of 3 · Your details" text plus 3 short bars. Steps really are a sequence here, so numbering is justified. |
 | **Bottom sheet** (phone) | 14 px top radius, drag handle, the floating shadow tier, focus moved inside, closes with Esc, back or a swipe. |
 | **Toast** | Bottom-centre on phones, top-right on desktop, 4 s, uses the same verb as the action ("Request sent", "Rent marked paid"). Errors stay until dismissed. |
@@ -418,7 +420,20 @@ another session. Re-check them once that work lands.
 | 7 | The resident home leads with a stays list; money is on another tab | Money summary first, open requests second (§4.2) | Medium |
 | 8 | The owner landing shows many equal tiles | *Today* view with a "Needs you" list (§4.3) | Medium |
 | 9 | A building icon is repeated as every missing photo | Initials placeholder; nudge owners to add photos | Low |
-| 10 | The system font stack | Anek Latin + Mukta (§3.2) | Low |
+| 10 | The system font stack | Plus Jakarta Sans + Inter (§3.2) | Low |
+
+### Status after the 20 Nov 2026 pass
+
+Fresh screenshots at 360 px and 1280 px. Findings 1, 3–8 had already landed; this pass added:
+
+- **One brand on all three sites.** The house mark (`src/assets/logo-mark.png`) and the "Living **Plus**" wordmark come from one `BrandLogo` component, used in the guest header and footer and the workspace sidebar.
+- **Finding 9: missing photos.** `PgPlaceholder` draws a simple building that varies by PG and says "No photos yet", replacing the bare initials.
+- **Honest cards.** "Deposit not listed" no longer appears on cards. The PG details page still says "Not listed: ask the owner".
+- **Guest landing structure (Uber/Mercury bands).** An h1 with the promise ("with the real monthly cost"; shorter on phones so the first listing stays near the fold), then the listings, then "How a bed request works", a navy owner band, and a footer.
+- **Resident money (Revolut/Wise).** "You owe ₹9,800" first, then bills by name ("October 2026 rent", due 5 Oct). Shared status pills, sentence case, and the unbacked "Refund protection" heading removed.
+- **Workspace polish.** Sidebar active state uses an inset amber bar with 44 px rows. The duplicate "Main menu" link is gone. Toasts appear top-centre so they don't cover header actions. The assistant launcher is a 56 px icon on phones, and pages leave room for it. Owner *Today* rows wrap on phones instead of cutting names off.
+
+Finding 10 is done too: the brand fonts are self-hosted through `@fontsource` (switched to Plus Jakarta Sans + Inter the same day; see §3.2). Still open: real PG photos in the demo data.
 
 ## 13. Implementation notes
 
@@ -436,8 +451,8 @@ another session. Re-check them once that work lands.
     --color-attention: #B5470B; --color-attention-bg: #FDEEE4;
     --color-negative: #B42318;  --color-negative-bg: #FDECEA;
     --color-info: #0A3B75;      --color-info-bg: #EAF1FA;
-    --font-display: "Anek Latin Variable", "Anek Latin", system-ui, sans-serif;
-    --font-sans: "Mukta", system-ui, sans-serif;
+    --font-display: "Plus Jakarta Sans Variable", system-ui, sans-serif;
+    --font-sans: "Inter Variable", system-ui, sans-serif;
     --radius-field: 6px; --radius-button: 10px; --radius-card: 14px;
     --shadow-float: 0 1px 2px rgb(2 34 75 / .06), 0 8px 24px rgb(2 34 75 / .12);
   }

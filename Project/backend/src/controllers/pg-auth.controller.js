@@ -8,7 +8,7 @@ import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { logger } from '../utils/logger.js';
 import { isGenderPolicy, isStrongPassword, MESSAGES } from '@livingplus/shared';
 import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
-import { changePasswordBody, googleLoginBody, loginBody, otpRequestBody, otpVerifyBody, registerBody, updateProfileBody } from '../validation/request.schemas.js';
+import { changePasswordBody, googleLoginBody, verifyPhoneBody, loginBody, otpRequestBody, otpVerifyBody, registerBody, updateProfileBody } from '../validation/request.schemas.js';
 import { googleSignInEnabled, otpProvider, verifyFirebaseGoogleToken, verifyFirebasePhoneToken } from '../services/phone-verification.js';
 function normalizePhone(phone) {
     const digits = phone.replace(/\D/g, '');
@@ -22,7 +22,8 @@ function toUserResponse(user) {
         name: user.name,
         role: user.role,
         profileImage: user.profileImage,
-        googleLinked: Boolean(user.googleUid)
+        googleLinked: Boolean(user.googleUid),
+        phoneVerified: Boolean(user.phoneVerifiedAt)
     };
 }
 function createToken(user, propertyId) {
@@ -60,7 +61,7 @@ async function hasPropertyAccess(user, propertyId) {
     if (!propertyId)
         return true;
     const propertyAccess = await prisma.pGPropertyAccess.findFirst({
-        where: { propertyId, userId: user.id, role: user.role === 'PG_WARDEN' ? 'WARDEN' : 'OWNER' },
+        where: { propertyId, userId: user.id, role: user.role === 'PG_WARDEN' ? { in: ['WARDEN', 'COOK', 'HOUSEKEEPING', 'ACCOUNTANT'] } : 'OWNER' },
         select: { id: true }
     });
     return Boolean(propertyAccess);
@@ -111,6 +112,10 @@ export const register = async (req, res) => {
     }
     if (!isStrongPassword(String(password)))
         return res.status(400).json({ message: MESSAGES.strongPassword });
+    // Owners prove the phone number they register with, so guests can trust "Verified owner".
+    if (!await consumePhoneToken(normalizedPhone, input.phoneToken ? String(input.phoneToken) : undefined)) {
+        return res.status(400).json({ code: 'PHONE_NOT_VERIFIED', message: 'Verify your phone number with the code we sent' });
+    }
     try {
         const existing = await prisma.user.findFirst({
             where: {
@@ -131,7 +136,8 @@ export const register = async (req, res) => {
                     email: email?.trim() || null,
                     phone: normalizedPhone,
                     password: passwordHash,
-                    role: 'PG_OWNER'
+                    role: 'PG_OWNER',
+                    phoneVerifiedAt: new Date()
                 }
             });
             const slug = pgSlug || await createUniquePgSlug(tx, propertyName);
@@ -459,6 +465,29 @@ export const changePassword = async (req, res) => {
     catch (error) {
         logger.error({ err: error }, 'PG password change error');
         res.status(500).json({ message: 'Failed to change password' });
+    }
+};
+/** Owners and wardens who registered before phone checks prove their number here. */
+export const verifyMyPhone = async (req, res) => {
+    const input = parseBody(verifyPhoneBody, req, res, INVALID_REQUEST);
+    if (!input)
+        return;
+    const { userId } = req.user || {};
+    if (!userId)
+        return res.status(401).json({ message: 'Unauthorized' });
+    try {
+        const user = await prisma.user.findUnique({ where: { id: String(userId) } });
+        if (!user || user.role === 'PG_TENANT')
+            return res.status(403).json({ message: 'Only staff accounts verify here' });
+        if (!await consumePhoneToken(normalizePhone(user.phone || ''), String(input.phoneToken || ''))) {
+            return res.status(400).json({ message: 'That code is for a different number or has expired. Send a new code.' });
+        }
+        const updated = await prisma.user.update({ where: { id: user.id }, data: { phoneVerifiedAt: new Date() } });
+        res.json({ user: toUserResponse(updated) });
+    }
+    catch (error) {
+        logger.error({ err: error }, 'Phone verification error');
+        res.status(500).json({ message: 'Could not verify your phone' });
     }
 };
 export const updateProfile = async (req, res) => {

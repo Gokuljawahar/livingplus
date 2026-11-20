@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
-import { login, googleLogin, linkGoogle, unlinkGoogle, register, updateProfile, forgotPassword, changePassword, requestOtp, verifyOtp } from '../controllers/pg-auth.controller.js';
+import { login, googleLogin, linkGoogle, unlinkGoogle, register, updateProfile, forgotPassword, changePassword, verifyMyPhone, requestOtp, verifyOtp } from '../controllers/pg-auth.controller.js';
 import { systemRoute } from '../db/context.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 const router = Router();
@@ -37,6 +37,7 @@ router.post('/otp-verify', otpVerifyLimiter, systemRoute('phone codes check resi
 router.post('/register', systemRoute('registration creates a new PG workspace', register));
 router.post('/forgot-password', forgotPassword);
 router.post('/change-password', authenticate, changePassword);
+router.post('/verify-phone', authenticate, otpVerifyLimiter, verifyMyPhone);
 router.put('/profile', authenticate, updateProfile);
 export default router;
 //# sourceMappingURL=auth.routes.js.map

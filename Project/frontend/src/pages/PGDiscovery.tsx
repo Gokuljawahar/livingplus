@@ -4,7 +4,6 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowUpDown,
-  Building2,
   Check,
   Loader2,
   LogOut,
@@ -31,9 +30,14 @@ import {
   type GuestSession,
 } from '../utils/guest-session';
 import { SecureImage } from '../components/SecureImage';
+import BrandLogo from '../components/ui/BrandLogo';
+import PgPlaceholder from '../components/ui/PgPlaceholder';
 import AIChatPanel from '../components/AIChatPanel';
 import GuestLoginGate from '../components/GuestLoginGate';
 import MyRequests from '../components/MyRequests';
+import VibeProfileBuilder from '../components/VibeProfileBuilder';
+import { hasKeyHabits, loadVibeAnswers, loadVibeSummary, saveVibeAnswers, saveVibeSummary } from '../utils/vibe-storage';
+import { type VibeAnswers, type VibeMatch } from '@livingplus/shared';
 import { useOtpCooldown } from '../hooks/useOtpCooldown';
 import { apiErrorMessage, apiErrorStatus } from '../utils/api-error';
 import { phoneOtpErrorMessage, startPhoneVerification, type PhoneChallenge } from '../utils/phone-otp';
@@ -51,6 +55,11 @@ interface PGProperty {
   houseRules: string[];
   photoUrls: string[];
   availableBeds: number;
+  serviceSettings?: { vibeCheck?: boolean } | null;
+  /** An owner proved their phone with a code. */
+  ownerVerified?: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
   rooms: {
     id: string;
     roomNumber: string;
@@ -98,7 +107,6 @@ const SORTS = [
 const GENDER_LABELS: Record<string, string> = { MEN: 'Men', WOMEN: 'Women', ANY: 'Co-living' };
 
 const rupees = (amount: number) => `₹${amount.toLocaleString('en-IN')}`;
-const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]!.toUpperCase()).join('');
 
 function keywordMatch(property: PGProperty, text: string): boolean {
   return `${property.name} ${property.locality} ${property.city} ${property.address}`.toLowerCase().includes(text);
@@ -151,6 +159,12 @@ export default function PGDiscovery() {
   const [selectedProperty, setSelectedProperty] = useState<PGProperty | null>(null);
   const [selectedBed, setSelectedBed] = useState('');
   const [step, setStep] = useState<'details' | 'bed' | 'you' | 'verify'>('details');
+  // VibeCheck: answers live on this device; matches are per PG.
+  const [vibeAnswers, setVibeAnswers] = useState<VibeAnswers>(() => loadVibeAnswers());
+  const [vibeSummary, setVibeSummary] = useState(() => loadVibeSummary());
+  const [vibeOpen, setVibeOpen] = useState(false);
+  const [vibeLoading, setVibeLoading] = useState(false);
+  const [vibeMatches, setVibeMatches] = useState<Map<string, VibeMatch> | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
@@ -285,6 +299,8 @@ export default function PGDiscovery() {
     const verifiedPhone = guest?.phone || '';
     setSelectedProperty(property);
     setStep('details');
+    setVibeMatches(null);
+    setVibeOpen(false);
     setSelectedBed('');
     setRequest({ residentName: user?.name || '', phone: verifiedPhone, email: '', moveInDate: '', notes: '' });
     // Reuse the login OTP token for the first booking when the number matches.
@@ -351,6 +367,7 @@ export default function PGDiscovery() {
         propertyId: selectedProperty.id,
         bedId: selectedBed,
         phoneToken,
+        ...(Object.keys(vibeAnswers).length ? { vibeAnswers, ...(vibeSummary ? { vibeSummary } : {}) } : {}),
       });
       toast.success(response.data.message || 'Booking request submitted');
       // The OTP token is single-use; drop it but keep the guest signed in.
@@ -576,6 +593,27 @@ export default function PGDiscovery() {
     { label: 'AC', active: acOnly, toggle: () => setAcOnly(!acOnly) }
   ];
   const facts = selectedProperty ? priceFacts(selectedProperty) : null;
+  const vibeComplete = hasKeyHabits(vibeAnswers);
+  const runVibeCheck = async () => {
+    if (!selectedProperty) return;
+    setVibeLoading(true);
+    try {
+      saveVibeAnswers(vibeAnswers);
+      saveVibeSummary(vibeSummary);
+      const { beds } = (await api.post(`/pg/properties/${selectedProperty.id}/vibecheck`, { answers: vibeAnswers, ...(vibeSummary ? { summary: vibeSummary } : {}) })).data as { beds: (VibeMatch & { bedId: string })[] };
+      setVibeMatches(new Map(beds.map((bed) => [bed.bedId, bed])));
+      setVibeOpen(false);
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not run VibeCheck. Try again.'));
+    } finally {
+      setVibeLoading(false);
+    }
+  };
+  const bedChoices = selectedProperty
+    ? selectedProperty.rooms.filter(matchesRoom).flatMap((room) => room.beds.map((bed) => ({ room, bed, match: vibeMatches?.get(bed.id) ?? null })))
+        .sort((a, b) => (b.match?.score ?? -1) - (a.match?.score ?? -1))
+    : [];
+  const selectedMatch = vibeMatches?.get(selectedBed) ?? null;
   const chosenBed = selectedProperty?.rooms.flatMap((room) => room.beds.map((bed) => ({ room, bed }))).find(({ bed }) => bed.id === selectedBed) ?? null;
   const stepIndex = step === 'bed' ? 1 : step === 'you' ? 2 : step === 'verify' ? 3 : 0;
   const stepTitle = { details: '', bed: 'Choose a bed', you: 'Your details', verify: 'Verify your phone' }[step];
@@ -589,11 +627,8 @@ export default function PGDiscovery() {
       </a>
       <header className="sticky top-0 z-40 bg-navy-900 text-white">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 sm:px-6">
-          <Link to={ROUTES.guestHome} className="flex items-center gap-2 font-display text-xl font-bold text-white">
-            <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-amber-500 text-navy-900" aria-hidden="true">
-              <Building2 className="h-5 w-5" />
-            </span>
-            LivingPlus
+          <Link to={ROUTES.guestHome} aria-label="Living Plus home">
+            <BrandLogo tone="dark" />
           </Link>
           <form
             role="search"
@@ -709,7 +744,14 @@ export default function PGDiscovery() {
           </div>
         </section>
       ) : (
-        <section id="results" className="mx-auto max-w-7xl px-4 pb-16 pt-4 sm:px-6">
+        <section id="results" className="mx-auto max-w-7xl px-4 pb-16 pt-5 sm:px-6">
+          <div className="mb-4 sm:mb-5">
+            <h1 className="font-display text-[22px] font-bold leading-tight text-navy-900 sm:text-[32px]">PGs in Chennai, with the real monthly cost</h1>
+            <p className="mt-1 max-w-2xl text-muted">
+              <span className="sm:hidden">Rent, food and deposit up front. Live bed availability.</span>
+              <span className="hidden sm:inline">Rent, food and deposit shown up front. Beds are live from the owner's own register. Browse freely; you only verify your phone when you request a bed.</span>
+            </p>
+          </div>
           <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-hide sm:mx-0 sm:flex-wrap sm:px-0" role="group" aria-label="Quick filters">
             {quickChips.map((chip) => (
               <button
@@ -788,15 +830,18 @@ export default function PGDiscovery() {
                     >
                       <div className="relative aspect-[4/3] overflow-hidden rounded-[14px] bg-closed-bg">
                         {property.photoUrls?.[0] ? (
-                          <SecureImage srcKey={property.photoUrls[0]} alt="" className="h-full w-full object-cover" />
+                          <SecureImage srcKey={property.photoUrls[0]} alt="" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
                         ) : (
-                          <div className="flex h-full items-center justify-center font-display text-4xl font-bold text-navy-900/25" aria-hidden="true">
-                            {initials(property.name)}
-                          </div>
+                          <PgPlaceholder name={property.name} />
                         )}
                         <span className="absolute left-3 top-3 rounded-full bg-white px-2.5 py-1 text-[13px] font-semibold text-navy-900 shadow-[var(--shadow-float)]">
                           {GENDER_LABELS[property.genderPolicy] || property.genderPolicy}
                         </span>
+                        {property.ownerVerified && (
+                          <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[13px] font-semibold text-positive shadow-[var(--shadow-float)]">
+                            <Check className="h-3.5 w-3.5" aria-hidden="true" /> Verified owner
+                          </span>
+                        )}
                       </div>
                       <div className="mt-3">
                         <div className="flex items-start justify-between gap-3">
@@ -814,7 +859,7 @@ export default function PGDiscovery() {
                             <span className="text-sm text-muted"> {price.food}</span>
                           </p>
                         )}
-                        <p className="text-sm text-muted">{price.deposit}</p>
+                        {price.deposit !== 'Deposit not listed' && <p className="text-sm text-muted">{price.deposit}</p>}
                       </div>
                     </button>
                   </li>
@@ -824,6 +869,56 @@ export default function PGDiscovery() {
           )}
         </section>
       )}
+
+      {!(activeTab === 'requests' && guestPhone) && (
+        <>
+          <section aria-labelledby="how-heading" className="border-t border-hairline bg-white">
+            <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6">
+              <h2 id="how-heading" className="font-display text-2xl font-bold text-navy-900">How a bed request works</h2>
+              <ol className="mt-6 grid gap-6 sm:grid-cols-3">
+                {[
+                  ['Compare honestly', 'Every listing shows rent, food and deposit, and which beds are free right now.'],
+                  ['Check the vibe', 'VibeCheck compares your sleep, tidiness and noise habits with the people already in each room. Names are never shown.'],
+                  ['Request with one code', 'Verify your phone once. The bed is held while the owner reviews, and you follow the reply in My requests.']
+                ].map(([title, body], index) => (
+                  <li key={title} className="flex gap-4">
+                    <span className="tabular flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-50 font-display font-bold text-navy-900">{index + 1}</span>
+                    <div>
+                      <h3 className="font-semibold text-navy-900">{title}</h3>
+                      <p className="mt-1 text-muted">{body}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </section>
+          <section aria-labelledby="owner-band-heading" className="bg-navy-900 text-white">
+            <div className="mx-auto flex max-w-7xl flex-col gap-5 px-4 py-12 sm:px-6 md:flex-row md:items-center md:justify-between">
+              <div className="max-w-xl">
+                <h2 id="owner-band-heading" className="font-display text-2xl font-bold text-white">Run a PG?</h2>
+                <p className="mt-1 text-white/80">Bed requests, rent, food, maintenance and staff in one workspace, with an assistant that drafts the routine work for you to confirm.</p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <Link to={ROUTES.ownerRegister} className="inline-flex min-h-11 items-center rounded-full bg-white px-5 font-semibold text-navy-900 hover:bg-amber-50">List your PG</Link>
+                <Link to={ROUTES.ownerLogin} className="inline-flex min-h-11 items-center rounded-full px-5 font-semibold text-white ring-1 ring-white/30 hover:bg-white/10">Owner sign in</Link>
+              </div>
+            </div>
+          </section>
+        </>
+      )}
+
+      <footer className="border-t border-hairline bg-white">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-6 text-sm text-muted sm:px-6">
+          <BrandLogo />
+          <nav aria-label="Footer" className="flex flex-wrap gap-x-5 gap-y-2">
+            <a href={residentHome} className="hover:text-navy-900">Residents</a>
+            <Link to={ROUTES.ownerLogin} className="hover:text-navy-900">For PG owners</Link>
+            <Link to="/privacy-policy" className="hover:text-navy-900">Privacy</Link>
+            <Link to="/terms" className="hover:text-navy-900">Terms</Link>
+          </nav>
+          <p>© 2026 Living Plus, Chennai</p>
+        </div>
+      </footer>
 
       {mobileFiltersOpen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-navy-900/50 sm:items-center sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileFiltersOpen(false); }}>
@@ -887,6 +982,20 @@ export default function PGDiscovery() {
                     ))}
                   </dl>
                   {selectedProperty.description && <p className="mt-4 max-w-prose text-ink">{selectedProperty.description}</p>}
+                  <h3 className="mt-5 font-sans text-base font-semibold">What we've checked</h3>
+                  <ul className="mt-2 space-y-1">
+                    {[
+                      [Boolean(selectedProperty.ownerVerified), "Owner's phone number verified with a code"],
+                      [selectedProperty.latitude != null && selectedProperty.longitude != null, 'Location pinned on the map'],
+                      [(selectedProperty.photoUrls?.length ?? 0) > 0, (selectedProperty.photoUrls?.length ?? 0) > 0 ? `${selectedProperty.photoUrls.length} photo${selectedProperty.photoUrls.length === 1 ? '' : 's'} from the owner` : 'Photos from the owner'],
+                      [(selectedProperty.houseRules?.length ?? 0) > 0, 'House rules shared up front']
+                    ].map(([ok, label]) => (
+                      <li key={String(label)} className={`flex items-center gap-2 ${ok ? 'text-ink' : 'text-muted'}`}>
+                        {ok ? <Check className="h-4 w-4 shrink-0 text-positive" aria-hidden="true" /> : <span className="h-4 w-4 shrink-0 text-center" aria-hidden="true">–</span>}
+                        <span>{label}{ok ? '' : ': not yet'}</span>
+                      </li>
+                    ))}
+                  </ul>
                   {selectedProperty.amenities?.length > 0 && (
                     <>
                       <h3 className="mt-5 font-sans text-base font-semibold">What's here</h3>
@@ -934,15 +1043,56 @@ export default function PGDiscovery() {
                         Available bed
                         <select required value={selectedBed} onChange={(event) => setSelectedBed(event.target.value)} className={fieldClass}>
                           <option value="">Choose a bed</option>
-                          {selectedProperty.rooms.filter(matchesRoom).flatMap((room) =>
-                            room.beds.map((bed) => (
-                              <option key={bed.id} value={bed.id}>
-                                Room {room.roomNumber}, {bed.label} · {rupees(room.monthlyRent)}/mo
-                              </option>
-                            ))
-                          )}
+                          {bedChoices.map(({ room, bed, match }) => (
+                            <option key={bed.id} value={bed.id}>
+                              Room {room.roomNumber}, {bed.label} · {rupees(room.monthlyRent)}/mo{match ? (match.score !== null ? ` · ${match.score}% match` : ' · no roommates yet') : ''}
+                            </option>
+                          ))}
                         </select>
                       </label>
+
+                      {vibeMatches && selectedBed && selectedMatch && (
+                        <div className="rounded-[14px] border border-hairline bg-surface px-4 py-3" aria-live="polite">
+                          {selectedMatch.score !== null ? (
+                            <>
+                              <p className="font-medium text-navy-900">
+                                <span className="tabular">{selectedMatch.score}%</span> VibeCheck match with {selectedMatch.compared === 1 ? 'the resident' : `${selectedMatch.compared} residents`} of this room
+                              </p>
+                              <ul className="mt-1 space-y-0.5 text-sm text-ink">
+                                {selectedMatch.reasons.map((reason) => <li key={reason} className="flex gap-1.5"><Check className="mt-0.5 h-4 w-4 shrink-0 text-positive" aria-hidden="true" />{reason}</li>)}
+                                {selectedMatch.differences.map((difference) => <li key={difference} className="text-muted">{difference}</li>)}
+                              </ul>
+                            </>
+                          ) : (
+                            <p className="text-ink">Nobody in this room has taken VibeCheck yet, so there's no one to compare with.</p>
+                          )}
+                        </div>
+                      )}
+
+                      {selectedProperty.serviceSettings?.vibeCheck === false ? null : !vibeOpen ? (
+                        <div className="rounded-[14px] border border-hairline px-4 py-3">
+                          <p className="font-medium text-navy-900">{vibeMatches ? 'Your VibeCheck is on' : 'Find the room that suits you'}</p>
+                          <p className="mt-0.5 text-sm text-muted">
+                            {vibeMatches
+                              ? 'Beds are sorted by how well your habits match the people already in each room.'
+                              : 'Tell us about your routine in your own words, or answer 8 quick questions. AI compares you with the people already living in each room. Only habits are shown, never who said what.'}
+                          </p>
+                          <button type="button" onClick={() => setVibeOpen(true)} className="btn-secondary mt-3">
+                            {vibeMatches ? 'Change my answers' : 'Take VibeCheck'}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="rounded-[14px] border border-navy-900/20 px-4 py-4">
+                          <h3 className="font-sans text-base font-semibold">VibeCheck</h3>
+                          <div className="mt-3"><VibeProfileBuilder answers={vibeAnswers} summary={vibeSummary} onChange={(answers, summary) => { setVibeAnswers(answers); setVibeSummary(summary); }} /></div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button type="button" disabled={!vibeComplete || vibeLoading} onClick={() => void runVibeCheck()} className="btn-secondary">
+                              {vibeLoading && <Loader2 className="h-4 w-4 animate-spin" />} See my matches
+                            </button>
+                            <button type="button" onClick={() => setVibeOpen(false)} className="min-h-11 px-3 font-medium text-muted hover:text-navy-900">Not now</button>
+                          </div>
+                        </div>
+                      )}
                       <label className={labelClass}>
                         Move-in date
                         <input required type="date" min={new Date().toISOString().slice(0, 10)} value={request.moveInDate} onChange={(event) => setRequest({ ...request, moveInDate: event.target.value })} className={fieldClass} />

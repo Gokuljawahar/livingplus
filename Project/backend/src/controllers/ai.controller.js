@@ -32,13 +32,14 @@ export const postChat = async (req, res) => {
         if (String(error?.message || '').startsWith('AI_MODEL_INIT_FAILED'))
             logger.error({ err: error }, 'PG AI model init failed');
         return res.status(503).json({
-            message: 'The AI assistant is not connected. Set ENABLE_AI_ORCHESTRATOR=true and AI_MODEL (for example google:gemini-3.8-flash) with that provider\'s credentials to enable it.'
+            message: 'The AI assistant is not connected. Set ENABLE_AI_ORCHESTRATOR=true and AI_MODEL (for example google:gemini-4-hydrogen) with Google credentials (GOOGLE_API_KEY, or Vertex AI) to enable it.'
         });
     }
     try {
         const result = await runChat(req, model, {
             message,
             imageDataUrl,
+            language: input.language ? String(input.language) : undefined,
             sessionId: input.sessionId ? String(input.sessionId) : undefined,
             confirmationId: input.confirmationId ? String(input.confirmationId) : undefined,
             cancelConfirmationId: input.cancelConfirmationId ? String(input.cancelConfirmationId) : undefined

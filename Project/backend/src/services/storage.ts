@@ -8,7 +8,7 @@
 //                          needs roles/iam.serviceAccountTokenCreator on itself.
 // UPLOAD_STORAGE=s3     -> S3_BUCKET_NAME, S3_BUCKET_REGION, AWS credentials
 // Unset: gcs when GCS_BUCKET is set, s3 when S3_BUCKET_NAME is set, else local.
-import { access, mkdir, writeFile } from 'fs/promises';
+import { access, mkdir, readFile as readLocalFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
@@ -49,6 +49,7 @@ const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
 export interface GcsFileLike {
   save(data: Buffer, options: { contentType: string; resumable: boolean }): Promise<unknown>;
   getSignedUrl(options: { version: 'v4'; action: 'read' | 'write'; expires: number; contentType?: string }): Promise<[string]>;
+  download?(): Promise<[Buffer]>;
 }
 export interface GcsBucketLike {
   file(name: string): GcsFileLike;
@@ -98,6 +99,26 @@ export async function putFile(fileKey: string, data: Buffer, contentType: string
   }
   const { sdk, client, bucket } = await s3();
   await client.send(new sdk.PutObjectCommand({ Bucket: bucket, Key: fileKey, Body: data, ContentType: contentType }));
+}
+
+/** Reads a stored file back (for server-side checks such as AI KYC reading). */
+export async function readStoredFile(fileKey: string): Promise<{ data: Buffer; contentType: string }> {
+  const contentType = /\.pdf$/i.test(fileKey) ? 'application/pdf' : /\.png$/i.test(fileKey) ? 'image/png' : /\.jpe?g$/i.test(fileKey) ? 'image/jpeg' : 'image/webp';
+  const kind = storageKind();
+  if (kind === 'local') {
+    const filePath = localUploadPath(fileKey);
+    if (!filePath) throw new Error('INVALID_FILE_KEY');
+    return { data: await readLocalFile(filePath), contentType };
+  }
+  if (kind === 'gcs') {
+    const file = (await gcsBucket()).file(fileKey);
+    if (!file.download) throw new Error('DOWNLOAD_UNSUPPORTED');
+    const [data] = await file.download();
+    return { data, contentType };
+  }
+  const { sdk, client, bucket } = await s3();
+  const object = await client.send(new sdk.GetObjectCommand({ Bucket: bucket, Key: fileKey }));
+  return { data: Buffer.from(await object.Body.transformToByteArray()), contentType: object.ContentType || contentType };
 }
 
 function localMediaUrl(req: Request, fileKey: string): string {

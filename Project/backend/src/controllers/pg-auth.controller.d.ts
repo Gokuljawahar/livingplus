@@ -22,5 +22,7 @@ export declare const verifyOtp: (req: Request, res: Response) => Promise<any>;
 export declare function consumePhoneToken(phone: string, token: string | undefined, purpose?: string, propertyId?: string): Promise<boolean>;
 export declare const forgotPassword: (_req: Request, res: Response) => Promise<any>;
 export declare const changePassword: (req: Request, res: Response) => Promise<any>;
+/** Owners and wardens who registered before phone checks prove their number here. */
+export declare const verifyMyPhone: (req: Request, res: Response) => Promise<any>;
 export declare const updateProfile: (req: Request, res: Response) => Promise<any>;
 //# sourceMappingURL=pg-auth.controller.d.ts.map

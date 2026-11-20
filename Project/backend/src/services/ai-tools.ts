@@ -779,6 +779,30 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     }
   },
 
+  send_property_notice: {
+    description: 'Post a notice (water cut, cleaning schedule, rule change, festival timings…) to every current resident of one property, in their resident-site notifications. Draft the title and message for the owner first; call this only once they are happy with the exact text.',
+    schema: toolArgs({ property_id: z.string(), title: z.string(), message: z.string() }),
+    requiresConfirmation: true,
+    roles: ['PG_OWNER', 'PG_WARDEN'],
+    execute: async (actor, args = {}) => {
+      const propertyId = await resolveScopedPropertyId(actor, args.property_id);
+      if (!propertyId) throw new Error('FORBIDDEN');
+      const residents = await db.pGTenant.findMany({
+        where: { propertyId, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
+        select: { id: true }
+      });
+      const title = String(args.title ?? '').trim();
+      const message = String(args.message ?? '').trim();
+      if (title.length < 3 || title.length > 80) throw new Error('NOTICE_TITLE_LENGTH: use 3 to 80 characters');
+      if (message.length < 5 || message.length > 600) throw new Error('NOTICE_MESSAGE_LENGTH: use 5 to 600 characters');
+      if (!residents.length) return { sent: 0, note: 'No current residents at this property.' };
+      await db.pGResidentNotification.createMany({
+        data: residents.map((resident: { id: string }) => ({ propertyId, tenantId: resident.id, type: 'NOTICE', title, message }))
+      });
+      return { sent: residents.length };
+    }
+  },
+
   log_expense: {
     description: 'Record a property expense (food, staff, maintenance, utilities). Only call after the owner explicitly confirmed amount, category and date.',
     schema: toolArgs({ property_id: z.string(), category: z.string().optional(), amount: num(), spent_on: z.string().optional(), note: z.string().optional() }),

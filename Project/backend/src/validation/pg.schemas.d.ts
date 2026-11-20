@@ -9,6 +9,8 @@ export declare const bookingRequestBody: z.ZodObject<{
     notes: z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>;
     phoneToken: z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>;
     idempotencyKey: z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>;
+    vibeAnswers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    vibeSummary: z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>;
 }, z.core.$strip>;
 export declare const rentPaymentBody: z.ZodObject<{
     amount: z.ZodCoercedNumber<unknown>;

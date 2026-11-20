@@ -5,6 +5,7 @@ export declare function currentUser(req: Request): {
     propertyId?: string;
 } | null;
 export declare function canManageProperty(req: Request, propertyId: string, roles?: string[]): Promise<boolean>;
+export declare function accessiblePropertyIds(req: Request, roles?: string[]): Promise<string[]>;
 export declare const getPublicConfig: (_req: Request, res: Response) => Promise<any>;
 /**
  * Meaning-based search over published PGs. Returns ranked property ids; the
@@ -28,6 +29,32 @@ export declare const createBookingRequest: (req: Request, res: Response) => Prom
 export declare const cancelBookingRequest: (req: Request, res: Response) => Promise<any>;
 export declare const getPublicBookingStatus: (req: Request, res: Response) => Promise<any>;
 export declare const listGuestBookings: (req: Request, res: Response) => Promise<any>;
+/**
+ * Public: turns a free-text description of someone's routine (any language)
+ * into VibeCheck habits with one structured Gemini call. Nothing is stored;
+ * the person reviews the result before using it.
+ */
+export declare const buildVibeProfileFromText: (req: Request, res: Response) => Promise<any>;
+/**
+ * Public VibeCheck for a published PG: scores the visitor's answers against the
+ * residents of each room with a free bed. Returns scores and habit-level
+ * reasons only, never residents' names or individual answers.
+ */
+export declare const vibeCheckProperty: (req: Request, res: Response) => Promise<any>;
+/** The signed-in resident's own stay, or null (same ownership rule as notices). */
+export declare function ownStay(req: Request, tenantId: string): Promise<any | null>;
+/** Residents answer VibeCheck so future roommates can match with them. */
+export declare const saveTenantVibe: (req: Request, res: Response) => Promise<any>;
+/** The resident's match with their current roommates, and whether the rematch window is open. */
+export declare const getTenantVibeMatch: (req: Request, res: Response) => Promise<any>;
+/** Resident: read my uploaded KYC document with AI right after uploading it. */
+export declare const checkMyKyc: (req: Request, res: Response) => Promise<any>;
+/** Owner or warden: run (or re-run) the AI reading of a resident's KYC document. */
+export declare const checkTenantKyc: (req: Request, res: Response) => Promise<any>;
+/** Timestamped move-in / move-out condition records for one stay, newest first. */
+export declare const listConditionReports: (req: Request, res: Response) => Promise<any>;
+/** Adds a condition record. Records are never edited or deleted, so they can settle deposit disputes. */
+export declare const createConditionReport: (req: Request, res: Response) => Promise<any>;
 export declare const listOwnerBookings: (req: Request, res: Response) => Promise<any>;
 export declare const updateBookingStatus: (req: Request, res: Response) => Promise<any>;
 export declare const checkInTenant: (req: Request, res: Response) => Promise<any>;

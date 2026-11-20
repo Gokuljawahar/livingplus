@@ -14,7 +14,10 @@ export const bookingRequestBody = z.object({
   moveInDate: text(40),
   notes: optionalText(1000),
   phoneToken: optionalText(200),
-  idempotencyKey: optionalText(200)
+  idempotencyKey: optionalText(200),
+  /** VibeCheck answers; cleaned by cleanVibeAnswers (unknown keys and values dropped). */
+  vibeAnswers: z.record(z.string().max(30), z.unknown()).optional(),
+  vibeSummary: optionalText(300)
 });
 
 export const rentPaymentBody = z.object({

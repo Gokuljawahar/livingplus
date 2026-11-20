@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
+import A2uiSurface, { type A2uiAction, type A2uiMessage } from './a2ui/A2uiSurface';
 import { useAuth } from '../context/auth';
 import { OWNER_USER_KEY, RESIDENT_USER_KEY } from '../utils/session';
 
@@ -17,7 +18,7 @@ function readStoredRole(key: string): string | null {
   }
 }
 
-type ChatMsg = { from: 'user' | 'assistant'; text: string };
+type ChatMsg = { from: 'user' | 'assistant'; text: string; ui?: A2uiMessage[] };
 
 const MAX_RECORD_SECONDS = 60;
 
@@ -145,11 +146,15 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
     persona = 'resident';
   }
   const copy = PERSONA_COPY[persona];
+  // Reply language (Tamil, Hindi or English), remembered on this device.
+  const [language, setLanguage] = useState(() => {
+    try { return localStorage.getItem('assistantLanguage') || 'en'; } catch { return 'en'; }
+  });
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [sessionId, setSessionId] = useState('');
-  const [pending, setPending] = useState<{ confirmationId: string; tool: string; preview: string } | null>(null);
+  const [pending, setPending] = useState<{ confirmationId: string; tool: string; preview: string; ui?: A2uiMessage[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const [photo, setPhoto] = useState<string | null>(null);
@@ -161,6 +166,34 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
   const chunksRef = useRef<Blob[]>([]);
   const stopTimerRef = useRef<number | null>(null);
 
+  const applyResponse = (data: { sessionId?: string; reply: string; needsConfirmation?: { confirmationId: string; tool: string; preview: string }; ui?: A2uiMessage[] }, cancelConfirmationId?: string) => {
+    if (data.sessionId) setSessionId(data.sessionId);
+    setPending(data.needsConfirmation ? { ...data.needsConfirmation, ...(data.ui ? { ui: data.ui } : {}) } : null);
+    const message: ChatMsg = { from: 'assistant', text: data.reply, ...(data.ui && !data.needsConfirmation ? { ui: data.ui } : {}) };
+    setMessages((current) => cancelConfirmationId ? [message] : [...current, message]);
+  };
+
+  const handleFailure = (error: unknown) => {
+    const failure = (error as { response?: { status?: number; data?: { message?: string } } })?.response;
+    if (failure?.status === 503) {
+      setUnavailable(true);
+      setMessages((current) => [...current, { from: 'assistant', text: 'The AI assistant is not connected yet. The owner can enable it by configuring an AI model.' }]);
+    } else {
+      toast.error(failure?.data?.message || 'Assistant failed to answer');
+    }
+  };
+
+  const dispatch = async (body: { message: string; confirmationId?: string; cancelConfirmationId?: string; imageDataUrl?: string | null }) => {
+    try {
+      const response = await api.post('/pg/ai/chat', { ...body, sessionId: sessionId || undefined, language });
+      applyResponse(response.data, body.cancelConfirmationId);
+    } catch (error: unknown) {
+      handleFailure(error);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const send = async (confirmationId?: string, cancelConfirmationId?: string) => {
     const text = input.trim();
     if ((!text && !confirmationId && !cancelConfirmationId) || busy) return;
@@ -169,23 +202,28 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
     const imageDataUrl = photo;
     setInput('');
     setPhoto(null);
-    try {
-      const response = await api.post('/pg/ai/chat', { message: text, sessionId: sessionId || undefined, confirmationId, cancelConfirmationId, imageDataUrl: imageDataUrl || undefined });
-      if (response.data.sessionId) setSessionId(response.data.sessionId);
-      setPending(response.data.needsConfirmation || null);
-      setMessages((current) => cancelConfirmationId
-        ? [{ from: 'assistant', text: response.data.reply }]
-        : [...current, { from: 'assistant', text: response.data.reply }]);
-    } catch (error: unknown) {
-      const failure = (error as { response?: { status?: number; data?: { message?: string } } })?.response;
-      if (failure?.status === 503) {
-        setUnavailable(true);
-        setMessages((current) => [...current, { from: 'assistant', text: 'The AI assistant is not connected yet. The owner can enable it by configuring an AI model.' }]);
-      } else {
-        toast.error(failure?.data?.message || 'Assistant failed to answer');
-      }
-    } finally {
-      setBusy(false);
+    await dispatch({ message: text, confirmationId, cancelConfirmationId, imageDataUrl: imageDataUrl || undefined });
+  };
+
+  /** A2UI button events come back as agent actions (renderer-to-agent over the chat POST). */
+  const handleUiAction = (action: A2uiAction) => {
+    const confirmationId = typeof action.context.confirmationId === 'string' ? action.context.confirmationId : pending?.confirmationId;
+    if (action.name === 'confirm_action' && confirmationId) {
+      setPending(null);
+      void send(confirmationId);
+      return;
+    }
+    if (action.name === 'cancel_action' && confirmationId) {
+      setPending(null);
+      void send(undefined, confirmationId);
+      return;
+    }
+    if (action.name === 'book_property') {
+      const name = typeof action.context.name === 'string' ? action.context.name : 'this PG';
+      if (busy) return;
+      setBusy(true);
+      setMessages((current) => [...current, { from: 'user', text: `I'd like to book a bed at ${name}` }]);
+      void dispatch({ message: `I'd like to book a bed at ${name}` });
     }
   };
 
@@ -280,13 +318,10 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
       <button
         onClick={() => setOpen(true)}
         aria-label="Open PG assistant"
-        className={`fixed ${isResidentPage ? 'bottom-20 lg:bottom-6' : 'bottom-6'} right-6 z-50 flex items-center gap-2 rounded-full bg-navy-900 text-white px-4 py-3 shadow-xl transition-all duration-200 group border border-white/20`}
+        className={`fixed ${isResidentPage ? 'bottom-20 lg:bottom-6' : 'bottom-5 sm:bottom-6'} right-4 sm:right-6 z-50 flex h-14 w-14 items-center justify-center gap-2 rounded-full border border-white/20 bg-navy-900 text-white shadow-[var(--shadow-float)] transition-colors hover:bg-navy-700 sm:h-auto sm:w-auto sm:px-4 sm:py-3`}
       >
-        <div className="relative">
-          <MessageCircle className="h-5 w-5 text-amber-500" />
-          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-        </div>
-        <span className="text-xs font-bold pr-1">PG Concierge</span>
+        <MessageCircle className="h-6 w-6 text-amber-500 sm:h-5 sm:w-5" aria-hidden="true" />
+        <span className="hidden pr-1 text-sm font-semibold sm:inline">Ask the assistant</span>
       </button>
     );
   }
@@ -301,7 +336,7 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
   return (
     <section
       aria-label="PG assistant"
-      className="fixed bottom-6 right-6 z-50 flex h-[520px] w-[min(94vw,400px)] flex-col rounded-3xl border border-slate-200/90 bg-white shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+      className="fixed bottom-6 right-6 z-50 flex h-[520px] w-[min(94vw,400px)] flex-col rounded-3xl border border-hairline bg-white shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
     >
       <header className="flex items-center justify-between bg-navy-900 px-5 py-3.5 text-white shadow-xs">
         <div className="flex items-center gap-2.5">
@@ -315,9 +350,24 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live
               </span>
             </div>
-            <p className="text-[11px] text-blue-200/80">Context-aware · Verifies property records</p>
+            <p className="text-[13px] text-white/75">Answers from your PG's live records</p>
           </div>
         </div>
+        <label className="ml-auto mr-1">
+          <span className="sr-only">Reply language</span>
+          <select
+            value={language}
+            onChange={(event) => {
+              setLanguage(event.target.value);
+              try { localStorage.setItem('assistantLanguage', event.target.value); } catch { /* per-visit only */ }
+            }}
+            className="rounded-[6px] border border-white/30 bg-navy-900 px-2 py-1 text-[13px] text-white"
+          >
+            <option value="en">English</option>
+            <option value="ta">தமிழ்</option>
+            <option value="hi">हिन्दी</option>
+          </select>
+        </label>
         <button
           onClick={() => setOpen(false)}
           aria-label="Close assistant"
@@ -327,11 +377,11 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
         </button>
       </header>
 
-      <div className="flex-1 space-y-3 overflow-y-auto p-4 text-xs sm:text-sm bg-slate-50/40">
+      <div className="flex-1 space-y-3 overflow-y-auto p-4 text-xs sm:text-sm bg-surface">
         {!messages.length && (
           <div className="space-y-3 pt-2">
             <div className="rounded-2xl border border-blue-100 bg-white p-4 shadow-xs">
-              <p className="text-slate-700 leading-relaxed font-medium">{copy.welcome}</p>
+              <p className="text-ink leading-relaxed font-medium">{copy.welcome}</p>
               {limited && (
                 <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/70 p-2.5 text-[11px] text-amber-900 font-medium leading-relaxed">
                   🔒 <strong>Guest mode:</strong> Onboard as a resident on your PG's site to unlock voice notes and photo-based maintenance reporting.
@@ -341,7 +391,7 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
 
             {/* Quick Suggestion Chips */}
             <div className="pt-2">
-              <p className="text-[11px] font-bold text-slate-400 px-1 mb-2">Try asking</p>
+              <p className="text-[11px] font-bold text-muted px-1 mb-2">Try asking</p>
               <div className="flex flex-wrap gap-1.5">
                 {SUGGESTED_PROMPTS[persona].map((promptText) => (
                   <button
@@ -351,7 +401,7 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
                       setInput(promptText);
                       inputRef.current?.focus();
                     }}
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-navy-900 hover:border-amber-500 hover:bg-amber-50/50 transition-all shadow-xs text-left"
+                    className="rounded-full border border-hairline bg-white px-3 py-1.5 text-xs font-semibold text-navy-900 hover:border-amber-500 hover:bg-amber-50/50 transition-all text-left"
                   >
                     {promptText}
                   </button>
@@ -367,7 +417,7 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
             className={`max-w-[88%] px-3.5 py-2.5 text-xs sm:text-sm leading-relaxed ${
               msg.from === 'user'
                 ? 'ml-auto rounded-2xl rounded-tr-xs bg-navy-900 text-white shadow-xs font-medium'
-                : 'rounded-2xl rounded-tl-xs bg-white text-slate-800 border border-slate-200/80 shadow-xs'
+                : 'rounded-2xl rounded-tl-xs bg-white text-ink border border-hairline'
             }`}
           >
             <ReactMarkdown
@@ -386,11 +436,12 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
             >
               {msg.text}
             </ReactMarkdown>
+            {msg.ui && <A2uiSurface messages={msg.ui} onAction={handleUiAction} />}
           </div>
         ))}
 
         {(busy || transcribing) && (
-          <div className="flex items-center gap-2 text-xs text-slate-400 bg-white px-3 py-2 rounded-2xl w-fit border border-slate-100 shadow-xs">
+          <div className="flex items-center gap-2 text-xs text-muted bg-white px-3 py-2 rounded-2xl w-fit border border-hairline">
             <Loader2 className="h-3.5 w-3.5 animate-spin text-navy-900" />
             <span>Thinking…</span>
           </div>
@@ -398,10 +449,10 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
       </div>
 
       {photo && (
-        <div className="flex items-center gap-2 border-t border-slate-200 bg-slate-50 p-2 text-xs text-slate-600">
-          <img src={photo} alt="Attached issue" className="h-10 w-10 object-cover rounded-lg border border-slate-200" />
+        <div className="flex items-center gap-2 border-t border-hairline bg-surface p-2 text-xs text-muted">
+          <img src={photo} alt="Attached issue" className="h-10 w-10 object-cover rounded-lg border border-hairline" />
           <span className="font-medium">Photo attached to message</span>
-          <button onClick={() => setPhoto(null)} aria-label="Remove photo" className="ml-auto p-1 hover:bg-slate-200 rounded-full transition-colors"><X className="h-3.5 w-3.5" /></button>
+          <button onClick={() => setPhoto(null)} aria-label="Remove photo" className="ml-auto p-1 hover:bg-hairline rounded-full transition-colors"><X className="h-3.5 w-3.5" /></button>
         </div>
       )}
 
@@ -413,19 +464,25 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
       )}
 
       {pending && !unavailable && (
-        <div className="border-t border-amber-200 bg-amber-50 p-3.5 text-xs">
-          <p className="text-amber-900 font-medium leading-relaxed">{pending.preview}</p>
-          <div className="mt-2.5 flex gap-2">
-            <button onClick={() => { setPending(null); void send(pending.confirmationId); }} className="rounded-lg bg-emerald-700 px-3 py-1.5 font-bold text-white shadow-xs hover:bg-emerald-800 transition-colors">Confirm action</button>
-            <button onClick={() => void send(undefined, pending.confirmationId)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50 transition-colors">Cancel</button>
+        pending.ui ? (
+          <div className="border-t border-amber-200 bg-amber-50/60 p-3">
+            <A2uiSurface messages={pending.ui} onAction={handleUiAction} />
           </div>
-        </div>
+        ) : (
+          <div className="border-t border-amber-200 bg-amber-50 p-3.5 text-xs">
+            <p className="text-amber-900 font-medium leading-relaxed">{pending.preview}</p>
+            <div className="mt-2.5 flex gap-2">
+              <button onClick={() => { setPending(null); void send(pending.confirmationId); }} className="btn-primary">Confirm action</button>
+              <button onClick={() => void send(undefined, pending.confirmationId)} className="btn-secondary">Cancel</button>
+            </div>
+          </div>
+        )
       )}
 
-      <form onSubmit={(e) => { e.preventDefault(); void send(); }} className="flex items-center gap-2 border-t border-slate-200 bg-white p-3">
+      <form onSubmit={(e) => { e.preventDefault(); void send(); }} className="flex items-center gap-2 border-t border-hairline bg-white p-3">
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { void attachPhoto(e.target.files?.[0]); e.target.value = ''; }} />
         {!limited && (
-          <button type="button" onClick={() => fileRef.current?.click()} aria-label="Attach a photo" className="p-2 text-slate-400 hover:text-navy-900 hover:bg-slate-100 rounded-xl transition-colors" title="Attach issue photo">
+          <button type="button" onClick={() => fileRef.current?.click()} aria-label="Attach a photo" className="p-2 text-muted hover:text-navy-900 hover:bg-surface rounded-xl transition-colors" title="Attach issue photo">
             <ImagePlus className="h-4.5 w-4.5" />
           </button>
         )}
@@ -435,14 +492,14 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
           onChange={(e) => setInput(e.target.value)}
           placeholder={copy.placeholder}
           aria-label={copy.placeholder}
-          className="w-full rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2 text-xs sm:text-sm font-medium outline-none focus:bg-white focus:ring-2 focus:ring-navy-900/15 focus:border-navy-900 transition-all"
+          className="w-full rounded-xl border border-field-border bg-surface px-3.5 py-2 text-xs sm:text-sm font-medium outline-none focus:bg-white focus:ring-2 focus:ring-navy-900/15 focus:border-navy-900 transition-all"
         />
         {!limited && (
           <button
             type="button"
             onClick={() => void toggleRecording()}
             aria-label={recording ? 'Stop recording' : 'Record a voice note'}
-            className={`p-2 rounded-xl transition-colors ${recording ? 'text-red-600 bg-red-50' : 'text-slate-400 hover:text-navy-900 hover:bg-slate-100'}`}
+            className={`p-2 rounded-xl transition-colors ${recording ? 'text-red-600 bg-red-50' : 'text-muted hover:text-navy-900 hover:bg-surface'}`}
             title={recording ? 'Stop voice note' : 'Record voice note'}
           >
             {recording ? <Square className="h-4.5 w-4.5" /> : <Mic className="h-4.5 w-4.5" />}

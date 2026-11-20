@@ -17,6 +17,10 @@ export declare const registerBody: z.ZodObject<{
     genderPolicy: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
     amenities: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodArray<z.ZodString>, z.ZodString]>>>;
     houseRules: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodArray<z.ZodString>, z.ZodString]>>>;
+    phoneToken: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
+}, z.core.$strip>;
+export declare const verifyPhoneBody: z.ZodObject<{
+    phoneToken: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
 }, z.core.$strip>;
 export declare const otpRequestBody: z.ZodObject<{
     phone: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
@@ -116,6 +120,7 @@ export declare const createPropertyStaffBody: z.ZodObject<{
     email: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
     phone: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
     password: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
+    role: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>>;
 }, z.core.$strip>;
 export declare const updateBedStatusBody: z.ZodObject<{
     status: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
@@ -211,5 +216,6 @@ export declare const aiChatBody: z.ZodObject<{
     confirmationId: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
     cancelConfirmationId: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
     imageDataUrl: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
+    language: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodPipe<z.ZodNumber, z.ZodTransform<string, number>>]>>>;
 }, z.core.$strip>;
 //# sourceMappingURL=request.schemas.d.ts.map

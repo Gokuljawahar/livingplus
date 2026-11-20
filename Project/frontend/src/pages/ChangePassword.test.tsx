@@ -10,7 +10,9 @@ import ChangePassword from './ChangePassword';
 import { AuthProvider } from '../context/AuthContext';
 import { renderWithProviders } from '../test/render';
 
-beforeEach(() => api.post.mockReset());
+beforeEach(() => {
+  api.post.mockReset();
+});
 
 const fill = async (current: string, next: string, confirm: string) => {
   const user = userEvent.setup();

@@ -6,10 +6,14 @@ import {
   electricityBillSchema, expenseSchema, ownerPropertySchema, ownerRoomSchema, ownerTicketSchema, rentEntrySchema, staffSchema,
   type ElectricityBillForm, type ExpenseForm, type OwnerPropertyForm, type OwnerRoomForm, type OwnerTicketForm, type RentEntryForm, type StaffForm
 } from '../validation/forms';
-import { ArrowLeftRight, BedDouble, Building2, Check, ClipboardList, Clock, Download, FileText, IndianRupee, Loader2, Plus, Users, Wallet, Wrench, X, Zap } from 'lucide-react';
+import { ArrowLeftRight, BedDouble, Building2, Check, ClipboardList, Clock, Download, FileText, IndianRupee, Loader2, Plus, Users, Wallet, Wrench, X, Zap, UtensilsCrossed } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
 import ResidentSiteLink from '../components/ResidentSiteLink';
+import ConditionRecords from '../components/ConditionRecords';
+import { STAFF_ROLES, STAFF_ROLE_HINTS, STAFF_ROLE_LABELS, viewsForRoles } from '@livingplus/shared';
+import OwnerServices from '../components/OwnerServices';
+import KycAiSummary, { type KycAiCheck } from '../components/KycAiSummary';
 import { rupees, shortDate } from '../utils/money';
 import { SecureImage } from '../components/SecureImage';
 import { MapPicker } from '../components/MapPicker';
@@ -19,16 +23,16 @@ import { apiErrorMessage } from '../utils/api-error';
 
 type Activity = { id: string; action: string; entityType?: string | null; entityId?: string | null; detail?: string | null; actorName?: string | null; createdAt: string; propertyId: string };
 type Property = { id: string; slug?: string | null; name: string; description?: string | null; address: string; locality: string; contactPhone?: string | null; upiId?: string | null; city: string; latitude?: number | null; longitude?: number | null; genderPolicy: string; status?: string; bookingLockMinutes?: number; rentDay?: number; rentDueDay?: number; amenities: string[]; houseRules: string[]; photoUrls: string[]; rooms: { id: string; roomNumber: string; monthlyRent: number; depositAmount: number; maintenanceFee: number; utilitiesSurcharge: number; foodCharge: number; roomType: string; beds: { id: string; label: string; status: string; maintenanceNote?: string | null }[] }[] };
-type Booking = { id: string; bookingRef: string; residentName: string; phone: string; moveInDate: string; status: string; rejectionReason?: string | null; property: { name: string; locality: string }; bed: { label: string; room: { roomNumber: string } } | null; bedId: string | null; tenant?: { id: string; status: string } | null };
+type Booking = { id: string; bookingRef: string; residentName: string; phone: string; moveInDate: string; status: string; rejectionReason?: string | null; property: { name: string; locality: string }; bed: { label: string; room: { roomNumber: string } } | null; bedId: string | null; tenant?: { id: string; status: string } | null; vibe?: { score: number | null; compared: number; reasons: string[]; differences: string[] } | null };
 type Ticket = { id: string; title: string; description: string; category: string; priority: string; status: string; imageUrl?: string | null; assignedName?: string | null; property: { name: string }; tenant?: { name: string } | null };
-type Tenant = { id: string; name: string; phone: string; email?: string | null; status: string; monthlyRent: number; depositAmount: number; depositReceived: number; kycVerified?: boolean; foodOptOut?: boolean; noticeDate?: string | null; depositDeductions?: number; depositRefundAmount?: number | null; depositRefundStatus?: string; depositRefundReference?: string | null; checkoutNote?: string | null; permanentAddress?: string | null; bloodGroup?: string | null; institutionOrEmployer?: string | null; emergencyName?: string | null; emergencyPhone?: string | null; kycType?: string | null; kycDocumentUrl?: string | null; checkedInAt?: string | null; property: { id: string; name: string; locality: string }; bed?: { label: string; room: { roomNumber: string } } | null };
+type Tenant = { kycAiCheck?: KycAiCheck | null; id: string; name: string; phone: string; email?: string | null; status: string; monthlyRent: number; depositAmount: number; depositReceived: number; kycVerified?: boolean; foodOptOut?: boolean; noticeDate?: string | null; depositDeductions?: number; depositRefundAmount?: number | null; depositRefundStatus?: string; depositRefundReference?: string | null; checkoutNote?: string | null; permanentAddress?: string | null; bloodGroup?: string | null; institutionOrEmployer?: string | null; emergencyName?: string | null; emergencyPhone?: string | null; kycType?: string | null; kycDocumentUrl?: string | null; checkedInAt?: string | null; property: { id: string; name: string; locality: string }; bed?: { label: string; room: { roomNumber: string } } | null };
 type RentEntry = { id: string; entryType: string; period: string; amount: number; paidAmount: number; dueDate: string; status: string; method?: string | null; reference?: string | null; tenant: { id: string; name: string; phone: string; property: { id: string; name: string }; bed?: { label: string; room: { roomNumber: string } } | null } };
 type PaymentClaim = { id: string; amount: number; reference: string; status: string; responseNote?: string | null; createdAt: string; tenant: { name: string; phone: string }; rentEntry: { entryType: string; period: string; amount: number; paidAmount: number }; property: { name: string } };
 type Expense = { id: string; category: string; amount: number; spentOn: string; note?: string | null; property: { name: string } };
 type ElecBill = { id: string; period: string; totalAmount: number; status: string; splitJson: string; property: { name: string } };
 type Staff = { id: string; name: string; phone: string; email?: string | null; role: string; property: { id: string; name: string } };
-type WorkspaceView = 'overview' | 'properties' | 'bookings' | 'roomchanges' | 'tenants' | 'activity' | 'rent' | 'payments' | 'expenses' | 'utilities' | 'maintenance' | 'reports' | 'staff';
-type Summary = { properties: number; totalBeds: number; occupiedBeds: number; occupancyRate: number; pendingBookings: number; openTickets: number; rentOutstanding: number; canManageStaff: boolean };
+type WorkspaceView = 'overview' | 'properties' | 'bookings' | 'roomchanges' | 'tenants' | 'activity' | 'rent' | 'payments' | 'expenses' | 'utilities' | 'maintenance' | 'reports' | 'staff' | 'services';
+type Summary = { properties: number; totalBeds: number; occupiedBeds: number; occupancyRate: number; pendingBookings: number; openTickets: number; rentOutstanding: number; canManageStaff: boolean; staffRoles?: string[] };
 type RoomChangeBed = { bed_id: string; label: string; room_number: string | null; floor: number | null; room_type: string | null } | null;
 type RoomChangeRow = { request_id: string; request_type: string; status: string; property: string | null; requester: string | null; partner: string | null; from_bed: RoomChangeBed; to_bed: RoomChangeBed; reason: string | null; created_at: string };
 type OwnerReport = { period: string; properties: number; totalBeds: number; occupiedBeds: number; availableBeds: number; occupancyRate: number; activeTenants: number; newBookings: number; rentCharged: number; rentCollected: number; outstanding: number; entries: RentEntry[] };
@@ -41,7 +45,7 @@ const localMonth = () => localDate().slice(0, 7);
 
 const EMPTY_PROPERTY_FORM: OwnerPropertyForm = { name: '', description: '', address: '', locality: '', contactPhone: '', upiId: '', city: 'Chennai', latitude: '', longitude: '', genderPolicy: 'ANY', amenities: '', houseRules: '', status: 'ACTIVE', bookingLockMinutes: '120', rentDay: '1', rentDueDay: '5' };
 const EMPTY_ROOM_FORM: OwnerRoomForm = { roomNumber: '', block: '', floor: '', roomType: 'SHARED', monthlyRent: '', depositAmount: '', maintenanceFee: '', utilitiesSurcharge: '', foodCharge: '', numberOfBeds: '1', hasAc: false, foodIncluded: false };
-const EMPTY_STAFF_FORM: StaffForm = { name: '', phone: '', email: '', password: '', propertyId: '' };
+const EMPTY_STAFF_FORM: StaffForm = { name: '', phone: '', email: '', password: '', propertyId: '', role: 'WARDEN' };
 const EMPTY_TICKET_FORM: OwnerTicketForm = { title: '', description: '', category: 'PLUMBING', priority: 'NORMAL', assignedTo: '' };
 const emptyRentForm = (): RentEntryForm => ({ tenantId: '', period: localMonth(), amount: '', dueDate: '' });
 const emptyExpenseForm = (): ExpenseForm => ({ category: 'FOOD', amount: '', spentOn: localDate(), note: '' });
@@ -97,7 +101,7 @@ async function fetchWorkspace(): Promise<Workspace> {
 }
 
 export default function PGManagement() {
-  const [view, setView] = useState<WorkspaceView>('overview');
+  const [chosenView, setView] = useState<WorkspaceView>('overview');
   const [rejectingClaimId, setRejectingClaimId] = useState('');
   const [claimRejectionReason, setClaimRejectionReason] = useState('');
   const [reminding, setReminding] = useState(false);
@@ -307,6 +311,22 @@ export default function PGManagement() {
     } catch (error) {
       preview?.close();
       toast.error(apiErrorMessage(error, 'Could not open KYC document'));
+    }
+  };
+
+  const [kycChecking, setKycChecking] = useState('');
+  const [recordsFor, setRecordsFor] = useState('');
+  const runKycCheck = async (tenantId: string) => {
+    setKycChecking(tenantId);
+    try {
+      const check = (await api.post(`/pg/owner/tenants/${tenantId}/kyc-check`)).data as KycAiCheck;
+      if (check.flags.length) toast.error(`AI flagged: ${check.flags[0]}`);
+      else toast.success('AI check found no problems');
+      refresh();
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Could not run the AI check'));
+    } finally {
+      setKycChecking('');
     }
   };
 
@@ -551,6 +571,10 @@ export default function PGManagement() {
     }
   };
 
+  // Each staff role sees only its own views (cooks: meals; accountants: money).
+  const roleKey = (summary.staffRoles ?? []).join(',');
+  const allowedViews = useMemo(() => viewsForRoles(roleKey ? roleKey.split(',') : ['WARDEN']), [roleKey]);
+  const view: WorkspaceView = allowedViews.includes(chosenView) ? chosenView : ((allowedViews[0] ?? 'overview') as WorkspaceView);
   const views = useMemo(() => [
     { id: 'overview', label: 'Today', icon: Building2 },
     { id: 'properties', label: 'Properties & Beds', icon: BedDouble },
@@ -559,15 +583,14 @@ export default function PGManagement() {
     { id: 'tenants', label: 'Tenants & KYC', icon: Users },
     { id: 'activity', label: 'Activity', icon: Clock },
     { id: 'maintenance', label: 'Maintenance', icon: Wrench },
-    ...(summary.canManageStaff ? [
-      { id: 'rent' as const, label: 'Rent Ledger', icon: Wallet },
-      { id: 'payments' as const, label: 'Payment claims', icon: IndianRupee },
-      { id: 'expenses' as const, label: 'Expenses', icon: IndianRupee },
-      { id: 'utilities' as const, label: 'Utilities', icon: Zap },
-      { id: 'reports' as const, label: 'Reports', icon: FileText },
-      { id: 'staff' as const, label: 'Staff', icon: Users }
-    ] : [])
-  ] as const, [summary.canManageStaff]);
+    { id: 'services', label: 'Meals & cleaning', icon: UtensilsCrossed },
+    { id: 'rent', label: 'Rent Ledger', icon: Wallet },
+    { id: 'payments', label: 'Payment claims', icon: IndianRupee },
+    { id: 'expenses', label: 'Expenses', icon: IndianRupee },
+    { id: 'utilities', label: 'Utilities', icon: Zap },
+    { id: 'reports', label: 'Reports', icon: FileText },
+    { id: 'staff', label: 'Staff', icon: Users }
+  ].filter((item) => allowedViews.includes(item.id)) as { id: WorkspaceView; label: string; icon: typeof Users }[], [allowedViews]);
 
   const { setSectionNav } = useSidebar();
 
@@ -667,11 +690,11 @@ export default function PGManagement() {
                     {needs.length ? (
                       <ul className="divide-y divide-hairline">
                         {needs.slice(0, 8).map((need) => (
-                          <li key={need.key} className="flex items-center gap-3 px-5 py-3">
+                          <li key={need.key} className="flex items-center gap-3 px-4 py-3 sm:px-5">
                             <span className={`h-2 w-2 shrink-0 rounded-full ${dot[need.tone]}`} aria-hidden="true" />
                             <div className="min-w-0 flex-1">
-                              <p className="truncate font-medium text-navy-900">{need.text}</p>
-                              <p className="tabular truncate text-sm text-muted">{need.detail}</p>
+                              <p className="font-medium leading-snug text-navy-900 sm:truncate">{need.text}</p>
+                              <p className="tabular text-sm text-muted sm:truncate">{need.detail}</p>
                             </div>
                             <button type="button" onClick={() => setView(need.go)} className="btn-secondary min-h-10 shrink-0 px-3 py-1.5 text-sm">{need.action}</button>
                           </li>
@@ -685,6 +708,8 @@ export default function PGManagement() {
                 </section>
               );
             })()}
+
+            {view === 'services' && <OwnerServices canEditSettings={summary.canManageStaff} />}
 
             {view === 'properties' && <section className="grid gap-8 pt-2 xl:grid-cols-[minmax(0,1.3fr)_minmax(340px,0.7fr)]">
               <div>
@@ -827,6 +852,13 @@ export default function PGManagement() {
                     <p className="text-xs text-slate-600 font-medium">{booking.property.name} · {booking.property.locality}</p>
                     <p className="text-xs text-slate-500">{booking.phone} · Move-in {new Date(booking.moveInDate).toLocaleDateString()}{booking.bed ? ` · Room ${booking.bed.room.roomNumber}, ${booking.bed.label}` : ''}</p>
                     <p className="text-[11px] text-slate-400">Ref {booking.bookingRef}</p>
+                    {booking.vibe && (
+                      <p className="mt-1 text-sm text-ink">
+                        {booking.vibe.score !== null
+                          ? <>VibeCheck <span className="tabular font-semibold text-navy-900">{booking.vibe.score}%</span> with {booking.vibe.compared === 1 ? 'the current resident' : `${booking.vibe.compared} current residents`}{booking.vibe.reasons[0] ? `. ${booking.vibe.reasons[0]}` : ''}{booking.vibe.differences[0] ? `. ${booking.vibe.differences[0]}` : ''}.</>
+                          : 'Took VibeCheck. Nobody in this room has answered yet.'}
+                      </p>
+                    )}
                     {booking.status === 'REJECTED' && booking.rejectionReason && <p className="text-xs text-rose-700 font-semibold bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-xl mt-1">Declined: {booking.rejectionReason}</p>}
                     {rejectingBookingId === booking.id && <form onSubmit={(event) => { event.preventDefault(); void updateBooking(booking.id, 'REJECTED'); }} className="mt-3 flex flex-col gap-2 sm:flex-row">
                       <input required value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} placeholder="Reason for declining (guest will see this)" className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 sm:w-80" />
@@ -907,17 +939,21 @@ export default function PGManagement() {
                       </div>
                       <p className="mt-1 text-xs text-slate-500 font-medium">{tenant.property.name} · {tenant.bed ? `Room ${tenant.bed.room.roomNumber}, ${tenant.bed.label}` : 'No bed assigned'}</p>
                       <p className="mt-1 text-xs text-slate-700 font-medium">{tenant.phone} · ₹{tenant.monthlyRent.toLocaleString('en-IN')} / month · Deposit ₹{tenant.depositReceived.toLocaleString('en-IN')} / ₹{tenant.depositAmount.toLocaleString('en-IN')}</p>
+                      {tenant.kycDocumentUrl && !tenant.kycVerified && <KycAiSummary check={tenant.kycAiCheck} audience="owner" />}
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {tenant.status === 'RESERVED' && <button onClick={() => void updateTenantStay(tenant.id, 'check-in')} className="rounded-xl bg-emerald-700 px-3.5 py-2 text-xs font-bold text-white hover:bg-emerald-800 transition-colors shadow-xs">Check in</button>}
                       {tenant.status === 'ACTIVE' && <button onClick={() => setCheckoutTenantId(checkoutTenantId === tenant.id ? '' : tenant.id)} className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 transition-colors">Check out</button>}
                       {tenant.status === 'CHECKED_OUT' && tenant.depositRefundStatus === 'PENDING' && <span className="inline-flex items-center rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2 text-xs font-bold text-amber-800">Refund due ₹{(tenant.depositRefundAmount || 0).toLocaleString('en-IN')}</span>}
+                      <button type="button" aria-expanded={recordsFor === tenant.id} onClick={() => setRecordsFor(recordsFor === tenant.id ? '' : tenant.id)} className="btn-secondary min-h-9 px-3 py-1.5 text-xs">Condition records</button>
                       {tenant.kycDocumentUrl && <button type="button" onClick={() => void viewKycDocument(tenant.kycDocumentUrl!)} className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors">View KYC</button>}
+                      {tenant.kycDocumentUrl && !tenant.kycVerified && <button type="button" disabled={kycChecking === tenant.id} onClick={() => void runKycCheck(tenant.id)} className="btn-secondary min-h-9 px-3 py-1.5 text-xs">{kycChecking === tenant.id ? 'Reading…' : tenant.kycAiCheck ? 'Re-run AI check' : 'AI check'}</button>}
                       {tenant.kycDocumentUrl && !tenant.kycVerified && <button type="button" onClick={() => void verifyKyc(tenant.id, true)} className="rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 transition-colors">Verify KYC</button>}
                       {tenant.kycVerified && <button type="button" onClick={() => void verifyKyc(tenant.id, false)} className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-medium text-slate-500 hover:bg-slate-100 transition-colors">KYC verified · revoke</button>}
                       {tenant.foodOptOut ? <button type="button" onClick={() => void setFoodOptOut(tenant.id, false)} className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-medium text-slate-500 hover:bg-slate-100 transition-colors">Food off · turn on</button> : <button type="button" onClick={() => void setFoodOptOut(tenant.id, true)} className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors">Food on · opt out</button>}
                     </div>
                   </div>
+                  {recordsFor === tenant.id && <ConditionRecords tenantId={tenant.id} viewer="staff" />}
                   <form onSubmit={(event) => void updateTenant(event, tenant.id)} className="grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2 xl:grid-cols-4">
                     <input name="permanentAddress" defaultValue={tenant.permanentAddress || ''} placeholder="Permanent address" className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white" />
                     <input name="institutionOrEmployer" defaultValue={tenant.institutionOrEmployer || ''} placeholder="College / employer" className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white" />
@@ -1136,21 +1172,32 @@ export default function PGManagement() {
 
             {view === 'staff' && summary.canManageStaff && <section className="grid gap-8 pt-2 xl:grid-cols-[minmax(0,1fr)_360px]">
               <div>
-                <h2 className="text-base font-bold text-slate-900 mb-4">Property wardens</h2>
+                <h2 className="text-base font-bold text-slate-900 mb-4">Your team</h2>
                 <div className="space-y-3">
                   {staff.map((member) => <article key={`${member.property.id}-${member.id}`} className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-xs flex items-center justify-between gap-4">
                     <div>
-                      <p className="font-bold text-slate-900 text-sm">{member.name}</p>
+                      <p className="font-bold text-slate-900 text-sm">{member.name} <span className="ml-1 rounded-full bg-info-bg px-2 py-0.5 text-[13px] font-medium text-info">{STAFF_ROLE_LABELS[member.role as keyof typeof STAFF_ROLE_LABELS] ?? member.role}</span></p>
                       <p className="mt-1 text-xs text-slate-500 font-medium">{member.property.name} · {member.phone}{member.email ? ` · ${member.email}` : ''}</p>
                     </div>
                     <button onClick={() => void removeStaff(member)} className="rounded-xl border border-rose-200 px-3.5 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 transition-colors">Remove access</button>
                   </article>)}
-                  {!staff.length && <div className="rounded-2xl border border-slate-200 bg-white py-12 text-center text-xs text-slate-500 font-medium shadow-xs">No wardens assigned yet.</div>}
+                  {!staff.length && <div className="rounded-2xl border border-slate-200 bg-white py-12 text-center text-xs text-slate-500 font-medium shadow-xs">No staff added yet.</div>}
                 </div>
               </div>
               <form onSubmit={addStaff} className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm h-fit">
-                <h2 className="font-bold text-slate-900 text-sm pb-3 border-b border-slate-100">Add a warden</h2>
+                <h2 className="font-bold text-slate-900 text-sm pb-3 border-b border-slate-100">Add staff</h2>
                 <div className="mt-4 space-y-3">
+                  <fieldset>
+                    <legend className="block text-[13px] font-medium text-navy-900 mb-1">Role</legend>
+                    <div className="space-y-1.5">
+                      {STAFF_ROLES.map((role) => (
+                        <label key={role} className="flex cursor-pointer items-start gap-2 rounded-[10px] border border-hairline p-2 has-[:checked]:border-navy-900 has-[:checked]:bg-amber-50">
+                          <input type="radio" value={role} {...staffFormApi.register('role')} className="mt-1 accent-navy-900" />
+                          <span><span className="block text-sm font-medium text-navy-900">{STAFF_ROLE_LABELS[role]}</span><span className="block text-[13px] text-muted">{STAFF_ROLE_HINTS[role]}</span></span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
                   <div>
                     <label className="block text-[11px] font-bold text-slate-500 mb-1">Property</label>
                     <select required {...staffFormApi.register('propertyId')} className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white"><option value="">Assign property</option>{properties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}</select>

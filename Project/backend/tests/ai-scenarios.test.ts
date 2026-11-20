@@ -3,13 +3,13 @@
 // model stub, so no API key, model network access, or running server is required.
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { z } from 'zod';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import net from 'node:net';
-import { AIMessage } from '@langchain/core/messages';
 import type { LocalPostgres } from '../scripts/local-postgres.js';
 import { inAppZone, periodOf } from '../src/utils/app-time.js';
 
@@ -58,19 +58,18 @@ const userReq = (user: any) => ({
 }) as any;
 const guestActor = { userId: null, role: 'GUEST', phones: [], propertyIds: [] };
 
-// Scripted stand-in for a LangChain chat model: each turn returns the next step.
+// Scripted stand-in for the chat model: each generate() returns the next step.
 function stubProvider(script: Array<{ text?: string; calls?: Array<{ name: string; args: any }> }>) {
   let i = 0;
   return {
-    bindTools() {
+    async generate() {
+      const step = script[Math.min(i++, script.length - 1)]!;
+      const calls = (step.calls ?? []).map((c, n) => ({ id: `call_${i}_${n}`, name: c.name, args: c.args }));
       return {
-        async invoke() {
-          const step = script[Math.min(i++, script.length - 1)]!;
-          return new AIMessage({
-            content: step.text ?? '',
-            tool_calls: (step.calls ?? []).map((c, n) => ({ id: `call_${i}_${n}`, name: c.name, args: c.args, type: 'tool_call' as const }))
-          });
-        }
+        text: step.text ?? '',
+        content: { role: 'model', parts: [{ text: step.text ?? '' }, ...calls.map((c) => ({ functionCall: { id: c.id, name: c.name, args: c.args } }))] },
+        calls,
+        invalid: []
       };
     }
   };
@@ -702,6 +701,49 @@ describe('orchestrator behaviour', () => {
     assert.equal(await prisma.pGExpense.count({ where: { propertyId: ids.prop.id, note: 'cancel test' } }), 0);
   });
 
+  it('emits an A2UI property-results surface alongside the text reply', async () => {
+    const house = await prisma.pGProperty.create({
+      data: { name: 'A2UI House', address: '7, Test Lane', locality: 'A2UIVille', city: 'Chennai', genderPolicy: 'ANY', amenities: [], houseRules: [], status: 'ACTIVE' }
+    });
+    const room = await prisma.pGRoom.create({ data: { propertyId: house.id, roomNumber: 'A1', roomType: 'DOUBLE', monthlyRent: 6000, foodIncluded: false, status: 'ACTIVE' } });
+    await prisma.pGBed.create({ data: { roomId: room.id, label: 'Bed 1', status: 'AVAILABLE' } });
+    const provider = stubProvider([
+      { calls: [{ name: 'search_properties', args: { location: 'A2UIVille' } }] },
+      { text: 'Here is what I found.' }
+    ]);
+    const result = await orchestrator.runChat(guestReq(), provider, { message: 'PGs in A2UIVille' });
+    assert.equal(result.reply, 'Here is what I found.');
+    assert.equal(result.ui?.length, 1);
+    const surface = result.ui![0]!;
+    assert.equal(surface.version, '1.0');
+    const create = surface.createSurface;
+    assert.match(create.catalogId, /a2ui\.org/);
+    assert.equal(create.dataModel.properties[0].name, 'A2UI House');
+    assert.match(create.dataModel.properties[0].meta, /bed available/);
+    const root = create.components.find((c: any) => c.id === 'root');
+    assert.equal(root.component, 'Column');
+    const card = create.components.find((c: any) => c.component === 'Card');
+    assert.ok(card, 'results render as cards');
+    const button = create.components.find((c: any) => c.component === 'Button');
+    assert.equal(button.action.event.name, 'book_property');
+    assert.equal(button.variant, 'secondary', 'result cards keep the single amber action for confirmations');
+    assert.deepEqual(button.action.event.context.propertyId, { '@path': '/properties/0/property_id' });
+    assert.ok(!JSON.stringify(surface).includes('9200000002'), 'no resident data in the surface');
+  });
+
+  it('emits an A2UI confirmation surface when a sensitive tool pauses', async () => {
+    const provider = stubProvider([{ calls: [{ name: 'create_maintenance_ticket', args: { title: 'Tap leak', description: 'Kitchen tap drips', category: 'plumbing' } }] }]);
+    const result = await orchestrator.runChat(userReq(ids.tenantUser), provider, { message: 'my tap leaks' });
+    assert.ok(result.needsConfirmation);
+    const surface = result.ui?.[0]?.createSurface;
+    assert.ok(surface, 'the pause carries a surface');
+    const names = surface.components.filter((c: any) => c.component === 'Button').map((c: any) => c.action.event.name);
+    assert.deepEqual(names.sort(), ['cancel_action', 'confirm_action']);
+    const variants = Object.fromEntries(surface.components.filter((c: any) => c.component === 'Button').map((c: any) => [c.action.event.name, c.variant]));
+    assert.deepEqual(variants, { confirm_action: 'primary', cancel_action: 'text' });
+    assert.equal(surface.components.find((c: any) => c.action?.event.name === 'confirm_action').action.event.context.confirmationId, result.needsConfirmation.confirmationId);
+  });
+
   it('returns plain answers and keeps session context', async () => {
     const first = await orchestrator.runChat(guestReq(), stubProvider([{ text: 'Which locality are you looking in?' }]), { message: 'find me a PG' });
     assert.equal(first.reply, 'Which locality are you looking in?');
@@ -720,16 +762,17 @@ describe('orchestrator behaviour', () => {
   it('surfaces malformed tool arguments back to the model', async () => {
     let seen = 0;
     const broken = {
-      bindTools() {
-        return {
-          async invoke() {
-            seen += 1;
-            if (seen === 1) {
-              return new AIMessage({ content: '', invalid_tool_calls: [{ id: 'call_x', name: 'search_properties', args: '{oops', error: 'bad json', type: 'invalid_tool_call' }] });
-            }
-            return new AIMessage('Let me try that differently.');
-          }
-        };
+      async generate() {
+        seen += 1;
+        if (seen === 1) {
+          return {
+            text: '',
+            content: { role: 'model', parts: [] },
+            calls: [],
+            invalid: [{ id: 'call_x', name: 'search_properties', error: 'bad json' }]
+          };
+        }
+        return { text: 'Let me try that differently.', content: { role: 'model', parts: [{ text: 'Let me try that differently.' }] }, calls: [], invalid: [] };
       }
     };
     const result = await orchestrator.runChat(guestReq(), broken as any, { message: 'search' });
@@ -737,7 +780,7 @@ describe('orchestrator behaviour', () => {
   });
 });
 
-// Intercepts fetch so the real LangChain Google model runs end to end without
+// Intercepts fetch so the real Google model runs end to end without
 // network access: records each Gemini request and replies with scripted bodies.
 function fakeGemini(replies: any[]) {
   const seen: { url: string; key: string; body: any }[] = [];
@@ -764,22 +807,21 @@ async function withEnv<T>(vars: Record<string, string | undefined>, fn: () => Pr
   }
 }
 
-// Like stubProvider, but records the messages the model was given each turn.
+// Like stubProvider, but records the turn (system, contents, tools) the model was given each step.
 function recordingProvider(script: Array<{ text?: string; calls?: Array<{ name: string; args: any }> }>) {
-  const seen: any[][] = [];
+  const seen: any[] = [];
   let i = 0;
   return {
     seen,
-    bindTools() {
+    async generate(turn: any) {
+      seen.push(turn);
+      const step = script[Math.min(i++, script.length - 1)]!;
+      const calls = (step.calls ?? []).map((c, n) => ({ id: `rec_${i}_${n}`, name: c.name, args: c.args }));
       return {
-        async invoke(messages: any[]) {
-          seen.push(messages);
-          const step = script[Math.min(i++, script.length - 1)]!;
-          return new AIMessage({
-            content: step.text ?? '',
-            tool_calls: (step.calls ?? []).map((c, n) => ({ id: `rec_${i}_${n}`, name: c.name, args: c.args, type: 'tool_call' as const }))
-          });
-        }
+        text: step.text ?? '',
+        content: { role: 'model', parts: [{ text: step.text ?? '' }, ...calls.map((c) => ({ functionCall: { id: c.id, name: c.name, args: c.args } }))] },
+        calls,
+        invalid: []
       };
     }
   };
@@ -802,6 +844,17 @@ describe('tool argument validation (Zod)', () => {
       properties: { booking_ref: { type: 'string' }, phone: { type: 'string' } },
       required: ['booking_ref', 'phone']
     });
+  });
+
+  it('converts tool schemas to Gemini function declarations', () => {
+    const declared = providerMod.toFunctionDeclarations([
+      { name: 'get_booking_status', description: 'Look up a booking.', parameters: tools.toolParameters(tools.toolCatalogue.get_booking_status.schema) }
+    ]);
+    assert.deepEqual(declared, [{
+      name: 'get_booking_status',
+      description: 'Look up a booking.',
+      parameters: { type: 'OBJECT', properties: { booking_ref: { type: 'STRING' }, phone: { type: 'STRING' } }, required: ['booking_ref', 'phone'] }
+    }]);
   });
 
   it('normalizes harmless model quirks', () => {
@@ -829,14 +882,36 @@ describe('tool argument validation (Zod)', () => {
     const result = await orchestrator.runChat(guestReq(), model, { message: 'book bed 1' });
     assert.equal(result.needsConfirmation, undefined, 'nothing is offered for confirmation');
     assert.equal(result.reply, 'I need your phone number and verification to book.');
-    const toolReply = model.seen[1]!.find((m: any) => m.getType() === 'tool');
-    assert.match(String(toolReply.content), /invalid arguments for create_booking_request/);
-    assert.match(String(toolReply.content), /phone_token/);
+    const responses = model.seen[1]!.contents.flatMap((c: any) => (c.parts || []).filter((p: any) => p.functionResponse).map((p: any) => p.functionResponse.response));
+    assert.match(JSON.stringify(responses), /invalid arguments for create_booking_request/);
+    assert.match(JSON.stringify(responses), /phone_token/);
     assert.equal(await prisma.pGBooking.count(), before);
   });
 });
 
-describe('durable agent threads (LangGraph checkpointer)', () => {
+describe('owner notices through the assistant', () => {
+  it('posts a confirmed notice to every current resident, and only on the caller\'s own PG', async () => {
+    const before = await prisma.pGResidentNotification.count({ where: { type: 'NOTICE', propertyId: ids.prop.id } });
+    const residents = await prisma.pGTenant.count({ where: { propertyId: ids.prop.id, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } } });
+    const prepared = await orchestrator.runChat(userReq(ids.owner), stubProvider([
+      { calls: [{ name: 'send_property_notice', args: { property_id: ids.prop.id, title: 'Water cut on Sunday', message: 'No water from 10 am to 1 pm on Sunday for tank cleaning.' } }] }
+    ]), { message: 'tell everyone about the water cut' });
+    assert.equal(prepared.needsConfirmation?.tool, 'send_property_notice');
+    assert.match(prepared.needsConfirmation!.preview, /Water cut on Sunday/);
+    assert.equal(await prisma.pGResidentNotification.count({ where: { type: 'NOTICE', propertyId: ids.prop.id } }), before, 'nothing is posted before confirmation');
+
+    const done = await orchestrator.runChat(userReq(ids.owner), stubProvider([]), { message: 'yes', confirmationId: prepared.needsConfirmation!.confirmationId });
+    assert.match(done.reply, /^Done\./);
+    assert.ok(residents > 0);
+    assert.equal(await prisma.pGResidentNotification.count({ where: { type: 'NOTICE', propertyId: ids.prop.id } }), before + residents);
+
+    await assert.rejects(
+      tools.toolCatalogue.send_property_notice.execute(await tools.actorFromRequest(userReq(ids.owner)), { property_id: ids.other.id, title: 'Not yours', message: 'Should be refused.' }),
+      /FORBIDDEN/);
+  });
+});
+
+describe('durable agent threads (PostgreSQL state)', () => {
   const expenseCall = (note: string) => ({ calls: [{ name: 'log_expense', args: { property_id: ids.prop.id, category: 'OTHER', amount: 321, spent_on: '2025-01-03', note } }] });
   after(async () => {
     const created = await prisma.pGExpense.findMany({ where: { amount: 321, spentOn: { lt: new Date('2025-02-01') } }, select: { id: true } });
@@ -858,17 +933,21 @@ describe('durable agent threads (LangGraph checkpointer)', () => {
     assert.deepEqual(done.toolCalls, ['log_expense']);
     assert.equal(await prisma.pGExpense.count({ where: { note: 'restart test' } }), 1);
 
-    const rows: Array<{ n: bigint }> = await prisma.$queryRawUnsafe('SELECT count(*)::bigint AS n FROM langgraph.checkpoints WHERE thread_id = $1', prepared.sessionId);
-    assert.ok(Number(rows[0]!.n) > 0, 'thread state lives in PostgreSQL');
+    const thread = await prisma.conversationSession.findUnique({ where: { id: prepared.sessionId } });
+    const saved = JSON.parse(thread!.stateJson);
+    assert.equal(saved.pending, null, 'the confirmation was consumed');
+    assert.ok(saved.history.length > 2, 'thread state lives in PostgreSQL');
   });
 
   it('restores conversation history from the checkpoint', async () => {
     const first = await orchestrator.runChat(guestReq(), stubProvider([{ text: 'Which area?' }]), { message: 'find a PG' });
     const model = recordingProvider([{ text: 'Got it.' }]);
     await orchestrator.runChat(guestReq(), model, { message: 'Sholinganallur', sessionId: first.sessionId });
-    const texts = model.seen[0]!.map((m: any) => `${m.getType()}:${typeof m.content === 'string' ? m.content : ''}`);
-    assert.deepEqual(texts.slice(1), ['human:find a PG', 'ai:Which area?', 'human:Sholinganallur']);
-    assert.equal(model.seen[0]![0].getType(), 'system', 'the role prompt is added per call, not stored');
+    const turn = model.seen[0]!;
+    assert.match(turn.system, /PG OS assistant/, 'the role prompt is added per call, not stored');
+    assert.ok(turn.tools.some((t: any) => t.name === 'search_properties'));
+    const texts = turn.contents.map((c: any) => `${c.role === 'user' ? 'human' : 'ai'}:${(c.parts || []).map((p: any) => p.text || '').join('')}`);
+    assert.deepEqual(texts, ['human:find a PG', 'ai:Which area?', 'human:Sholinganallur']);
   });
 
   it('closes an unanswered confirmation when the user moves on', async () => {
@@ -878,9 +957,9 @@ describe('durable agent threads (LangGraph checkpointer)', () => {
     assert.equal(next.reply, 'Sure, what else?');
 
     // Every tool call the model made has an answer before the next user turn.
-    const history = model.seen[0]!;
-    const callIds = history.flatMap((m: any) => (m.tool_calls ?? []).map((c: any) => c.id));
-    const answered = history.filter((m: any) => m.getType() === 'tool').map((m: any) => m.tool_call_id);
+    const history = model.seen[0]!.contents;
+    const callIds = history.flatMap((c: any) => (c.parts || []).filter((p: any) => p.functionCall).map((p: any) => p.functionCall.id));
+    const answered = history.flatMap((c: any) => (c.parts || []).filter((p: any) => p.functionResponse).map((p: any) => p.functionResponse.id));
     assert.ok(callIds.length > 0);
     assert.deepEqual(answered, callIds);
 
@@ -1350,6 +1429,9 @@ describe('semantic PG search', () => {
     return v;
   };
   const fakeEmbeddings = (purpose: string) => ({
+    model: 'fake:bag-of-words',
+    taskType: purpose === 'query' ? 'RETRIEVAL_QUERY' : 'RETRIEVAL_DOCUMENT',
+    dimensions: 64,
     async embedQuery(text: string) { embedCalls.push(`${purpose}:query`); return fakeVector(text); },
     async embedDocuments(texts: string[]) { embedCalls.push(`${purpose}:docs:${texts.length}`); return texts.map(fakeVector); }
   });
@@ -1458,15 +1540,17 @@ describe('semantic PG search', () => {
 
   it('builds Vertex AI embeddings (service account, no key) at the stored vector size', async () => {
     embeddingsMod.setEmbeddingsForTests(null);
-    const keep = process.env.AI_EMBEDDING_MODEL;
+    const keep = { model: process.env.AI_EMBEDDING_MODEL, location: process.env.GOOGLE_CLOUD_LOCATION };
     try {
       process.env.AI_EMBEDDING_MODEL = 'google-vertexai:gemini-embedding-001';
+      process.env.GOOGLE_CLOUD_LOCATION = 'us-central1';
       const vertex: any = await embeddingsMod.createEmbeddings('document');
-      assert.equal(vertex.constructor.name, 'VertexAIEmbeddings');
       assert.equal(vertex.model, 'gemini-embedding-001');
-      assert.equal(vertex.buildParameters().outputDimensionality, 768, 'must match the 768-dim vectors already stored');
+      assert.equal(vertex.taskType, 'RETRIEVAL_DOCUMENT');
+      assert.equal(vertex.dimensions, 768, 'must match the 768-dim vectors already stored');
     } finally {
-      if (keep === undefined) delete process.env.AI_EMBEDDING_MODEL; else process.env.AI_EMBEDDING_MODEL = keep;
+      if (keep.model === undefined) delete process.env.AI_EMBEDDING_MODEL; else process.env.AI_EMBEDDING_MODEL = keep.model;
+      if (keep.location === undefined) delete process.env.GOOGLE_CLOUD_LOCATION; else process.env.GOOGLE_CLOUD_LOCATION = keep.location;
     }
   });
 
@@ -1475,20 +1559,20 @@ describe('semantic PG search', () => {
     const keep = process.env.AI_EMBEDDING_MODEL;
     try {
       process.env.AI_EMBEDDING_MODEL = 'google-genai:gemini-embedding-001';
-      const api = fakeGemini([{ embedding: { values: [0.1, 0.2, 0.3] } }]);
+      const api = fakeGemini([{ embeddings: [{ values: [0.1, 0.2, 0.3] }] }]);
       try {
         const query = await embeddingsMod.createEmbeddings('query');
         assert.deepEqual(await query.embedQuery('veg food near OMR'), [0.1, 0.2, 0.3]);
         const sent = api.seen[0]!;
-        assert.match(sent.url, /models\/gemini-embedding-001:embedContent/);
-        assert.equal(sent.body.taskType, 'RETRIEVAL_QUERY');
-        assert.equal(sent.body.outputDimensionality, 768);
+        assert.match(sent.url, /models\/gemini-embedding-001:batchEmbedContents/);
+        assert.equal(sent.body.requests[0].taskType, 'RETRIEVAL_QUERY');
+        assert.equal(sent.body.requests[0].outputDimensionality, 768);
         assert.equal((await embeddingsMod.createEmbeddings('document') as any).taskType, 'RETRIEVAL_DOCUMENT');
       } finally {
         api.restore();
       }
       process.env.AI_EMBEDDING_MODEL = 'cohere:embed-v4';
-      await assert.rejects(embeddingsMod.createEmbeddings('query'), /EMBEDDINGS_INIT_FAILED: install @langchain\/cohere/);
+      await assert.rejects(embeddingsMod.createEmbeddings('query'), /EMBEDDINGS_INIT_FAILED: unsupported provider "cohere"/);
       process.env.AI_EMBEDDING_MODEL = 'acme:x';
       await assert.rejects(embeddingsMod.createEmbeddings('query'), /unsupported provider "acme"/);
     } finally {
@@ -1699,7 +1783,23 @@ describe('model configuration', () => {
     assert.deepEqual(await providerMod.modelStatus(), { enabled: true, configured: true, provider: 'google', model: 'gemini-3.8-flash' });
   });
 
-  it('fails clearly when a provider package is not installed or options are invalid', async () => {
+  it('resolves the VibeCheck ADK model from VIBECHECK_AI_MODEL or the google AI_MODEL', async () => {
+    const agent = await import('../src/services/vibe-agent.js');
+    assert.equal(agent.vibeModelName(), 'gemini-3.8-flash');
+    assert.deepEqual(agent.vibeAiStatus(), { enabled: true, configured: true, model: 'gemini-3.8-flash' });
+    await withEnv({ AI_MODEL: 'openai:gpt-5-mini' }, async () => {
+      assert.equal(agent.vibeModelName(), null, 'only Gemini models run on ADK');
+      assert.equal(agent.vibeAiStatus().configured, false);
+    });
+    await withEnv({ AI_MODEL: 'openai:gpt-5-mini', VIBECHECK_AI_MODEL: 'gemini-2.5-flash' }, async () => {
+      assert.equal(agent.vibeModelName(), 'gemini-2.5-flash');
+    });
+    await withEnv({ AI_MODEL: '' }, async () => {
+      assert.equal(agent.vibeModelName(), null);
+    });
+  });
+
+  it('fails clearly when the provider is unsupported or options are invalid', async () => {
     await withEnv({ AI_MODEL: 'perplexity:sonar' }, async () => {
       await assert.rejects(providerMod.createChatModel(), /AI_MODEL_INIT_FAILED/);
       const status = await providerMod.modelStatus();
@@ -1720,8 +1820,8 @@ describe('model configuration', () => {
   });
 });
 
-describe('LangSmith tracing', () => {
-  it('uploads named, tagged agent runs when tracing is on', async () => {
+describe('agent tracing', () => {
+  it('sends no trace uploads: the optional tracers are gone', async () => {
     const bodies: string[] = [];
     const server = http.createServer((req, res) => {
       const chunks: Buffer[] = [];
@@ -1737,40 +1837,47 @@ describe('LangSmith tracing', () => {
       LANGSMITH_TRACING: 'true',
       LANGSMITH_API_KEY: 'ls-test-key',
       LANGSMITH_ENDPOINT: `http://127.0.0.1:${(server.address() as any).port}`,
-      LANGSMITH_PROJECT: 'livingplus-tests',
-      LANGCHAIN_CALLBACKS_BACKGROUND: 'false'
+      LANGSMITH_PROJECT: 'livingplus-tests'
     };
     try {
       await withEnv(vars, async () => {
         const result = await orchestrator.runChat(guestReq(), stubProvider([{ text: 'Traced hello.' }]), { message: 'hi' });
         assert.equal(result.reply, 'Traced hello.');
-        const { awaitAllCallbacks } = await import('@langchain/core/callbacks/promises');
-        await awaitAllCallbacks();
-        const { Client } = await import('langsmith');
-        await new Client().awaitPendingTraceBatches?.();
-        for (let i = 0; i < 50 && !bodies.some((b) => b.includes('livingplus-agent:turn')); i += 1) await new Promise((r) => setTimeout(r, 100));
       });
-      const uploaded = bodies.join('\n');
-      assert.match(uploaded, /livingplus-agent:turn/);
-      assert.match(uploaded, /role:guest/);
+      await new Promise((r) => setTimeout(r, 300));
+      assert.equal(bodies.length, 0, 'no trace upload leaves the process');
     } finally {
       server.close();
     }
   });
 });
 
-describe('LangGraph agent with the Google provider', () => {
-  it('builds Gemini without an API key on the Node client, so Cloud Run uses its service account', async () => {
-    const keep = process.env.GOOGLE_API_KEY;
+describe('chat agent with the Google provider', () => {
+  it('uses Vertex AI with the service account when enterprise mode is on (no API key)', async () => {
+    const keep = {
+      key: process.env.GOOGLE_API_KEY,
+      genai: process.env.GOOGLE_GENAI_API_KEY,
+      gemini: process.env.GEMINI_API_KEY,
+      flag: process.env.GOOGLE_GENAI_USE_ENTERPRISE,
+      project: process.env.GOOGLE_CLOUD_PROJECT,
+      location: process.env.GOOGLE_CLOUD_LOCATION
+    };
     try {
       delete process.env.GOOGLE_API_KEY;
+      delete process.env.GOOGLE_GENAI_API_KEY;
+      delete process.env.GEMINI_API_KEY;
+      process.env.GOOGLE_GENAI_USE_ENTERPRISE = 'true';
+      process.env.GOOGLE_CLOUD_PROJECT = 'livingplus-test';
+      process.env.GOOGLE_CLOUD_LOCATION = 'us-central1';
       const model: any = await providerMod.createChatModel();
-      // The web client (what initChatModel loads) rejects calls without a key:
-      // "No authentication method available". The Node client uses ADC instead.
-      assert.equal(model.apiClient?.constructor?.name, 'NodeApiClient');
-      assert.equal(model.location, 'global');
+      assert.equal(model.backend, 'vertex-ai');
+      assert.equal(model.model, 'gemini-3.8-flash');
+      delete process.env.GOOGLE_GENAI_USE_ENTERPRISE;
+      await assert.rejects(providerMod.createChatModel(), /AI_MODEL_INIT_FAILED/);
     } finally {
-      if (keep === undefined) delete process.env.GOOGLE_API_KEY; else process.env.GOOGLE_API_KEY = keep;
+      for (const [env, value] of Object.entries({ GOOGLE_API_KEY: keep.key, GOOGLE_GENAI_API_KEY: keep.genai, GEMINI_API_KEY: keep.gemini, GOOGLE_GENAI_USE_ENTERPRISE: keep.flag, GOOGLE_CLOUD_PROJECT: keep.project, GOOGLE_CLOUD_LOCATION: keep.location })) {
+        if (value === undefined) delete process.env[env]; else process.env[env] = value;
+      }
     }
   });
 
@@ -2777,5 +2884,584 @@ describe('guest booking requests need a verified phone', () => {
     assert.equal((await prisma.pGBooking.findUnique({ where: { bookingRef: ref } }))!.status, 'PENDING');
     assert.equal((await cancel({ 'x-guest-token': token(victim) })).status, 200);
     assert.equal((await prisma.pGBooking.findUnique({ where: { bookingRef: ref } }))!.status, 'CANCELLED');
+  });
+});
+
+describe('VibeCheck roommate matching', () => {
+  const respond = () => ({
+    statusCode: 200,
+    body: undefined as any,
+    status(code: number) { this.statusCode = code; return this; },
+    json(body: unknown) { this.body = body; return this; }
+  });
+  const early = { sleep: 0, wake: 0, tidiness: 0, noise: 0, guests: 0, kitchen: 1, schedule: 0, cooling: 1 };
+  const night = { sleep: 2, wake: 2, tidiness: 2, noise: 2, guests: 2, kitchen: 1, schedule: 2, cooling: 1 };
+  const vibe: Record<string, any> = {};
+  let base = '';
+  let server: http.Server;
+
+  before(async () => {
+    vibe.shared = await import('@livingplus/shared');
+    vibe.pg = await import('../src/controllers/pg.controller.js');
+    vibe.prop = await prisma.pGProperty.create({ data: { name: 'Vibe House', address: '3 Vibe Rd', locality: 'Adyar', city: 'Chennai', genderPolicy: 'ANY', status: 'ACTIVE' } as any });
+    vibe.room = await prisma.pGRoom.create({ data: { propertyId: vibe.prop.id, roomNumber: 'V1', roomType: 'DOUBLE', monthlyRent: 7000, status: 'ACTIVE' } });
+    vibe.emptyRoom = await prisma.pGRoom.create({ data: { propertyId: vibe.prop.id, roomNumber: 'V2', roomType: 'DOUBLE', monthlyRent: 7000, status: 'ACTIVE' } });
+    const taken = await prisma.pGBed.create({ data: { roomId: vibe.room.id, label: 'Bed 1', status: 'OCCUPIED' } });
+    vibe.freeBed = await prisma.pGBed.create({ data: { roomId: vibe.room.id, label: 'Bed 2', status: 'AVAILABLE' } });
+    vibe.emptyBed = await prisma.pGBed.create({ data: { roomId: vibe.emptyRoom.id, label: 'Bed 1', status: 'AVAILABLE' } });
+    vibe.user = await prisma.user.create({ data: { phone: '9877700001', password: 'x', name: 'Vibe Resident', role: 'PG_TENANT' } });
+    vibe.tenant = await prisma.pGTenant.create({ data: { propertyId: vibe.prop.id, bedId: taken.id, name: 'Kavya Iyer', phone: '9877700001', moveInDate: new Date(), monthlyRent: 7000, status: 'ACTIVE', vibeAnswers: early } });
+    const { default: app } = await import('../src/app.js');
+    server = app.listen(0);
+    await new Promise<void>((r) => server.once('listening', () => r()));
+    base = `http://127.0.0.1:${(server.address() as any).port}`;
+  });
+  after(() => { server?.close(); });
+
+  it('scores lifestyle answers with plain reasons and drops anything else', () => {
+    const same = vibe.shared.vibeMatch(early, [early]);
+    assert.equal(same.score, 100);
+    assert.deepEqual(same.reasons, ['You both sleep before 11 pm', 'You both keep things spotless']);
+    const apart = vibe.shared.vibeMatch(early, [night]);
+    assert.ok(apart.score < 40);
+    assert.equal(apart.differences.length, 1);
+    assert.match(apart.differences[0], /^A roommate tends to /);
+    assert.equal(vibe.shared.vibeMatch(early, []).score, null);
+    assert.deepEqual(vibe.shared.cleanVibeAnswers({ sleep: 1, religion: 2, noise: 9, tidiness: 1.5 }), { sleep: 1 });
+  });
+
+  it('scores every free bed for a visitor, revealing only scores and habit-level reasons', async () => {
+    const res = await fetch(`${base}/api/pg/properties/${vibe.prop.id}/vibecheck`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ answers: early })
+    });
+    assert.equal(res.status, 200);
+    const text = await res.text();
+    assert.ok(!text.includes('Kavya') && !text.includes('9877700001') && !text.includes('vibeAnswers'), 'no names, phones or raw answers');
+    const beds = JSON.parse(text).beds as any[];
+    const shared = beds.find((bed) => bed.bedId === vibe.freeBed.id);
+    assert.equal(shared.score, 100);
+    assert.equal(shared.compared, 1);
+    assert.equal(beds.find((bed) => bed.bedId === vibe.emptyBed.id).score, null, 'empty rooms have nobody to compare with');
+    const bad = await fetch(`${base}/api/pg/properties/${vibe.prop.id}/vibecheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ answers: { religion: 1 } }) });
+    assert.equal(bad.status, 400);
+  });
+
+  it('judges rooms with the ADK agent when it answers, keeping residents anonymous', async () => {
+    const agent = await import('../src/services/vibe-agent.js');
+    let seen = '';
+    agent.setVibeAgentForTests(async (prompt: string) => {
+      seen = prompt;
+      return JSON.stringify({ rooms: { [vibe.room.id]: { score: 92, reasons: ['You both sleep before 11 pm'], differences: [], headline: 'Nearly identical routines' } } });
+    });
+    try {
+      const res = respond();
+      await vibe.pg.vibeCheckProperty({ params: { propertyId: vibe.prop.id }, body: { answers: early } } as any, res as any);
+      assert.equal(res.statusCode, 200);
+      const bed = (res.body.beds as any[]).find((item) => item.bedId === vibe.freeBed.id);
+      assert.equal(bed.score, 92);
+      assert.equal(bed.compared, 1);
+      assert.equal(bed.ai, true);
+      assert.equal(bed.headline, 'Nearly identical routines');
+      const empty = (res.body.beds as any[]).find((item) => item.bedId === vibe.emptyBed.id);
+      assert.equal(empty.score, null, 'empty rooms never reach the agent');
+      assert.equal(empty.ai, false);
+      assert.ok(seen.length > 0, 'the agent saw the prompt');
+      assert.ok(!seen.includes('Kavya') && !seen.includes('9877700001'), 'the prompt carries habits, never names or phones');
+    } finally {
+      agent.setVibeAgentForTests(null);
+    }
+  });
+
+  it('falls back to deterministic scoring when the AI agent fails or rambles', async () => {
+    const agent = await import('../src/services/vibe-agent.js');
+    const stubs: Array<() => Promise<string>> = [
+      async () => { throw new Error('MODEL_API_FAILED: boom'); },
+      async () => 'sorry, I cannot answer as JSON {{{'
+    ];
+    for (const stub of stubs) {
+      agent.setVibeAgentForTests(stub);
+      try {
+        const res = respond();
+        await vibe.pg.vibeCheckProperty({ params: { propertyId: vibe.prop.id }, body: { answers: early } } as any, res as any);
+        assert.equal(res.statusCode, 200);
+        const bed = (res.body.beds as any[]).find((item) => item.bedId === vibe.freeBed.id);
+        assert.equal(bed.score, 100);
+        assert.equal(bed.ai, false);
+        assert.deepEqual(bed.reasons, ['You both sleep before 11 pm', 'You both keep things spotless']);
+      } finally {
+        agent.setVibeAgentForTests(null);
+      }
+    }
+  });
+
+  it('lets residents save answers and see their roommate match with the rematch window', async () => {
+    const newcomer = await prisma.pGTenant.create({ data: { propertyId: vibe.prop.id, bedId: vibe.freeBed.id, name: 'New Resident', phone: '9877700002', moveInDate: new Date(), monthlyRent: 7000, status: 'ACTIVE' } });
+    const newcomerUser = await prisma.user.create({ data: { phone: '9877700002', password: 'x', name: 'New Resident', role: 'PG_TENANT' } });
+    const req = (body: any = {}) => ({ user: { userId: newcomerUser.id, role: 'PG_TENANT' }, params: { tenantId: newcomer.id }, body }) as any;
+
+    const saved = respond();
+    await vibe.pg.saveTenantVibe(req({ answers: night }), saved as any);
+    assert.equal(saved.statusCode, 200);
+    const match = respond();
+    await vibe.pg.getTenantVibeMatch(req(), match as any);
+    assert.equal(match.statusCode, 200);
+    assert.ok(match.body.match.score < 40, 'night owl vs early riser');
+    assert.equal(match.body.rematchOpen, true, 'first 30 days after move-in');
+
+    const stranger = respond();
+    await vibe.pg.getTenantVibeMatch({ user: { userId: vibe.user.id, role: 'PG_TENANT' }, params: { tenantId: newcomer.id }, body: {} } as any, stranger as any);
+    assert.equal(stranger.statusCode, 404, 'residents only see their own VibeCheck');
+  });
+});
+
+describe('AI-assisted KYC reading', () => {
+  const respond = () => ({
+    statusCode: 200,
+    body: undefined as any,
+    status(code: number) { this.statusCode = code; return this; },
+    json(body: unknown) { this.body = body; return this; }
+  });
+  const k: Record<string, any> = {};
+  before(async () => {
+    k.kyc = await import('../src/services/kyc-check.js');
+    k.pg = await import('../src/controllers/pg.controller.js');
+    k.storage = await import('../src/services/storage.js');
+    k.fileKey = k.storage.newFileKey('webp');
+    await k.storage.putFile(k.fileKey, Buffer.from('fake-image-bytes'), 'image/webp');
+    k.user = await prisma.user.create({ data: { phone: '9866600001', password: 'x', name: 'Priya Sharma', role: 'PG_TENANT' } });
+    k.tenant = await prisma.pGTenant.create({ data: { propertyId: ids.prop.id, name: 'Priya Sharma', phone: '9866600001', moveInDate: new Date(), monthlyRent: 7000, status: 'ACTIVE', kycType: 'AADHAAR', kycDocumentUrl: k.fileKey } });
+  });
+  after(() => k.kyc?.setKycReaderForTests(null));
+  const req = (userId: string) => ({ user: { userId, role: 'PG_TENANT' }, params: { tenantId: k.tenant.id }, body: {} }) as any;
+
+  it('compares printed and declared names tolerantly', () => {
+    assert.equal(k.kyc.compareNames('Priya Sharma', 'PRIYA SHARMA'), 'match');
+    assert.equal(k.kyc.compareNames('Priya Sharma', 'Priya K. Sharma'), 'match');
+    assert.equal(k.kyc.compareNames('Priya Sharma', 'Priya Nair'), 'partial');
+    assert.equal(k.kyc.compareNames('Priya Sharma', 'Meera Iyer'), 'mismatch');
+    assert.equal(k.kyc.compareNames('Priya Sharma', ''), 'unknown');
+  });
+
+  it('flags a mismatched ID for the owner and keeps only the last 4 digits', async () => {
+    let seenBytes = 0;
+    k.kyc.setKycReaderForTests(async (data: Buffer) => {
+      seenBytes = data.length;
+      return { documentType: 'PAN', nameOnDocument: 'MEERA IYER', idNumberLast4: 'ABCDE1234F', legible: true, notes: [] };
+    });
+    const res = respond();
+    await k.pg.checkMyKyc(req(k.user.id), res as any);
+    assert.equal(res.statusCode, 200);
+    assert.equal(seenBytes, 'fake-image-bytes'.length, 'reads the stored file');
+    assert.equal(res.body.nameMatch, 'mismatch');
+    assert.equal(res.body.typeMatch, false);
+    assert.equal(res.body.idNumberLast4, '234F', 'never more than 4 characters');
+    assert.ok(res.body.flags.some((flag: string) => /does not match/.test(flag)));
+    const stored = await prisma.pGTenant.findUnique({ where: { id: k.tenant.id } });
+    assert.equal((stored!.kycAiCheck as any).nameMatch, 'mismatch');
+    assert.equal(stored!.kycVerified, false, 'the AI never verifies on its own');
+  });
+
+  it('only lets residents check their own document', async () => {
+    const res = respond();
+    await k.pg.checkMyKyc(req(ids.tenantUser.id), res as any);
+    assert.equal(res.statusCode, 404);
+  });
+});
+
+describe('move-in and move-out condition records', () => {
+  const respond = () => ({
+    statusCode: 200,
+    body: undefined as any,
+    status(code: number) { this.statusCode = code; return this; },
+    json(body: unknown) { this.body = body; return this; }
+  });
+  const c: Record<string, any> = {};
+  before(async () => {
+    c.pg = await import('../src/controllers/pg.controller.js');
+    c.user = await prisma.user.create({ data: { phone: '9855500001', password: 'x', name: 'Record Resident', role: 'PG_TENANT' } });
+    c.tenant = await prisma.pGTenant.create({ data: { propertyId: ids.prop.id, name: 'Record Resident', phone: '9855500001', moveInDate: new Date(), monthlyRent: 7000, status: 'RESERVED' } });
+  });
+  const ownerReq = (body: any, query: any = {}) => ({ user: { userId: ids.owner.id, role: 'PG_OWNER' }, body, query, params: {} }) as any;
+  const residentReq = (body: any, query: any = {}) => ({ user: { userId: c.user.id, role: 'PG_TENANT' }, body, query, params: {} }) as any;
+
+  it('lets staff and the resident add timestamped records, newest first', async () => {
+    const byOwner = respond();
+    await c.pg.createConditionReport(ownerReq({ tenantId: c.tenant.id, kind: 'MOVE_IN', notes: 'Wardrobe hinge loose', photoUrls: [] }), byOwner as any);
+    assert.equal(byOwner.statusCode, 201);
+    const byResident = respond();
+    await c.pg.createConditionReport(residentReq({ tenantId: c.tenant.id, kind: 'MOVE_IN', notes: 'Small crack in the window' }), byResident as any);
+    assert.equal(byResident.statusCode, 201);
+    assert.equal(byResident.body.createdByRole, 'RESIDENT');
+    const list = respond();
+    await c.pg.listConditionReports(residentReq({}, { tenantId: c.tenant.id }), list as any);
+    assert.deepEqual(list.body.map((r: any) => r.notes), ['Small crack in the window', 'Wardrobe hinge loose']);
+    assert.ok(list.body.every((r: any) => r.createdAt));
+  });
+
+  it('rejects bad input and other PGs', async () => {
+    const bad = respond();
+    await c.pg.createConditionReport(ownerReq({ tenantId: c.tenant.id, kind: 'DURING', notes: 'x' }), bad as any);
+    assert.equal(bad.statusCode, 400);
+    const empty = respond();
+    await c.pg.createConditionReport(ownerReq({ tenantId: c.tenant.id, kind: 'MOVE_OUT' }), empty as any);
+    assert.equal(empty.statusCode, 400);
+    const outsider = respond();
+    await c.pg.createConditionReport({ user: { userId: ids.outsider.id, role: 'PG_OWNER' }, body: { tenantId: c.tenant.id, kind: 'MOVE_OUT', notes: 'x' }, query: {}, params: {} } as any, outsider as any);
+    assert.equal(outsider.statusCode, 404);
+  });
+
+  it('is append-only in the database, even for the PG owner', async () => {
+    const record = await prisma.pGConditionReport.findFirst({ where: { tenantId: c.tenant.id } });
+    await assert.rejects(dbContext.runAsDbUser({ userId: ids.owner.id, role: 'PG_OWNER' }, async () => {
+      await prisma.pGConditionReport.update({ where: { id: record!.id }, data: { notes: 'edited' } });
+    }), /permission denied/i);
+    await assert.rejects(dbContext.runAsDbUser({ userId: ids.owner.id, role: 'PG_OWNER' }, async () => {
+      await prisma.pGConditionReport.delete({ where: { id: record!.id } });
+    }), /permission denied/i);
+  });
+});
+
+describe('meal orders, housekeeping and per-PG service switches', () => {
+  const respond = () => ({
+    statusCode: 200,
+    body: undefined as any,
+    status(code: number) { this.statusCode = code; return this; },
+    json(body: unknown) { this.body = body; return this; }
+  });
+  const o: Record<string, any> = {};
+  const dayIn = (days: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.now() + days * 86400000));
+  before(async () => {
+    o.svc = await import('../src/controllers/services.controller.js');
+    o.pg = await import('../src/controllers/pg.controller.js');
+    o.user = await prisma.user.create({ data: { phone: '9844400001', password: 'x', name: 'Meal Resident', role: 'PG_TENANT' } });
+    o.tenant = await prisma.pGTenant.create({ data: { propertyId: ids.prop.id, name: 'Meal Resident', phone: '9844400001', moveInDate: new Date(), monthlyRent: 7000, status: 'ACTIVE' } });
+  });
+  const owner = (body: any = {}, params: any = {}, query: any = {}) => ({ user: { userId: ids.owner.id, role: 'PG_OWNER' }, body, params, query }) as any;
+  const resident = (body: any = {}, params: any = {}) => ({ user: { userId: o.user.id, role: 'PG_TENANT' }, body, params: { tenantId: o.tenant.id, ...params }, query: {} }) as any;
+
+  it('only takes orders for services the owner switched on, at the owner\'s prices', async () => {
+    const off = respond();
+    await o.svc.createServiceOrder(resident({ type: 'MEAL', slot: 'LUNCH', forDate: dayIn(1) }), off as any);
+    assert.equal(off.statusCode, 409, 'meals are off by default');
+
+    const saved = respond();
+    await o.svc.updateServiceSettings(owner({ settings: { mealOrders: { enabled: true, prices: { LUNCH: 90, DINNER: 110, BREAKFAST: 50 } }, housekeeping: { enabled: false } } }, { propertyId: ids.prop.id }), saved as any);
+    assert.equal(saved.statusCode, 200);
+    assert.equal(saved.body.vibeCheck, true, 'defaults kept for untouched switches');
+
+    const lunch = respond();
+    await o.svc.createServiceOrder(resident({ type: 'MEAL', slot: 'LUNCH', forDate: dayIn(1), quantity: 2 }), lunch as any);
+    assert.equal(lunch.statusCode, 201);
+    assert.equal(lunch.body.unitPrice, 90);
+    assert.equal(lunch.body.quantity, 2);
+
+    const cleaning = respond();
+    await o.svc.createServiceOrder(resident({ type: 'HOUSEKEEPING', slot: 'MORNING', forDate: dayIn(1) }), cleaning as any);
+    assert.equal(cleaning.statusCode, 409, 'housekeeping still off');
+
+    for (const [body, why] of [[{ type: 'MEAL', slot: 'MORNING', forDate: dayIn(1) }, 'cleaning slot for a meal'], [{ type: 'MEAL', slot: 'LUNCH', forDate: dayIn(-1) }, 'past date'], [{ type: 'MEAL', slot: 'LUNCH', forDate: dayIn(30) }, 'too far ahead']] as const) {
+      const bad = respond();
+      await o.svc.createServiceOrder(resident(body), bad as any);
+      assert.equal(bad.statusCode, 400, why);
+    }
+  });
+
+  it('gives the kitchen a head-count and lets staff confirm while residents cancel only unconfirmed orders', async () => {
+    const day = respond();
+    await o.svc.listStaffServiceOrders(owner({}, {}, { date: dayIn(1) }), day as any);
+    assert.equal(day.body.mealCounts.LUNCH, 2);
+    const order = day.body.orders.find((item: any) => item.tenantId === o.tenant.id);
+    const confirmed = respond();
+    await o.svc.updateServiceOrderStatus(owner({ status: 'CONFIRMED' }, { orderId: order.id }), confirmed as any);
+    assert.equal(confirmed.body.status, 'CONFIRMED');
+    const cancel = respond();
+    await o.svc.cancelMyServiceOrder(resident({}, { orderId: order.id }), cancel as any);
+    assert.equal(cancel.statusCode, 409);
+    const outsider = respond();
+    await o.svc.updateServiceOrderStatus({ user: { userId: ids.outsider.id, role: 'PG_OWNER' }, body: { status: 'DONE' }, params: { orderId: order.id }, query: {} } as any, outsider as any);
+    assert.equal(outsider.statusCode, 404);
+  });
+
+  it('turns VibeCheck off for guests when the owner switches it off', async () => {
+    const off = respond();
+    await o.svc.updateServiceSettings(owner({ settings: { vibeCheck: false } }, { propertyId: ids.prop.id }), off as any);
+    const check = respond();
+    await o.pg.vibeCheckProperty({ params: { propertyId: ids.prop.id }, body: { answers: { sleep: 0 } }, user: undefined } as any, check as any);
+    assert.equal(check.statusCode, 404);
+    await o.svc.updateServiceSettings(owner({ settings: { vibeCheck: true } }, { propertyId: ids.prop.id }), respond() as any);
+  });
+});
+
+describe('staff roles: warden, cook, housekeeping, accountant', () => {
+  const respond = () => ({
+    statusCode: 200,
+    body: undefined as any,
+    status(code: number) { this.statusCode = code; return this; },
+    json(body: unknown) { this.body = body; return this; }
+  });
+  const r: Record<string, any> = {};
+  before(async () => {
+    r.pg = await import('../src/controllers/pg.controller.js');
+    r.svc = await import('../src/controllers/services.controller.js');
+    r.shared = await import('@livingplus/shared');
+    for (const [role, phone] of [['COOK', '9833300001'], ['HOUSEKEEPING', '9833300002'], ['ACCOUNTANT', '9833300003']] as const) {
+      const res = respond();
+      await r.pg.createPropertyStaff({ user: { userId: ids.owner.id, role: 'PG_OWNER' }, body: { propertyId: ids.prop.id, name: `${role} Staff`, phone, password: 'Strong@pass1', email: '', role }, params: {}, query: {} } as any, res as any);
+      assert.equal(res.statusCode, 201, `create ${role}`);
+      r[role] = await prisma.user.findFirst({ where: { phone: { endsWith: phone } } });
+    }
+    const resident = await prisma.pGTenant.create({ data: { propertyId: ids.prop.id, name: 'Order Resident', phone: '9833300009', moveInDate: new Date(), monthlyRent: 7000, status: 'ACTIVE' } });
+    const day = new Date(); day.setUTCHours(0, 0, 0, 0);
+    r.meal = await prisma.pGServiceOrder.create({ data: { propertyId: ids.prop.id, tenantId: resident.id, type: 'MEAL', slot: 'LUNCH', forDate: day } });
+    r.clean = await prisma.pGServiceOrder.create({ data: { propertyId: ids.prop.id, tenantId: resident.id, type: 'HOUSEKEEPING', slot: 'MORNING', forDate: day } });
+    r.today = day.toISOString().slice(0, 10);
+  });
+  const as = (role: string, extra: any = {}) => ({ user: { userId: r[role].id, role: 'PG_WARDEN' }, body: {}, params: {}, query: {}, ...extra }) as any;
+
+  it('maps each role to its own views', () => {
+    assert.deepEqual(r.shared.viewsForRoles(['COOK']), ['services']);
+    assert.deepEqual(r.shared.viewsForRoles(['ACCOUNTANT']), ['rent', 'payments', 'expenses', 'utilities', 'reports']);
+    assert.ok(!r.shared.viewsForRoles(['WARDEN']).includes('rent'), 'wardens never see the ledger');
+  });
+
+  it('shows cooks meal orders and housekeeping cleaning orders only', async () => {
+    const cook = respond();
+    await r.svc.listStaffServiceOrders(as('COOK', { query: { date: r.today } }), cook as any);
+    assert.ok(cook.body.orders.some((o: any) => o.id === r.meal.id));
+    assert.ok(!cook.body.orders.some((o: any) => o.id === r.clean.id));
+    const sneaky = respond();
+    await r.svc.updateServiceOrderStatus(as('COOK', { body: { status: 'DONE' }, params: { orderId: r.clean.id } }), sneaky as any);
+    assert.equal(sneaky.statusCode, 404, 'a cook cannot close a cleaning order');
+    const cleaner = respond();
+    await r.svc.updateServiceOrderStatus(as('HOUSEKEEPING', { body: { status: 'DONE' }, params: { orderId: r.clean.id } }), cleaner as any);
+    assert.equal(cleaner.body.status, 'DONE');
+  });
+
+  it('gives accountants the ledger but not bookings, and cooks neither', async () => {
+    const ledger = respond();
+    await r.pg.listOwnerRentEntries(as('ACCOUNTANT'), ledger as any);
+    assert.equal(ledger.statusCode, 200);
+    assert.ok(Array.isArray(ledger.body) && ledger.body.length > 0, 'accountant sees rent entries');
+    const cookLedger = respond();
+    await r.pg.listOwnerRentEntries(as('COOK'), cookLedger as any);
+    assert.deepEqual(cookLedger.body, [], 'cooks see no money');
+    const bookings = respond();
+    await r.pg.listOwnerBookings(as('ACCOUNTANT'), bookings as any);
+    assert.deepEqual(bookings.body, [], 'accountants see no booking requests');
+    const summary = respond();
+    await r.pg.getOwnerSummary(as('COOK'), summary as any);
+    assert.deepEqual(summary.body.staffRoles, ['COOK']);
+  });
+
+  it('refuses unknown staff roles', async () => {
+    const res = respond();
+    await r.pg.createPropertyStaff({ user: { userId: ids.owner.id, role: 'PG_OWNER' }, body: { propertyId: ids.prop.id, name: 'X', phone: '9833300099', password: 'Strong@pass1', email: '', role: 'MANAGER' }, params: {}, query: {} } as any, res as any);
+    assert.equal(res.statusCode, 400);
+  });
+});
+
+describe('verified owners', () => {
+  const respond = () => ({
+    statusCode: 200,
+    body: undefined as any,
+    status(code: number) { this.statusCode = code; return this; },
+    json(body: unknown) { this.body = body; return this; }
+  });
+  const v: Record<string, any> = {};
+  before(async () => {
+    v.auth = await import('../src/controllers/pg-auth.controller.js');
+    v.pg = await import('../src/controllers/pg.controller.js');
+  });
+  const signup = (extra: any = {}) => ({ body: { name: 'Verified Owner', phone: '9822211001', password: 'Strong@pass1', propertyName: 'Verified House', propertyAddress: '7 Trust Rd', locality: 'Adyar', city: 'Chennai', email: '', contactPhone: '', genderPolicy: 'ANY', ...extra }, headers: {} }) as any;
+
+  it('requires a phone code to register, and marks the owner verified', async () => {
+    const missing = respond();
+    await v.auth.register(signup(), missing as any);
+    assert.equal(missing.statusCode, 400);
+    assert.equal(missing.body.code, 'PHONE_NOT_VERIFIED');
+    const { token } = await otpFor('9822211001', 'signup');
+    const ok = respond();
+    await v.auth.register(signup({ phoneToken: token }), ok as any);
+    assert.equal(ok.statusCode, 201);
+    const owner = await prisma.user.findFirst({ where: { phone: { endsWith: '9822211001' } } });
+    assert.ok(owner?.phoneVerifiedAt, 'phone verified at registration');
+    v.owner = owner;
+  });
+
+  it('shows "Verified owner" on listings only when an owner proved their phone', async () => {
+    const listing = respond();
+    await v.pg.listProperties({ query: {}, user: undefined, headers: {} } as any, listing as any);
+    const mine = listing.body.find((p: any) => p.name === 'Verified House');
+    const spec = listing.body.find((p: any) => p.id === ids.prop.id);
+    assert.equal(mine.ownerVerified, true);
+    assert.equal(spec.ownerVerified, false, 'the spec owner never verified');
+  });
+
+  it('lets existing owners verify from their account', async () => {
+    const { token } = await otpFor('9100000001', 'existing');
+    const res = respond();
+    await v.auth.verifyMyPhone({ user: { userId: ids.owner.id, role: 'PG_OWNER' }, body: { phoneToken: token }, headers: {} } as any, res as any);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.user.phoneVerified, true);
+    const reused = respond();
+    await v.auth.verifyMyPhone({ user: { userId: ids.owner.id, role: 'PG_OWNER' }, body: { phoneToken: token }, headers: {} } as any, reused as any);
+    assert.equal(reused.statusCode, 400, 'codes are single-use');
+  });
+});
+
+describe('assistant reply language', () => {
+  it('asks for Tamil or Hindi in their own script and keeps facts unchanged', async () => {
+    const { languageInstruction } = await import('../src/services/ai-orchestrator.js');
+    assert.match(languageInstruction('ta'), /Tamil \(தமிழ்\)/);
+    assert.match(languageInstruction('hi'), /Hindi \(हिन्दी\)/);
+    assert.match(languageInstruction('ta'), /rupee amounts/);
+    assert.match(languageInstruction('xx'), /Reply in English/);
+  });
+});
+
+describe('WhatsApp inbound assistant', () => {
+  const w: Record<string, any> = {};
+  const envKeys = ['ENABLE_WHATSAPP_CLOUD_API', 'WHATSAPP_APP_SECRET', 'WHATSAPP_VERIFY_TOKEN', 'WHATSAPP_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID'];
+  const saved: Record<string, string | undefined> = {};
+  let base = '';
+  let server: http.Server;
+  before(async () => {
+    w.wa = await import('../src/services/whatsapp-inbound.js');
+    const { default: app } = await import('../src/app.js');
+    server = app.listen(0);
+    await new Promise<void>((r) => server.once('listening', () => r()));
+    base = `http://127.0.0.1:${(server.address() as any).port}`;
+    for (const key of envKeys) saved[key] = process.env[key];
+  });
+  after(() => {
+    server?.close();
+    for (const key of envKeys) { if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key]; }
+  });
+  const enable = () => Object.assign(process.env, { ENABLE_WHATSAPP_CLOUD_API: 'true', WHATSAPP_APP_SECRET: 'app-secret', WHATSAPP_VERIFY_TOKEN: 'verify-me', WHATSAPP_TOKEN: 't', WHATSAPP_PHONE_NUMBER_ID: '1' });
+
+  it('stays off until fully configured, then checks the handshake and every signature', async () => {
+    for (const key of envKeys) delete process.env[key];
+    assert.equal((await fetch(`${base}/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=x&hub.challenge=1`)).status, 404);
+    enable();
+    const ok = await fetch(`${base}/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=verify-me&hub.challenge=4242`);
+    assert.equal(await ok.text(), '4242');
+    assert.equal((await fetch(`${base}/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=1`)).status, 403);
+    const body = JSON.stringify({ entry: [] });
+    const forged = await fetch(`${base}/webhooks/whatsapp`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': 'sha256=deadbeef' }, body });
+    assert.equal(forged.status, 401);
+    const sig = 'sha256=' + crypto.createHmac('sha256', 'app-secret').update(body).digest('hex');
+    const signed = await fetch(`${base}/webhooks/whatsapp`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': sig }, body });
+    assert.equal(signed.status, 200);
+  });
+
+  it('answers residents as residents and strangers as guests, with YES to confirm', async () => {
+    w.wa.resetWhatsAppStateForTests();
+    const calls: any[] = [];
+    const sent: string[] = [];
+    const chat = async (req: any, input: any) => {
+      calls.push({ role: req.user?.role ?? 'GUEST', input });
+      return input.confirmationId
+        ? { reply: 'Ticket created.', sessionId: 's1' }
+        : { reply: 'I can log that.', sessionId: 's1', needsConfirmation: { confirmationId: 'cfm.s1.n1', preview: 'Report: tap leaking' } };
+    };
+    const send = async (_to: string, body: string) => { sent.push(body); };
+    const resident = await prisma.pGTenant.findFirst({ where: { status: 'ACTIVE', phone: { endsWith: '9000000001' } } }).catch(() => null);
+    const residentPhone = resident ? '919000000001' : '919200000002';
+    await w.wa.handleInboundText({ id: 'm1', from: residentPhone, text: 'Tap is leaking in my room' }, { chat, send });
+    assert.equal(calls[0].role, 'PG_TENANT', 'a number with an active stay talks to the resident assistant');
+    assert.match(sent[0] ?? "", /Reply YES to confirm/);
+    await w.wa.handleInboundText({ id: 'm2', from: residentPhone, text: 'yes' }, { chat, send });
+    assert.equal(calls[1].input.confirmationId, 'cfm.s1.n1');
+    assert.equal(calls[1].input.sessionId, 's1', 'the same conversation continues');
+    assert.equal(await w.wa.handleInboundText({ id: 'm2', from: residentPhone, text: 'yes' }, { chat, send }), null, 'Meta retries are ignored');
+    await w.wa.handleInboundText({ id: 'm3', from: '919999988888', text: 'PGs near OMR?' }, { chat, send });
+    assert.equal(calls[2].role, 'GUEST');
+  });
+});
+
+describe('VibeCheck agents on Google ADK', () => {
+  const v: Record<string, any> = {};
+  const keep = { enabled: process.env.ENABLE_AI_ORCHESTRATOR, model: process.env.AI_MODEL };
+  before(async () => {
+    v.agent = await import('../src/services/vibe-agent.js');
+    v.provider = await import('../src/services/ai-provider.js');
+    v.pg = await import('../src/controllers/pg.controller.js');
+    process.env.ENABLE_AI_ORCHESTRATOR = 'true';
+    process.env.AI_MODEL = 'google:gemini-3.8-flash';
+  });
+  after(() => {
+    v.agent.setVibeProfilerForTests(null);
+    v.agent.setVibeAgentForTests(null);
+    if (keep.enabled === undefined) delete process.env.ENABLE_AI_ORCHESTRATOR; else process.env.ENABLE_AI_ORCHESTRATOR = keep.enabled;
+    if (keep.model === undefined) delete process.env.AI_MODEL; else process.env.AI_MODEL = keep.model;
+  });
+  const respond = () => ({
+    statusCode: 200,
+    body: undefined as any,
+    status(code: number) { this.statusCode = code; return this; },
+    json(body: unknown) { this.body = body; return this; }
+  });
+
+  it('turns a free-text routine into habits, drops identity details and asks one follow-up', async () => {
+    v.agent.setVibeProfilerForTests(async () => ({
+      answers: { sleep: 2, wake: 2, tidiness: null, noise: 1, guests: 0, kitchen: null, schedule: 2, cooling: 9 },
+      summary: 'Night owl who studies late, plays guitar softly on weekends.',
+      followUp: 'How tidy do you keep your space?'
+    }));
+    const res = respond();
+    await v.pg.buildVibeProfileFromText({ body: { text: 'Naan 2 mani varaikkum padippen, weekends guitar vaasippen', answers: { kitchen: 1 } } } as any, res as any);
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.body.answers, { kitchen: 1, sleep: 2, wake: 2, noise: 1, guests: 0, schedule: 2 }, 'null and invalid values dropped; earlier answers kept');
+    assert.equal(res.body.followUp, 'How tidy do you keep your space?');
+    assert.deepEqual(res.body.missing, ['tidiness', 'cooling']);
+    const short = respond();
+    await v.pg.buildVibeProfileFromText({ body: { text: 'hi' } } as any, short as any);
+    assert.equal(short.statusCode, 400);
+  });
+
+  it('offers the quiz instead when the profile agent is unavailable', async () => {
+    v.agent.setVibeProfilerForTests(null);
+    process.env.ENABLE_AI_ORCHESTRATOR = 'false';
+    const res = respond();
+    await v.pg.buildVibeProfileFromText({ body: { text: 'I sleep early and keep my room tidy.' } } as any, res as any);
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.body.code, 'VIBE_AI_UNAVAILABLE');
+    process.env.ENABLE_AI_ORCHESTRATOR = 'true';
+  });
+
+  it('keeps the AI score within 15 points of the calculated one and passes habit summaries, never names', async () => {
+    let prompt = '';
+    v.agent.setVibeAgentForTests(async (text: string) => {
+      prompt = text;
+      return JSON.stringify({ rooms: { r1: { score: 99, reasons: ['You both sleep before 11 pm'], differences: [], headline: 'Calm, early room' } } });
+    });
+    const early = { sleep: 0, wake: 0, tidiness: 0, noise: 0, guests: 0, kitchen: 1, schedule: 0, cooling: 1 };
+    const night = { sleep: 2, wake: 2, tidiness: 2, noise: 2, guests: 2, kitchen: 1, schedule: 2, cooling: 1 };
+    const baseline = (await import('@livingplus/shared')).vibeMatch(early, [night]).score!;
+    const matches = await v.agent.scoreVibeRooms(early, [{ roomId: 'r1', roomNumber: '101', roommates: [night], summaries: ['Plays drums most evenings.'] }], 'Early riser who needs quiet.');
+    const r1 = matches.get('r1');
+    assert.equal(r1.ai, true);
+    assert.equal(r1.score, baseline + 15, 'a 99 from the AI is held to baseline + 15');
+    assert.match(prompt, /Plays drums most evenings/);
+    assert.match(prompt, /Early riser who needs quiet/);
+    assert.equal(v.agent.anchoredScore(-20, 10), 0);
+    assert.equal(v.agent.anchoredScore(50, 40), 50);
+  });
+
+  it('makes one structured Gemini call for one-shot jobs, with the JSON schema', async () => {
+    const api = fakeGemini([geminiText('```json\n{"a":2}\n```')]);
+    try {
+      const out = await withEnv({ ENABLE_AI_ORCHESTRATOR: 'true', AI_MODEL: 'google:gemini-4-hydrogen', AI_MODEL_OPTIONS: '{"thinkingConfig":{"thinkingLevel":"MEDIUM"}}', GOOGLE_GENAI_USE_ENTERPRISE: undefined, GOOGLE_API_KEY: 'test-key' }, () =>
+        v.provider.generateStructured({ system: 'sys', parts: [{ text: 'hi' }], schema: z.object({ a: z.number() }) }));
+      assert.deepEqual(out, { a: 2 });
+      assert.match(api.seen[0]!.url, /models\/gemini-4-hydrogen:generateContent/);
+      const body = api.seen[0]!.body;
+      assert.equal(body.generationConfig.responseMimeType, 'application/json');
+      assert.equal(body.generationConfig.responseJsonSchema.properties.a.type, 'number');
+      assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, 'MEDIUM');
+      assert.equal(body.systemInstruction.parts[0].text, 'sys');
+    } finally {
+      api.restore();
+    }
   });
 });

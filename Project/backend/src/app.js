@@ -10,6 +10,9 @@ import { cronRoutes } from './routes/cron.routes.js';
 import { directUploadUrl, localUploadPath, newFileKey, putFile, storageKind, viewUrl } from './services/storage.js';
 import { applyHttpHardening } from './middleware/http-hardening.js';
 import { logger } from './utils/logger.js';
+import { handleInboundText, textMessages, validSignature, verifySubscription, whatsappInboundEnabled } from './services/whatsapp-inbound.js';
+import { createChatModel } from './services/ai-provider.js';
+import { runChat } from './services/ai-orchestrator.js';
 const app = express();
 // Every query runs for the request's caller under PostgreSQL Row-Level Security (db/client.ts).
 // Search vectors are large and internal: never returned unless selected explicitly (set on the client).
@@ -17,6 +20,33 @@ export { prisma, systemPrisma } from './db/client.js';
 import { prisma, systemPrisma } from './db/client.js';
 import { asSystem, dbContextMiddleware, rebindDbContext } from './db/context.js';
 applyHttpHardening(app);
+// WhatsApp webhook: before the JSON parser, because Meta's signature covers the raw body.
+// Returns 404 unless WhatsApp Cloud API inbound is fully configured.
+app.get('/webhooks/whatsapp', (req, res) => {
+    if (!whatsappInboundEnabled())
+        return res.sendStatus(404);
+    const challenge = verifySubscription(req.query);
+    return challenge === null ? res.sendStatus(403) : res.type('text/plain').send(challenge);
+});
+app.post('/webhooks/whatsapp', express.raw({ type: '*/*', limit: '1mb' }), async (req, res) => {
+    if (!whatsappInboundEnabled())
+        return res.sendStatus(404);
+    if (!Buffer.isBuffer(req.body) || !validSignature(req.body, req.get('x-hub-signature-256')))
+        return res.sendStatus(401);
+    try {
+        const messages = textMessages(JSON.parse(req.body.toString('utf8')));
+        if (messages.length) {
+            const model = await createChatModel('chat');
+            for (const message of messages)
+                await handleInboundText(message, { chat: (chatReq, input) => runChat(chatReq, model, input) });
+        }
+    }
+    catch (error) {
+        logger.error({ err: error }, 'WhatsApp webhook error');
+    }
+    // Always acknowledge, so Meta does not retry a message we already handled.
+    return res.sendStatus(200);
+});
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ limit: '100kb', extended: true }));
 // After the body parsers: their stream callbacks would otherwise drop the context.
@@ -58,7 +88,7 @@ const authorizePropertyStaffUpload = async (req, res, next) => {
         const digits = String(account?.phone || '').replace(/\D/g, '');
         const phones = [...new Set([digits, digits.length === 10 ? `91${digits}` : digits, digits.length > 10 ? digits.slice(-10) : digits])];
         const tenant = await prisma.pGTenant.findFirst({
-            where: { propertyId, phone: { in: phones }, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
+            where: { propertyId, phone: { in: phones }, status: { in: ['RESERVED', 'ACTIVE', 'NOTICE_PERIOD'] } },
             select: { id: true }
         });
         if (!tenant) {

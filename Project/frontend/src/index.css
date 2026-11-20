@@ -27,8 +27,8 @@
   --color-closed: #5A6B82;
   --color-closed-bg: #F1F4F8;
 
-  --font-display: "Anek Latin Variable", "Anek Latin", system-ui, sans-serif;
-  --font-sans: "Mukta", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-sans: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Tamil", "Noto Sans Devanagari", sans-serif;
 
   --radius-field: 6px;
   --radius-button: 10px;
@@ -56,7 +56,7 @@
   h1, h2, h3 {
     font-family: var(--font-display);
     color: var(--color-navy-900);
-    letter-spacing: -0.01em;
+    letter-spacing: -0.015em;
     text-wrap: balance;
   }
 

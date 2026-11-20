@@ -44,6 +44,8 @@ const demoProperties = [
         rooms: [{ number: '401', rent: 9200, foodIncluded: false, foodCharge: 0 }, { number: '402', rent: 8200, foodIncluded: false, foodCharge: 0 }]
     }
 ];
+// Ananya's VibeCheck: early sleeper, tidy, quiet (so guests see real match reasons).
+const DEMO_VIBE = { sleep: 0, wake: 0, tidiness: 0, noise: 0, guests: 0, kitchen: 1, schedule: 0, cooling: 1 };
 async function main() {
     // Optional demo owner for the demo PGs (DEMO_OWNER_PHONE + DEMO_OWNER_PASSWORD).
     // There is no platform super admin: every PG belongs to its owner's workspace.
@@ -149,12 +151,13 @@ async function main() {
     });
     const tenant = await prisma.pGTenant.upsert({
         where: { id: 'pg-demo-tenant-ananya' },
-        update: { bookingId: booking.id, status: 'ACTIVE' },
+        update: { bookingId: booking.id, status: 'ACTIVE', vibeAnswers: DEMO_VIBE },
         create: {
             id: 'pg-demo-tenant-ananya',
             propertyId: demoProperties[0].id,
             bedId: occupiedBed.id,
             bookingId: booking.id,
+            vibeAnswers: DEMO_VIBE,
             name: 'Ananya Rao',
             phone: '9000000001',
             moveInDate: new Date('2026-10-01T00:00:00.000Z'),

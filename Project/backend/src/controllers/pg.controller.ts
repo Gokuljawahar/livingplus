@@ -19,7 +19,9 @@ import { bookingRequestBody, paymentClaimBody, paymentClaimReviewBody, rentEntry
 import { logger } from '../utils/logger.js';
 import { asSystem } from '../db/context.js';
 import { guestPhoneFrom } from '../utils/guest-token.js';
-import { isBloodGroup, isGenderPolicy, isKycType, isValidUpiId, LIMITS, MESSAGES } from '@livingplus/shared';
+import { checkKycDocument } from '../services/kyc-check.js';
+import { buildVibeProfile, scoreVibeRooms } from '../services/vibe-agent.js';
+import { cleanServiceSettings, cleanVibeAnswers, cleanVibeSummary, isStaffRole, isBloodGroup, isGenderPolicy, isKycType, isValidUpiId, LIMITS, MESSAGES, vibeMatch, type VibeAnswers } from '@livingplus/shared';
 import { cancelBookingBody, checkOutTenantBody, createMaintenanceTicketBody, createOwnerExpenseBody, createPropertyBody, createPropertyStaffBody, createRoomBody, createTenantTicketBody, markDepositRefundedBody, proposeElectricityBillBody, sendRentRemindersBody, updateBedStatusBody, updateBookingStatusBody, updateMaintenanceStatusBody, updatePropertyBody, updateResidentProfileBody, updateTenantProfileBody } from '../validation/request.schemas.js';
 
 function phoneVariants(phone: string): string[] {
@@ -100,7 +102,7 @@ export async function canManageProperty(req: Request, propertyId: string, roles 
   return Boolean(access);
 }
 
-async function accessiblePropertyIds(req: Request, roles = ['OWNER', 'WARDEN']): Promise<string[]> {
+export async function accessiblePropertyIds(req: Request, roles = ['OWNER', 'WARDEN']): Promise<string[]> {
   const user = currentUser(req);
   if (!user) return [];
   const scopedPropertyId = requestPropertyId(req);
@@ -253,10 +255,18 @@ export const listProperties = async (req: Request, res: Response): Promise<any> 
       orderBy: { createdAt: 'desc' }
     });
 
+    // "Verified owner" = an owner of the PG proved their phone number with a code.
+    // Guests cannot read staff access under RLS, so this yes/no lookup runs as the system.
+    const verifiedOwners: Array<{ propertyId: string }> = await asSystem('listing badge: does the owner have a verified phone', () => db.pGPropertyAccess.findMany({
+      where: { role: 'OWNER', propertyId: { in: properties.map((property: any) => property.id) }, user: { phoneVerifiedAt: { not: null } } },
+      select: { propertyId: true }
+    }));
+    const verified = new Set(verifiedOwners.map((row) => row.propertyId));
     res.json(properties.map((property: any) => {
       const ownerPhone = String(property.contactPhone || '').replace(/\D/g, '');
       return {
         ...property,
+        ownerVerified: verified.has(property.id),
         managerPhone: ownerPhone.length === 10 ? `91${ownerPhone}` : ownerPhone || null,
         availableBeds: property.rooms.reduce((total: number, room: any) => total + room.beds.length, 0),
         rooms: property.rooms.map((room: any) => ({ ...room, availableBeds: room.beds.length }))
@@ -557,7 +567,8 @@ export const createBookingRequest = async (req: Request, res: Response): Promise
           moveInDate: moveIn,
           lockExpiresAt: new Date(Date.now() + (property.bookingLockMinutes || 120) * 60 * 1000),
           notes: notes?.trim() || null,
-          idempotencyKey: idemKey
+          idempotencyKey: idemKey,
+          ...(cleanVibeAnswers(body.vibeAnswers) ? { vibeAnswers: cleanVibeAnswers(body.vibeAnswers)!, vibeSummary: cleanVibeSummary(body.vibeSummary) } : {})
         }
       });
     });
@@ -671,6 +682,248 @@ export const listGuestBookings = async (req: Request, res: Response): Promise<an
   }
 };
 
+/** Money endpoints: owners and accountants (DESIGN: staff roles). */
+const MONEY_ROLES = ['OWNER', 'ACCOUNTANT'];
+/** Shared money-and-operations endpoints (expenses, utilities, reminders): also wardens. */
+const OPERATIONS_MONEY_ROLES = ['OWNER', 'WARDEN', 'ACCOUNTANT'];
+
+const VIBE_ROOMMATE_STATUSES = ['ACTIVE', 'NOTICE_PERIOD', 'RESERVED'];
+const VIBE_REMATCH_DAYS = 30;
+
+/** VibeCheck answers of the current residents of each room (excluding one resident, e.g. the caller). */
+async function roommateAnswersByRoom(roomIds: string[], excludeTenantId?: string): Promise<Map<string, VibeAnswers[]>> {
+  const byRoom = new Map<string, VibeAnswers[]>();
+  for (const [roomId, vibes] of await roommateVibesByRoom(roomIds, excludeTenantId)) byRoom.set(roomId, vibes.answers);
+  return byRoom;
+}
+
+/** Residents' VibeCheck answers and habit summaries per room (never names). */
+async function roommateVibesByRoom(roomIds: string[], excludeTenantId?: string): Promise<Map<string, { answers: VibeAnswers[]; summaries: string[] }>> {
+  const byRoom = new Map<string, { answers: VibeAnswers[]; summaries: string[] }>();
+  if (!roomIds.length) return byRoom;
+  const tenants = await db.pGTenant.findMany({
+    where: { status: { in: VIBE_ROOMMATE_STATUSES }, bed: { roomId: { in: [...new Set(roomIds)] } }, ...(excludeTenantId ? { id: { not: excludeTenantId } } : {}) },
+    select: { vibeAnswers: true, vibeSummary: true, bed: { select: { roomId: true } } }
+  });
+  for (const tenant of tenants) {
+    const answers = cleanVibeAnswers(tenant.vibeAnswers);
+    if (!answers || !tenant.bed) continue;
+    const room = byRoom.get(tenant.bed.roomId) ?? { answers: [], summaries: [] };
+    room.answers.push(answers);
+    const summary = cleanVibeSummary(tenant.vibeSummary);
+    if (summary) room.summaries.push(summary);
+    byRoom.set(tenant.bed.roomId, room);
+  }
+  return byRoom;
+}
+
+/**
+ * Public: turns a free-text description of someone's routine (any language)
+ * into VibeCheck habits with one structured Gemini call. Nothing is stored;
+ * the person reviews the result before using it.
+ */
+export const buildVibeProfileFromText = async (req: Request, res: Response): Promise<any> => {
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+  if (text.length < 10) return res.status(400).json({ message: 'Tell us a little more about your day, e.g. when you sleep and how tidy you are' });
+  try {
+    res.json(await buildVibeProfile(text, cleanVibeAnswers(req.body?.answers) ?? {}));
+  } catch (error: any) {
+    if (error?.message === 'VIBE_AI_UNAVAILABLE') return res.status(503).json({ code: 'VIBE_AI_UNAVAILABLE', message: 'Describing your routine is not available right now. Answer the quick questions instead.' });
+    logger.warn({ err: error }, 'VibeCheck profile agent failed');
+    res.status(502).json({ code: 'VIBE_AI_FAILED', message: 'We could not read that just now. Answer the quick questions instead.' });
+  }
+};
+
+/**
+ * Public VibeCheck for a published PG: scores the visitor's answers against the
+ * residents of each room with a free bed. Returns scores and habit-level
+ * reasons only, never residents' names or individual answers.
+ */
+export const vibeCheckProperty = async (req: Request, res: Response): Promise<any> => {
+  const answers = cleanVibeAnswers(req.body?.answers);
+  if (!answers) return res.status(400).json({ message: 'Answer at least one VibeCheck question' });
+  try {
+    const property = await db.pGProperty.findFirst({
+      where: { id: String(req.params.propertyId), status: 'ACTIVE', ...(requestPropertyId(req) ? { id: requestPropertyId(req) } : {}) },
+      select: { id: true, serviceSettings: true, rooms: { where: { status: 'ACTIVE' }, select: { id: true, roomNumber: true, beds: { where: { status: 'AVAILABLE' }, select: { id: true, label: true } } } } }
+    });
+    if (!property) return res.status(404).json({ message: 'PG not found' });
+    if (!cleanServiceSettings(property.serviceSettings).vibeCheck) return res.status(404).json({ message: 'VibeCheck is not offered by this PG' });
+    const rooms = property.rooms.filter((room: any) => room.beds.length);
+    const byRoom = await roommateVibesByRoom(rooms.map((room: any) => room.id));
+    // AI judgment per room (one Gemini call, deterministic fallback inside).
+    const matches = await scoreVibeRooms(answers, rooms.map((room: any) => ({
+      roomId: String(room.id),
+      roomNumber: String(room.roomNumber ?? ''),
+      roommates: byRoom.get(room.id)?.answers ?? [],
+      summaries: byRoom.get(room.id)?.summaries ?? []
+    })), cleanVibeSummary(req.body?.summary));
+    res.json({
+      beds: rooms.flatMap((room: any) => {
+        const match = matches.get(room.id) ?? { score: null, compared: 0, reasons: [], differences: [], ai: false };
+        return room.beds.map((bed: any) => ({ bedId: bed.id, roomId: room.id, roomNumber: room.roomNumber, label: bed.label, ...match }));
+      })
+    });
+  } catch (error) {
+    logger.error({ err: error }, 'VibeCheck error');
+    res.status(500).json({ message: 'Could not run VibeCheck' });
+  }
+};
+
+/** The signed-in resident's own stay, or null (same ownership rule as notices). */
+export async function ownStay(req: Request, tenantId: string): Promise<any | null> {
+  const user = currentUser(req);
+  if (!user) return null;
+  const account = await db.user.findUnique({ where: { id: user.id }, select: { phone: true } });
+  const tenant = await db.pGTenant.findUnique({ where: { id: tenantId }, include: { bed: { select: { roomId: true } } } });
+  const scopedPropertyId = requestPropertyId(req) || user.propertyId;
+  if (!tenant || (scopedPropertyId && tenant.propertyId !== scopedPropertyId)) return null;
+  const mine = phoneVariants(String(account?.phone || '')).some((variant) => [tenant.phone, String(tenant.phone || '').replace(/\D/g, '')].includes(variant));
+  return mine ? tenant : null;
+}
+
+/** Residents answer VibeCheck so future roommates can match with them. */
+export const saveTenantVibe = async (req: Request, res: Response): Promise<any> => {
+  if (!currentUser(req)) return res.status(401).json({ message: 'Unauthorized' });
+  const answers = cleanVibeAnswers(req.body?.answers);
+  if (!answers) return res.status(400).json({ message: 'Answer at least one VibeCheck question' });
+  try {
+    const tenant = await ownStay(req, String(req.params.tenantId));
+    if (!tenant) return res.status(404).json({ message: 'Stay not found' });
+    const summary = cleanVibeSummary(req.body?.summary);
+    await db.pGTenant.update({ where: { id: tenant.id }, data: { vibeAnswers: answers, vibeSummary: summary } });
+    res.json({ answers, summary });
+  } catch (error) {
+    logger.error({ err: error }, 'VibeCheck save error');
+    res.status(500).json({ message: 'Could not save your answers' });
+  }
+};
+
+/** The resident's match with their current roommates, and whether the rematch window is open. */
+export const getTenantVibeMatch = async (req: Request, res: Response): Promise<any> => {
+  if (!currentUser(req)) return res.status(401).json({ message: 'Unauthorized' });
+  try {
+    const tenant = await ownStay(req, String(req.params.tenantId));
+    if (!tenant) return res.status(404).json({ message: 'Stay not found' });
+    const answers = cleanVibeAnswers(tenant.vibeAnswers);
+    const roomId = tenant.bed?.roomId;
+    const vibes = roomId ? (await roommateVibesByRoom([roomId], tenant.id)).get(roomId) : undefined;
+    const match = answers && roomId
+      ? (await scoreVibeRooms(answers, [{ roomId, roommates: vibes?.answers ?? [], summaries: vibes?.summaries ?? [] }], cleanVibeSummary(tenant.vibeSummary))).get(roomId) ?? null
+      : null;
+    const since = new Date(tenant.checkedInAt || tenant.moveInDate);
+    const rematchUntil = new Date(since.getTime() + VIBE_REMATCH_DAYS * 24 * 60 * 60 * 1000);
+    res.json({
+      answers,
+      summary: cleanVibeSummary(tenant.vibeSummary),
+      match,
+      rematchUntil: rematchUntil.toISOString(),
+      rematchOpen: ['ACTIVE', 'RESERVED'].includes(tenant.status) && Date.now() <= rematchUntil.getTime()
+    });
+  } catch (error) {
+    logger.error({ err: error }, 'VibeCheck match error');
+    res.status(500).json({ message: 'Could not load your VibeCheck' });
+  }
+};
+
+async function runKycCheck(tenant: any): Promise<any> {
+  const property = await db.pGProperty.findUnique({ where: { id: tenant.propertyId }, select: { serviceSettings: true } });
+  if (!cleanServiceSettings(property?.serviceSettings).kycAi) throw new Error('KYC_AI_OFF');
+  const check = await checkKycDocument({ fileKey: tenant.kycDocumentUrl, declaredType: tenant.kycType, residentName: tenant.name });
+  await db.pGTenant.update({ where: { id: tenant.id }, data: { kycAiCheck: check } });
+  return check;
+}
+
+function kycCheckError(res: Response, error: any): any {
+  const message = String(error?.message || '');
+  if (message.startsWith('AI_ORCHESTRATOR_NOT_CONFIGURED')) return res.status(503).json({ message: 'AI checks are not available right now. The owner will review your document.' });
+  if (message === 'KYC_AI_OFF') return res.status(409).json({ message: 'AI ID checks are switched off for this PG. The owner will review your document.' });
+  if (message === 'KYC_FILE_INVALID') return res.status(400).json({ message: 'That file could not be read. Upload a clear photo or PDF under 8 MB.' });
+  logger.error({ err: error }, 'KYC AI check error');
+  return res.status(502).json({ message: 'The document check failed. Your document is saved; try the check again later.' });
+}
+
+/** Resident: read my uploaded KYC document with AI right after uploading it. */
+export const checkMyKyc = async (req: Request, res: Response): Promise<any> => {
+  if (!currentUser(req)) return res.status(401).json({ message: 'Unauthorized' });
+  try {
+    const tenant = await ownStay(req, String(req.params.tenantId));
+    if (!tenant) return res.status(404).json({ message: 'Stay not found' });
+    if (!tenant.kycDocumentUrl) return res.status(400).json({ message: 'Upload your ID document first' });
+    res.json(await runKycCheck(tenant));
+  } catch (error) {
+    return kycCheckError(res, error);
+  }
+};
+
+/** Owner or warden: run (or re-run) the AI reading of a resident's KYC document. */
+export const checkTenantKyc = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const tenant = await db.pGTenant.findUnique({ where: { id: String(req.params.tenantId) } });
+    if (!tenant || !await canManageProperty(req, tenant.propertyId)) return res.status(404).json({ message: 'Resident not found' });
+    if (!tenant.kycDocumentUrl) return res.status(400).json({ message: 'This resident has not uploaded an ID yet' });
+    res.json(await runKycCheck(tenant));
+  } catch (error) {
+    return kycCheckError(res, error);
+  }
+};
+
+const FILE_KEY = /^(?:local\/[0-9a-f-]{36}\.(?:webp|pdf)|uploads\/[a-zA-Z0-9._-]+)$/i;
+
+/** Staff of the resident's PG, or the resident themselves; returns the stay or null. */
+async function conditionAccess(req: Request, tenantId: string): Promise<{ tenant: any; role: 'staff' | 'resident' } | null> {
+  const user = currentUser(req);
+  if (!user) return null;
+  if (user.role === 'PG_TENANT') {
+    const tenant = await ownStay(req, tenantId);
+    return tenant ? { tenant, role: 'resident' } : null;
+  }
+  const tenant = await db.pGTenant.findUnique({ where: { id: tenantId } });
+  return tenant && await canManageProperty(req, tenant.propertyId) ? { tenant, role: 'staff' } : null;
+}
+
+/** Timestamped move-in / move-out condition records for one stay, newest first. */
+export const listConditionReports = async (req: Request, res: Response): Promise<any> => {
+  if (!currentUser(req)) return res.status(401).json({ message: 'Unauthorized' });
+  try {
+    const access = await conditionAccess(req, String(req.query.tenantId || ''));
+    if (!access) return res.status(404).json({ message: 'Stay not found' });
+    const reports = await db.pGConditionReport.findMany({ where: { tenantId: access.tenant.id }, orderBy: { createdAt: 'desc' } });
+    res.json(reports);
+  } catch (error) {
+    logger.error({ err: error }, 'Condition report list error');
+    res.status(500).json({ message: 'Failed to load condition records' });
+  }
+};
+
+/** Adds a condition record. Records are never edited or deleted, so they can settle deposit disputes. */
+export const createConditionReport = async (req: Request, res: Response): Promise<any> => {
+  const user = currentUser(req);
+  if (!user) return res.status(401).json({ message: 'Unauthorized' });
+  const body = req.body || {};
+  const kind = String(body.kind || '');
+  if (!['MOVE_IN', 'MOVE_OUT'].includes(kind)) return res.status(400).json({ message: 'Choose move-in or move-out' });
+  const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) : '';
+  const photoUrls = Array.isArray(body.photoUrls) ? body.photoUrls.map(String) : [];
+  if (photoUrls.length > 8 || photoUrls.some((key: string) => !FILE_KEY.test(key))) return res.status(400).json({ message: 'Add up to 8 photos' });
+  if (!notes && !photoUrls.length) return res.status(400).json({ message: 'Add a photo or a note' });
+  try {
+    const access = await conditionAccess(req, String(body.tenantId || ''));
+    if (!access) return res.status(404).json({ message: 'Stay not found' });
+    if (access.role === 'resident' && ['CHECKED_OUT', 'CANCELLED'].includes(access.tenant.status)) {
+      return res.status(409).json({ message: 'This stay has ended; ask your PG owner to add records' });
+    }
+    const report = await db.pGConditionReport.create({
+      data: { propertyId: access.tenant.propertyId, tenantId: access.tenant.id, kind, notes: notes || null, photoUrls, createdBy: user.id, createdByRole: access.role === 'resident' ? 'RESIDENT' : user.role }
+    });
+    logAudit(access.tenant.propertyId, user.id, kind === 'MOVE_IN' ? 'MOVE_IN_RECORDED' : 'MOVE_OUT_RECORDED', 'PGConditionReport', report.id, `${photoUrls.length} photo(s)`);
+    res.status(201).json(report);
+  } catch (error) {
+    logger.error({ err: error }, 'Condition report create error');
+    res.status(500).json({ message: 'Failed to save the condition record' });
+  }
+};
+
 export const listOwnerBookings = async (req: Request, res: Response): Promise<any> => {
   try {
     await releaseExpiredBookingHolds();
@@ -680,7 +933,17 @@ export const listOwnerBookings = async (req: Request, res: Response): Promise<an
       include: { property: { select: { name: true, locality: true } }, bed: { include: { room: true } }, tenant: true },
       orderBy: { createdAt: 'desc' }
     });
-    res.json(bookings);
+    // VibeCheck for pending requests: the applicant against the room's residents.
+    // Owner lists keep the deterministic baseline (no per-row model call); the
+    // visitor-facing endpoints above judge with Gemini on the same data.
+    const pending = bookings.filter((booking: any) => booking.status === 'PENDING' && booking.vibeAnswers && booking.bed);
+    const rooms = await roommateAnswersByRoom(pending.map((booking: any) => booking.bed.roomId));
+    res.json(bookings.map((booking: any) => {
+      const answers = cleanVibeAnswers(booking.vibeAnswers);
+      const vibe = booking.status === 'PENDING' && answers && booking.bed ? vibeMatch(answers, rooms.get(booking.bed.roomId) ?? []) : null;
+      const { vibeAnswers: _private, vibeSummary: _privateSummary, ...rest } = booking;
+      return { ...rest, vibe };
+    }));
   } catch (error) {
     logger.error({ err: error }, 'PG booking list error');
     res.status(500).json({ message: 'Failed to fetch booking requests' });
@@ -750,7 +1013,8 @@ export const updateBookingStatus = async (req: Request, res: Response): Promise<
             moveInDate: booking.moveInDate,
             monthlyRent: booking.bed.room.monthlyRent,
             depositAmount: booking.bed.room.depositAmount,
-            status: 'RESERVED'
+            status: 'RESERVED',
+            ...(booking.vibeAnswers ? { vibeAnswers: booking.vibeAnswers, vibeSummary: booking.vibeSummary } : {})
           }
         });
       } else if (booking.bedId) {
@@ -997,7 +1261,7 @@ export const markDepositRefunded = async (req: Request, res: Response): Promise<
   try {
     const tenant = await db.pGTenant.findUnique({ where: { id: String(req.params.tenantId) } });
     if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
-    if (!await canManageProperty(req, tenant.propertyId, ['OWNER'])) {
+    if (!await canManageProperty(req, tenant.propertyId, MONEY_ROLES)) {
       return res.status(403).json({ message: 'Only property owners can mark a deposit refund' });
     }
     if (tenant.status !== 'CHECKED_OUT' || tenant.depositRefundStatus !== 'PENDING') {
@@ -1092,7 +1356,7 @@ export const listPropertyStaff = async (req: Request, res: Response): Promise<an
     const staff = await db.pGPropertyAccess.findMany({
       where: {
         propertyId: { in: propertyId ? [propertyId] : ownerPropertyIds },
-        role: 'WARDEN'
+        role: { in: ['WARDEN', 'COOK', 'HOUSEKEEPING', 'ACCOUNTANT'] }
       },
       include: {
         property: { select: { id: true, name: true } },
@@ -1117,6 +1381,8 @@ export const createPropertyStaff = async (req: Request, res: Response): Promise<
   if (!input) return;
   const owner = currentUser(req);
   const { propertyId, name, email, phone, password } = input;
+  const staffRole = isStaffRole(String(input.role || 'WARDEN').toUpperCase()) ? String(input.role || 'WARDEN').toUpperCase() : null;
+  if (!staffRole) return res.status(400).json({ message: 'Choose warden, cook, housekeeping or accountant' });
   const normalizedPhone = String(phone || '').replace(/\D/g, '');
   if (!owner || !propertyId || !name?.trim() || normalizedPhone.length < 10 || !password) {
     return res.status(400).json({ message: 'Property, staff name, valid phone and password are required' });
@@ -1138,10 +1404,10 @@ export const createPropertyStaff = async (req: Request, res: Response): Promise<
         },
         select: { id: true, name: true, phone: true, email: true }
       });
-      await tx.pGPropertyAccess.create({ data: { propertyId: String(propertyId), userId: newUser.id, role: 'WARDEN' } });
+      await tx.pGPropertyAccess.create({ data: { propertyId: String(propertyId), userId: newUser.id, role: staffRole } });
       return newUser;
     });
-    res.status(201).json({ ...staff, propertyId: String(propertyId), role: 'WARDEN' });
+    res.status(201).json({ ...staff, propertyId: String(propertyId), role: staffRole });
   } catch (error: any) {
     if (error?.code === 'P2002') return res.status(409).json({ message: 'A user with this phone or email already exists' });
     logger.error({ err: error }, 'PG staff creation error');
@@ -1157,7 +1423,7 @@ export const removePropertyStaff = async (req: Request, res: Response): Promise<
 
   try {
     const access = await db.pGPropertyAccess.findFirst({
-      where: { propertyId: String(propertyId), userId: String(userId), role: 'WARDEN' },
+      where: { propertyId: String(propertyId), userId: String(userId), role: { in: ['WARDEN', 'COOK', 'HOUSEKEEPING', 'ACCOUNTANT'] } },
       select: { id: true }
     });
     if (!access) return res.status(404).json({ message: 'Staff access not found' });
@@ -1173,7 +1439,7 @@ export const removePropertyStaff = async (req: Request, res: Response): Promise<
 
 export const listOwnerRentEntries = async (req: Request, res: Response): Promise<any> => {
   try {
-    const propertyIds = await accessiblePropertyIds(req, ['OWNER']);
+    const propertyIds = await accessiblePropertyIds(req, MONEY_ROLES);
     const period = req.query.period ? String(req.query.period) : undefined;
     const entries = await db.pGRentEntry.findMany({
       where: {
@@ -1212,7 +1478,7 @@ export const createRentEntry = async (req: Request, res: Response): Promise<any>
   try {
     const tenant = await db.pGTenant.findUnique({ where: { id: String(tenantId) } });
     if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
-    if (!await canManageProperty(req, tenant.propertyId, ['OWNER'])) {
+    if (!await canManageProperty(req, tenant.propertyId, MONEY_ROLES)) {
       return res.status(403).json({ message: 'You do not have access to this property' });
     }
     const type = ['RENT', 'DEPOSIT', 'UTILITY'].includes(String(entryType || '').toUpperCase())
@@ -1242,7 +1508,7 @@ export const sendRentReminders = async (req: Request, res: Response): Promise<an
   const input: any = parseBody(sendRentRemindersBody, req, res, INVALID_REQUEST);
   if (!input) return;
   try {
-    const propertyIds = await accessiblePropertyIds(req, ['OWNER', 'WARDEN']);
+    const propertyIds = await accessiblePropertyIds(req, OPERATIONS_MONEY_ROLES);
     const summary = await sendDueRentReminders(db, {
       propertyIds,
       period: input?.period ? String(input.period) : undefined,
@@ -1258,7 +1524,7 @@ export const sendRentReminders = async (req: Request, res: Response): Promise<an
 
 export const listOwnerExpenses = async (req: Request, res: Response): Promise<any> => {
   try {
-    const propertyIds = await accessiblePropertyIds(req, ['OWNER', 'WARDEN']);
+    const propertyIds = await accessiblePropertyIds(req, OPERATIONS_MONEY_ROLES);
     const period = req.query.period ? String(req.query.period) : undefined;
     res.json(await listExpenses(db, propertyIds, period));
   } catch (error) {
@@ -1273,7 +1539,7 @@ export const createOwnerExpense = async (req: Request, res: Response): Promise<a
   if (!input) return;
   try {
     const propertyId = String(input?.propertyId || '');
-    if (!propertyId || !await canManageProperty(req, propertyId, ['OWNER', 'WARDEN'])) {
+    if (!propertyId || !await canManageProperty(req, propertyId, OPERATIONS_MONEY_ROLES)) {
       return res.status(403).json({ message: 'You do not have access to this property' });
     }
     const expense = await createExpense(db, (req as any).user?.userId ? String((req as any).user.userId) : null, {
@@ -1297,7 +1563,7 @@ export const createOwnerExpense = async (req: Request, res: Response): Promise<a
 
 export const deleteOwnerExpense = async (req: Request, res: Response): Promise<any> => {
   try {
-    const propertyIds = await accessiblePropertyIds(req, ['OWNER']);
+    const propertyIds = await accessiblePropertyIds(req, MONEY_ROLES);
     await deleteExpense(db, (req as any).user?.userId ? String((req as any).user.userId) : null, String(req.params.expenseId), propertyIds);
     res.json({ message: 'Expense removed' });
   } catch (error: any) {
@@ -1311,7 +1577,7 @@ export const deleteOwnerExpense = async (req: Request, res: Response): Promise<a
 
 export const listElectricityBills = async (req: Request, res: Response): Promise<any> => {
   try {
-    const propertyIds = await accessiblePropertyIds(req, ['OWNER', 'WARDEN']);
+    const propertyIds = await accessiblePropertyIds(req, OPERATIONS_MONEY_ROLES);
     const period = req.query.period ? String(req.query.period) : undefined;
     const { listElectricityBills: listBills } = await import('../services/pg-billing.js');
     res.json(await listBills(db, propertyIds, period));
@@ -1327,7 +1593,7 @@ export const proposeElectricityBill = async (req: Request, res: Response): Promi
   if (!input) return;
   try {
     const propertyId = String(input?.propertyId || '');
-    if (!propertyId || !await canManageProperty(req, propertyId, ['OWNER', 'WARDEN'])) {
+    if (!propertyId || !await canManageProperty(req, propertyId, OPERATIONS_MONEY_ROLES)) {
       return res.status(403).json({ message: 'You do not have access to this property' });
     }
     const { proposeElectricityBill: propose } = await import('../services/pg-billing.js');
@@ -1350,7 +1616,7 @@ export const proposeElectricityBill = async (req: Request, res: Response): Promi
 
 export const approveElectricityBill = async (req: Request, res: Response): Promise<any> => {
   try {
-    const propertyIds = await accessiblePropertyIds(req, ['OWNER', 'WARDEN']);
+    const propertyIds = await accessiblePropertyIds(req, OPERATIONS_MONEY_ROLES);
     const { approveElectricityBill: approve } = await import('../services/pg-billing.js');
     const result = await approve(db, (req as any).user?.userId ? String((req as any).user.userId) : null, String(req.params.billId), propertyIds);
     res.json(result);
@@ -1374,7 +1640,7 @@ export const recordRentPayment = async (req: Request, res: Response): Promise<an
       include: { tenant: true }
     });
     if (!entry) return res.status(404).json({ message: 'Ledger entry not found' });
-    if (!await canManageProperty(req, entry.tenant.propertyId, ['OWNER'])) {
+    if (!await canManageProperty(req, entry.tenant.propertyId, MONEY_ROLES)) {
       return res.status(403).json({ message: 'You do not have access to this property' });
     }
     const updated = await db.$transaction(async (tx: any) => {
@@ -1418,7 +1684,7 @@ export const recordRentPayment = async (req: Request, res: Response): Promise<an
 
 export const getOwnerReport = async (req: Request, res: Response): Promise<any> => {
   try {
-    const propertyIds = await accessiblePropertyIds(req, ['OWNER']);
+    const propertyIds = await accessiblePropertyIds(req, MONEY_ROLES);
     const propertyId = req.query.propertyId ? String(req.query.propertyId) : undefined;
     if (propertyId && !propertyIds.includes(propertyId)) {
       return res.status(403).json({ message: 'You do not have access to this property' });
@@ -1477,6 +1743,8 @@ export const getOwnerSummary = async (req: Request, res: Response): Promise<any>
     if (!user) return res.status(401).json({ message: 'Unauthorized' });
     const propertyIds = await accessiblePropertyIds(req);
     const ownerPropertyIds = await accessiblePropertyIds(req, ['OWNER']);
+    const accessRows = await db.pGPropertyAccess.findMany({ where: { userId: user.id }, select: { role: true } });
+    const staffRoles = [...new Set(accessRows.map((row: { role: string }) => row.role))];
     const canManageStaff = user.role === 'PG_OWNER' || ownerPropertyIds.length > 0;
     const propertyId = req.query.propertyId ? String(req.query.propertyId) : undefined;
     if (propertyId && !propertyIds.includes(propertyId)) {
@@ -1503,7 +1771,8 @@ export const getOwnerSummary = async (req: Request, res: Response): Promise<any>
       pendingBookings,
       openTickets,
       rentOutstanding,
-      canManageStaff
+      canManageStaff,
+      staffRoles
     });
   } catch (error) {
     logger.error({ err: error }, 'PG owner summary error');
@@ -1840,7 +2109,7 @@ export const updateMaintenanceStatus = async (req: Request, res: Response): Prom
 
 export const listOwnerPaymentClaims = async (req: Request, res: Response): Promise<any> => {
   try {
-    const propertyIds = await accessiblePropertyIds(req, ['OWNER']);
+    const propertyIds = await accessiblePropertyIds(req, MONEY_ROLES);
     const claims = await db.pGPaymentClaim.findMany({
       where: { propertyId: { in: propertyIds } },
       include: {
@@ -1870,7 +2139,7 @@ export const reviewPaymentClaim = async (req: Request, res: Response): Promise<a
       include: { rentEntry: true, tenant: true }
     });
     if (!claim) return res.status(404).json({ message: 'Payment claim not found' });
-    if (!await canManageProperty(req, claim.propertyId, ['OWNER'])) return res.status(403).json({ message: 'Only the property owner can verify a payment claim' });
+    if (!await canManageProperty(req, claim.propertyId, MONEY_ROLES)) return res.status(403).json({ message: 'Only the property owner can verify a payment claim' });
     if (claim.status !== 'PENDING') return res.status(409).json({ message: 'This payment claim has already been reviewed' });
 
     const updated = await db.$transaction(async (tx: any) => {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { registerSchema, type RegisterForm } from '../validation/forms';
@@ -13,6 +13,7 @@ import logo from '../assets/logo_bg_white.png';
 import logoBlack from '../assets/logo_bg_black.png';
 import { ROUTES } from '../utils/app-areas';
 import { apiErrorMessage } from '../utils/api-error';
+import { phoneOtpErrorMessage, startPhoneVerification, type PhoneChallenge } from '../utils/phone-otp';
 
 export default function RegisterPage() {
 
@@ -29,8 +30,34 @@ export default function RegisterPage() {
   });
   const phone = useWatch({ control, name: 'phone' });
 
+  // Owners prove their phone with a code, so guests can trust "Verified owner".
+  const challenge = useRef<PhoneChallenge<'BOOKING'> | null>(null);
+  const [codeSent, setCodeSent] = useState(false);
+  const [code, setCode] = useState('');
+  const [phoneToken, setPhoneToken] = useState('');
+  const [verifying, setVerifying] = useState(false);
+
   const handleContinue = async () => {
-    if (await trigger('phone')) setStep(2);
+    if (!await trigger('phone')) return;
+    setVerifying(true);
+    try {
+      if (!codeSent) {
+        challenge.current = await startPhoneVerification(phone, 'BOOKING');
+        if (challenge.current.devCode) toast.success(`Demo code: ${challenge.current.devCode}`);
+        else toast.success('Code sent');
+        setCodeSent(true);
+        return;
+      }
+      if (!challenge.current) return;
+      const data = await challenge.current.verify(code);
+      setPhoneToken(data.phoneToken);
+      toast.success('Phone verified');
+      setStep(2);
+    } catch (error) {
+      toast.error(phoneOtpErrorMessage(error, codeSent ? 'That code did not work' : 'Could not send the code'));
+    } finally {
+      setVerifying(false);
+    }
   };
 
   const onRegister = async (formData: RegisterForm) => {
@@ -48,7 +75,8 @@ export default function RegisterPage() {
         city: formData.city,
         genderPolicy: formData.genderPolicy,
         businessLogo: formData.businessLogo,
-        password: formData.password
+        password: formData.password,
+        phoneToken
       };
 
       const response = await api.post('/auth/register', payload);
@@ -187,13 +215,23 @@ export default function RegisterPage() {
                     {errors.phone && <p className="mt-1 text-xs text-red-500">{errors.phone.message}</p>}
                   </div>
 
+                  {codeSent && (
+                    <label className="block text-sm font-medium text-slate-700">
+                      Code sent to {phone}
+                      <input aria-label="6-digit verification code" value={code} onChange={(event) => setCode(event.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+                        className="tabular mt-2 block w-full rounded-[6px] border border-field-border px-3 py-2.5 tracking-[0.2em]" />
+                      <button type="button" onClick={() => { setCodeSent(false); setCode(''); }} className="mt-2 text-sm font-medium text-navy-700 underline-offset-2 hover:underline">Change number</button>
+                    </label>
+                  )}
                   <button
                     onClick={() => void handleContinue()}
-                    disabled={loading || phone.replace(/\D/g, '').length !== 12}
+                    disabled={loading || verifying || phone.replace(/\D/g, '').length !== 12 || (codeSent && code.length < 6)}
                     className="w-full py-4 bg-navy-900 hover:bg-navy-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mt-8 disabled:opacity-70 disabled:cursor-not-allowed"
                   >
-                    Continue
+                    {verifying && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {codeSent ? 'Verify and continue' : 'Send code'}
                   </button>
+                  <p className="text-sm text-muted">We verify your number so guests see you as a verified owner.</p>
                 </div>
               )}
 

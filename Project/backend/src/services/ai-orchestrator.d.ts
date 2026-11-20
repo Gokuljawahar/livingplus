@@ -1,12 +1,14 @@
-import { type BaseMessage } from '@langchain/core/messages';
+import { type ModelStep, type ModelTurn } from './ai-provider.js';
+import { type A2uiMessage } from './a2ui.js';
+/** Reply language chosen in the chat panel (buildathon answers Q12: local-language help). */
+export declare const ASSISTANT_LANGUAGES: Record<string, string>;
+export declare function languageInstruction(language?: string): string;
 /**
- * Minimal surface the agent needs from a chat model. Every LangChain chat model
- * with tool calling satisfies it; tests pass a scripted stand-in.
+ * Minimal surface the agent needs from a chat model: one generate() step per
+ * turn. The configured Google model satisfies it; tests pass scripted stand-ins.
  */
 export interface AgentModel {
-    bindTools?: (tools: any[]) => {
-        invoke: (messages: BaseMessage[], config?: any) => Promise<BaseMessage>;
-    };
+    generate?: (turn: ModelTurn) => Promise<ModelStep>;
 }
 export interface ChatResult {
     reply: string;
@@ -21,6 +23,8 @@ export interface ChatResult {
         prompt_tokens?: number;
         completion_tokens?: number;
     } | undefined;
+    /** A2UI v1.0 surfaces for the client to render natively (text reply remains the fallback). */
+    ui?: A2uiMessage[];
 }
 export declare function runChat(req: any, model: AgentModel, input: {
     message: string;
@@ -28,5 +32,6 @@ export declare function runChat(req: any, model: AgentModel, input: {
     confirmationId?: string | undefined;
     cancelConfirmationId?: string | undefined;
     imageDataUrl?: string | undefined;
+    language?: string | undefined;
 }): Promise<ChatResult>;
 //# sourceMappingURL=ai-orchestrator.d.ts.map

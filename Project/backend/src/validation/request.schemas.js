@@ -7,8 +7,11 @@ const t = textField;
 export const loginBody = z.object({ email: t(320), phone: t(30), password: t(200) });
 export const registerBody = z.object({
     name: t(200), email: t(320), phone: t(30), password: t(200), propertyName: t(200), propertyAddress: t(500),
-    locality: t(200), contactPhone: t(30), city: t(100), genderPolicy: t(20), amenities: textList(), houseRules: textList()
+    locality: t(200), contactPhone: t(30), city: t(100), genderPolicy: t(20), amenities: textList(), houseRules: textList(),
+    /** Proof the owner controls the phone (from /auth/otp-verify). */
+    phoneToken: t(200)
 });
+export const verifyPhoneBody = z.object({ phoneToken: t(200) });
 export const otpRequestBody = z.object({ phone: t(30), purpose: t(30) });
 export const otpVerifyBody = z.object({ phone: t(30), purpose: t(30), code: t(20), firebaseIdToken: t(8192) });
 export const googleLoginBody = z.object({ firebaseIdToken: t(8192) });
@@ -33,7 +36,7 @@ export const createRoomBody = z.object({
     maintenanceFee: numberLike(), utilitiesSurcharge: numberLike(), hasAc: booleanLike(), foodIncluded: booleanLike(),
     foodCharge: numberLike(), numberOfBeds: numberLike(), bedLabels: textList()
 });
-export const createPropertyStaffBody = z.object({ propertyId: t(100), name: t(200), email: t(320), phone: t(30), password: t(200) });
+export const createPropertyStaffBody = z.object({ propertyId: t(100), name: t(200), email: t(320), phone: t(30), password: t(200), role: t(30).optional() });
 export const updateBedStatusBody = z.object({ status: t(30), note: t(500) });
 // Bookings and tenants
 // The phone is taken from the guest token; a body phone is accepted but ignored.
@@ -60,6 +63,6 @@ export const proposeElectricityBillBody = z.object({ propertyId: t(100), period:
 export const sendRentRemindersBody = z.object({ period: t(20), force: booleanLike() });
 // AI assistant
 export const aiChatBody = z.object({
-    message: t(20000), sessionId: t(100), confirmationId: t(200), cancelConfirmationId: t(200), imageDataUrl: t(6_000_000)
+    message: t(20000), sessionId: t(100), confirmationId: t(200), cancelConfirmationId: t(200), imageDataUrl: t(6_000_000), language: t(5)
 });
 //# sourceMappingURL=request.schemas.js.map

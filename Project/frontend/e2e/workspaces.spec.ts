@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const OWNER = { phone: '9555500001', password: 'Owner@e2e-pass1' };
 const OWNER_VIEWS = [
-  'Today', 'Properties & Beds', 'Bookings', 'Room changes', 'Tenants & KYC', 'Activity', 'Maintenance',
+  'Today', 'Properties & Beds', 'Bookings', 'Room changes', 'Tenants & KYC', 'Activity', 'Maintenance', 'Meals & cleaning',
   'Rent Ledger', 'Payment claims', 'Expenses', 'Utilities', 'Reports', 'Staff'
 ];
 const shotDir = process.env.E2E_SCREENSHOT_DIR;
@@ -81,7 +81,7 @@ test('a resident opens the portal sections after signing in', async ({ page }) =
   await shot(page, 'resident-portal');
 
   const nav = page.locator('aside');
-  for (const section of ['Money', 'Food', 'Services', 'Maintenance', 'Room change', 'Notifications', 'Profile', 'Home']) {
+  for (const section of ['Money', 'Food', 'Meals & cleaning', 'Services', 'Maintenance', 'Room change', 'Notifications', 'Profile', 'Home']) {
     await nav.getByRole('button', { name: section, exact: true }).click();
     await page.waitForLoadState('networkidle');
     await shot(page, `resident-${section.toLowerCase().replace(/[^a-z]+/g, '-')}`);
