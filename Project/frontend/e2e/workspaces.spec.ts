@@ -2,8 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 
 const OWNER = { phone: '9555500001', password: 'Owner@e2e-pass1' };
 const OWNER_VIEWS = [
-  'Today', 'Properties & Beds', 'Bookings', 'Room changes', 'Tenants & KYC', 'Activity', 'Maintenance', 'Meals & cleaning',
-  'Rent Ledger', 'Payment claims', 'Expenses', 'Utilities', 'Reports', 'Staff'
+  'Today', 'Bed requests', 'Residents & KYC', 'Room changes', 'Rent', 'Payments', 'Expenses', 'Utilities', 'Reports',
+  'Maintenance', 'Meals & cleaning', 'Activity', 'PGs & beds', 'Staff'
 ];
 const shotDir = process.env.E2E_SCREENSHOT_DIR;
 
@@ -49,7 +49,7 @@ test('the owner opens every workspace view and logs an expense', async ({ page }
   await page.getByRole('button', { name: 'Log expense' }).click();
   await expect(page.getByText('Enter the expense amount')).toBeVisible();
 
-  await nav.getByRole('button', { name: 'Properties & Beds', exact: true }).click();
+  await nav.getByRole('button', { name: 'PGs & beds', exact: true }).click();
   await page.getByLabel('Room number').fill('E2E-1');
   await page.getByLabel('Monthly rent').fill('7000');
   await page.getByLabel('Number of beds').fill('2');

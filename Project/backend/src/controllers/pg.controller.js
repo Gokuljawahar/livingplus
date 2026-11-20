@@ -19,7 +19,7 @@ import { logger } from '../utils/logger.js';
 import { asSystem } from '../db/context.js';
 import { guestPhoneFrom } from '../utils/guest-token.js';
 import { checkKycDocument } from '../services/kyc-check.js';
-import { buildVibeProfile, scoreVibeRooms } from '../services/vibe-agent.js';
+import { buildVibeProfile, vibeInterviewTurn, scoreVibeRooms } from '../services/vibe-agent.js';
 import { cleanServiceSettings, cleanVibeAnswers, cleanVibeSummary, isStaffRole, isBloodGroup, isGenderPolicy, isKycType, isValidUpiId, LIMITS, MESSAGES, vibeMatch } from '@livingplus/shared';
 import { cancelBookingBody, checkOutTenantBody, createMaintenanceTicketBody, createOwnerExpenseBody, createPropertyBody, createPropertyStaffBody, createRoomBody, createTenantTicketBody, markDepositRefundedBody, proposeElectricityBillBody, sendRentRemindersBody, updateBedStatusBody, updateBookingStatusBody, updateMaintenanceStatusBody, updatePropertyBody, updateResidentProfileBody, updateTenantProfileBody } from '../validation/request.schemas.js';
 function phoneVariants(phone) {
@@ -744,6 +744,42 @@ export const buildVibeProfileFromText = async (req, res) => {
             return res.status(503).json({ code: 'VIBE_AI_UNAVAILABLE', message: 'Describing your routine is not available right now. Answer the quick questions instead.' });
         logger.warn({ err: error }, 'VibeCheck profile agent failed');
         res.status(502).json({ code: 'VIBE_AI_FAILED', message: 'We could not read that just now. Answer the quick questions instead.' });
+    }
+};
+const VIBE_AUDIO_TYPES = new Set(['audio/wav', 'audio/x-wav', 'audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/aac']);
+const MAX_VIBE_AUDIO_BASE64 = 900_000; // about 25 s of 16 kHz mono WAV
+/**
+ * Public: one turn of the voice VibeCheck interview. Gemini hears the answer
+ * (audio or typed text), updates the habits and says the next question.
+ * Nothing is stored; the person reviews the habits before matching.
+ */
+export const vibeInterviewStep = async (req, res) => {
+    const body = req.body ?? {};
+    const history = (Array.isArray(body.history) ? body.history : [])
+        .filter((turn) => turn && (turn.role === 'assistant' || turn.role === 'user') && typeof turn.text === 'string')
+        .slice(-12)
+        .map((turn) => ({ role: turn.role, text: String(turn.text).slice(0, 500) }));
+    const text = typeof body.text === 'string' ? body.text.trim().slice(0, 1000) : '';
+    let audio;
+    if (body.audio && typeof body.audio === 'object') {
+        const mimeType = String(body.audio.mimeType || '').split(';')[0].trim().toLowerCase();
+        const data = String(body.audio.data || '');
+        if (!VIBE_AUDIO_TYPES.has(mimeType) || !/^[A-Za-z0-9+/=]+$/.test(data))
+            return res.status(400).json({ message: 'That recording format is not supported. Type your answer instead.' });
+        if (data.length > MAX_VIBE_AUDIO_BASE64)
+            return res.status(413).json({ message: 'That recording is too long. Keep answers under 20 seconds.' });
+        audio = { mimeType, data };
+    }
+    if (!text && !audio)
+        return res.status(400).json({ message: 'Say or type your answer first' });
+    try {
+        res.json(await vibeInterviewTurn({ history, known: cleanVibeAnswers(body.answers) ?? {}, ...(text ? { text } : {}), ...(audio ? { audio } : {}) }));
+    }
+    catch (error) {
+        if (error?.message === 'VIBE_AI_UNAVAILABLE')
+            return res.status(503).json({ code: 'VIBE_AI_UNAVAILABLE', message: 'Voice VibeCheck is not available right now. Answer the quick questions instead.' });
+        logger.warn({ err: error }, 'VibeCheck interview turn failed');
+        res.status(502).json({ code: 'VIBE_AI_FAILED', message: 'I did not catch that. Try again, or type your answer.' });
     }
 };
 /**

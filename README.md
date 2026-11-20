@@ -23,7 +23,7 @@ Built for the Google Startup Buildathon 2026. The answers this build delivers on
 | Voice notes, photo issues | Gemini multimodal | Transcribes voice notes and describes photo complaints, which become maintenance tickets. |
 | Search ("quiet PG near Tidel Park") | Gemini embeddings | Semantic matches alongside keyword search. |
 
-**Model:** `gemini-4-hydrogen`, the newest generally available Gemini with function calling and structured output, at thinking level `MEDIUM`. It's configurable with `AI_MODEL` and `AI_MODEL_OPTIONS`.
+**Model:** `gemini-3.8-flash` on Vertex AI: stable, with function calling and structured output, at thinking level `MEDIUM`. The code also runs on `gemini-4-hydrogen`; switch with `AI_MODEL` once the project's per-minute quota for it is raised, since new projects start very low and multi-step tool calls hit 429s.
 
 **Guardrails:**
 - VibeCheck never sends names or phone numbers, only habits.

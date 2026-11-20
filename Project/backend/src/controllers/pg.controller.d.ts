@@ -36,6 +36,12 @@ export declare const listGuestBookings: (req: Request, res: Response) => Promise
  */
 export declare const buildVibeProfileFromText: (req: Request, res: Response) => Promise<any>;
 /**
+ * Public: one turn of the voice VibeCheck interview. Gemini hears the answer
+ * (audio or typed text), updates the habits and says the next question.
+ * Nothing is stored; the person reviews the habits before matching.
+ */
+export declare const vibeInterviewStep: (req: Request, res: Response) => Promise<any>;
+/**
  * Public VibeCheck for a published PG: scores the visitor's answers against the
  * residents of each room with a free bed. Returns scores and habit-level
  * reasons only, never residents' names or individual answers.

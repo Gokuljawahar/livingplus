@@ -80,7 +80,9 @@ export const login = async (req: Request, res: Response): Promise<any> => {
 
   try {
     const digits = normalizePhone(loginId);
-    const phoneOptions = [...new Set([loginId, digits, digits.startsWith('91') ? digits.slice(2) : digits])];
+    // "+91 95555 00001", "919555500001" and "09555500001" all mean the same number.
+    const local = digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits.startsWith('0') && digits.length === 11 ? digits.slice(1) : digits;
+    const phoneOptions = [...new Set([loginId, digits, local, `91${local}`])];
     const user = await prisma.user.findFirst({
       where: {
         OR: [
@@ -89,7 +91,10 @@ export const login = async (req: Request, res: Response): Promise<any> => {
         ]
       }
     });
-    if (!user || !await bcrypt.compare(String(password), user.password)) {
+    // A space copied along with the password shouldn't lock anyone out: try it exactly, then trimmed.
+    const typed = String(password);
+    const matches = user && (await bcrypt.compare(typed, user.password) || (typed.trim() !== typed && await bcrypt.compare(typed.trim(), user.password)));
+    if (!user || !matches) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 

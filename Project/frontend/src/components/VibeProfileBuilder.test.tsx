@@ -18,24 +18,47 @@ beforeEach(() => {
   api.post.mockReset();
 });
 
-describe('VibeProfileBuilder', () => {
-  it('reads a routine written in any language and pre-fills the quiz for review', async () => {
-    api.post.mockResolvedValue({ data: { answers: { sleep: 2, noise: 0 }, summary: 'Night owl who likes a quiet room.', followUp: 'Do you keep your desk tidy most days?' } });
+describe('VibeProfileBuilder (voice VibeCheck)', () => {
+  it('holds a conversation: the answer goes to Gemini, the next question comes back and habits appear', async () => {
+    api.post.mockResolvedValue({ data: {
+      heard: 'Naan 1 mani varaikkum padippen',
+      answers: { sleep: 2, schedule: 2 },
+      summary: 'Night owl who studies late.',
+      reply: 'Nice! How tidy do you keep your room?',
+      done: false
+    } });
     render(<Harness />);
-    await userEvent.type(screen.getByLabelText(/Describe your usual day/), 'Naan 2 mani varaikkum padippen, quiet room venum');
-    await userEvent.click(screen.getByRole('button', { name: /Read my routine/ }));
-    expect(api.post).toHaveBeenCalledWith('/pg/vibecheck/profile', { text: 'Naan 2 mani varaikkum padippen, quiet room venum', answers: {} });
-    expect(await screen.findByText('Night owl who likes a quiet room.')).toBeInTheDocument();
-    expect(screen.getByText('Do you keep your desk tidy most days?')).toBeInTheDocument();
-    expect(screen.getByLabelText('After 1 am')).toBeChecked();
+    await userEvent.click(screen.getByRole('button', { name: /Type instead/ }));
+    expect(screen.getByText(/When do you usually go to sleep\?/)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('Your answer'), 'Naan 1 mani varaikkum padippen');
+    await userEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+
+    expect(api.post).toHaveBeenCalledWith('/pg/vibecheck/interview', {
+      history: [{ role: 'assistant', text: "Hi! Let's find roommates who fit you. When do you usually go to sleep?" }],
+      answers: {},
+      text: 'Naan 1 mani varaikkum padippen'
+    });
+    expect(await screen.findByText('Nice! How tidy do you keep your room?')).toBeInTheDocument();
+    expect(screen.getByText('Night owl who studies late.')).toBeInTheDocument();
+    expect(screen.getByText('What I’ve learned')).toBeInTheDocument();
   });
 
-  it('falls back to the quick questions when the AI is unavailable', async () => {
-    api.post.mockRejectedValue({ isAxiosError: true, response: { status: 503, data: { message: 'Answer the quick questions instead.' } } });
+  it('keeps the conversation going after an error and offers the quick questions', async () => {
+    api.post.mockRejectedValue({ isAxiosError: true, response: { status: 503, data: { message: 'Voice VibeCheck is not available right now. Answer the quick questions instead.' } } });
     render(<Harness />);
-    await userEvent.type(screen.getByLabelText(/Describe your usual day/), 'I sleep early and keep things tidy.');
-    await userEvent.click(screen.getByRole('button', { name: /Read my routine/ }));
+    await userEvent.click(screen.getByRole('button', { name: /Type instead/ }));
+    await userEvent.type(screen.getByLabelText('Your answer'), 'I sleep early');
+    await userEvent.click(screen.getByRole('button', { name: 'Send answer' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Answer the quick questions instead.');
+    await userEvent.click(screen.getByRole('button', { name: 'Answer quick questions instead' }));
     expect(screen.getByLabelText('Before 11 pm')).toBeInTheDocument();
+  });
+
+  it('falls back to tap-to-talk when live voice cannot start', async () => {
+    render(<Harness />);
+    await userEvent.click(screen.getByRole('button', { name: 'Start voice VibeCheck' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('tap the mic for each answer instead');
+    expect(screen.getByText(/When do you usually go to sleep\?/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tap to answer' })).toBeInTheDocument();
   });
 });

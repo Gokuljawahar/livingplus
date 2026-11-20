@@ -46,6 +46,7 @@ import {
   listProperties,
   vibeCheckProperty,
   buildVibeProfileFromText,
+  vibeInterviewStep,
   saveTenantVibe,
   getTenantVibeMatch,
   checkMyKyc,
@@ -120,6 +121,7 @@ router.get('/properties', optionalAuthenticate, listProperties);
 // it returns only scores and habit-level reasons.
 router.post('/properties/:propertyId/vibecheck', aiChatLimiter, systemRoute('VibeCheck scores a visitor against a published PG', vibeCheckProperty));
 router.post('/vibecheck/profile', aiChatLimiter, buildVibeProfileFromText);
+router.post('/vibecheck/interview', aiChatLimiter, vibeInterviewStep);
 router.put('/tenant/:tenantId/vibe', authenticate, saveTenantVibe);
 router.get('/tenant/:tenantId/vibe-match', authenticate, getTenantVibeMatch);
 router.post('/tenant/:tenantId/kyc-check', authenticate, aiChatLimiter, checkMyKyc);

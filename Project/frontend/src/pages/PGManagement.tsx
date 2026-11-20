@@ -20,6 +20,8 @@ import { MapPicker } from '../components/MapPicker';
 import { downloadXlsx } from '../utils/xlsx';
 import { useSidebar } from '../context/sidebar';
 import { apiErrorMessage } from '../utils/api-error';
+import StatusPill from '../components/ui/StatusPill';
+import { statusLabel } from '../utils/status';
 
 type Activity = { id: string; action: string; entityType?: string | null; entityId?: string | null; detail?: string | null; actorName?: string | null; createdAt: string; propertyId: string };
 type Property = { id: string; slug?: string | null; name: string; description?: string | null; address: string; locality: string; contactPhone?: string | null; upiId?: string | null; city: string; latitude?: number | null; longitude?: number | null; genderPolicy: string; status?: string; bookingLockMinutes?: number; rentDay?: number; rentDueDay?: number; amenities: string[]; houseRules: string[]; photoUrls: string[]; rooms: { id: string; roomNumber: string; monthlyRent: number; depositAmount: number; maintenanceFee: number; utilitiesSurcharge: number; foodCharge: number; roomType: string; beds: { id: string; label: string; status: string; maintenanceNote?: string | null }[] }[] };
@@ -107,6 +109,8 @@ export default function PGManagement() {
   const [reminding, setReminding] = useState(false);
   const [selectedPropertyId, setSelectedPropertyId] = useState('');
   const [editingPropertyId, setEditingPropertyId] = useState<string | null>(null);
+  const [propertyFormOpen, setPropertyFormOpen] = useState(false);
+  const [editingTenantId, setEditingTenantId] = useState('');
   const [savingTenant, setSaving] = useState(false);
   const [tenantFilter, setTenantFilter] = useState('');
   const [reassignBed, setReassignBed] = useState<Record<string, string>>({});
@@ -173,6 +177,7 @@ export default function PGManagement() {
       setPropertyPhotoFiles([]);
       setExistingPhotoUrls([]);
       toast.success(editingPropertyId ? 'Property updated' : 'Property added');
+      setPropertyFormOpen(false);
       refresh();
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not add property'));
@@ -577,25 +582,27 @@ export default function PGManagement() {
   const view: WorkspaceView = allowedViews.includes(chosenView) ? chosenView : ((allowedViews[0] ?? 'overview') as WorkspaceView);
   const views = useMemo(() => [
     { id: 'overview', label: 'Today', icon: Building2 },
-    { id: 'properties', label: 'Properties & Beds', icon: BedDouble },
-    { id: 'bookings', label: 'Bookings', icon: ClipboardList },
-    { id: 'roomchanges', label: 'Room changes', icon: ArrowLeftRight },
-    { id: 'tenants', label: 'Tenants & KYC', icon: Users },
-    { id: 'activity', label: 'Activity', icon: Clock },
-    { id: 'maintenance', label: 'Maintenance', icon: Wrench },
-    { id: 'services', label: 'Meals & cleaning', icon: UtensilsCrossed },
-    { id: 'rent', label: 'Rent Ledger', icon: Wallet },
-    { id: 'payments', label: 'Payment claims', icon: IndianRupee },
-    { id: 'expenses', label: 'Expenses', icon: IndianRupee },
-    { id: 'utilities', label: 'Utilities', icon: Zap },
-    { id: 'reports', label: 'Reports', icon: FileText },
-    { id: 'staff', label: 'Staff', icon: Users }
-  ].filter((item) => allowedViews.includes(item.id)) as { id: WorkspaceView; label: string; icon: typeof Users }[], [allowedViews]);
+    { id: 'bookings', label: 'Bed requests', icon: ClipboardList, group: 'Residents' },
+    { id: 'tenants', label: 'Residents & KYC', icon: Users, group: 'Residents' },
+    { id: 'roomchanges', label: 'Room changes', icon: ArrowLeftRight, group: 'Residents' },
+    { id: 'rent', label: 'Rent', icon: Wallet, group: 'Money' },
+    { id: 'payments', label: 'Payments', icon: IndianRupee, group: 'Money' },
+    { id: 'expenses', label: 'Expenses', icon: IndianRupee, group: 'Money' },
+    { id: 'utilities', label: 'Utilities', icon: Zap, group: 'Money' },
+    { id: 'reports', label: 'Reports', icon: FileText, group: 'Money' },
+    { id: 'maintenance', label: 'Maintenance', icon: Wrench, group: 'Operations' },
+    { id: 'services', label: 'Meals & cleaning', icon: UtensilsCrossed, group: 'Operations' },
+    { id: 'activity', label: 'Activity', icon: Clock, group: 'Operations' },
+    { id: 'properties', label: 'PGs & beds', icon: BedDouble, group: 'Setup' },
+    { id: 'staff', label: 'Staff', icon: Users, group: 'Setup' }
+  ].filter((item) => allowedViews.includes(item.id)) as { id: WorkspaceView; label: string; icon: typeof Users; group?: string }[], [allowedViews]);
 
   const { setSectionNav } = useSidebar();
+  // The add/edit form opens on demand, while editing, or when there is no PG yet.
+  const showPropertyForm = propertyFormOpen || Boolean(editingPropertyId) || !properties.length;
 
   useEffect(() => {
-    setSectionNav(views.map(({ id, label, icon }) => ({ id, label, icon, active: id === view, onSelect: () => setView(id) })));
+    setSectionNav(views.map(({ id, label, icon, group }) => ({ id, label, icon, ...(group ? { group } : {}), active: id === view, onSelect: () => setView(id) })));
     return () => setSectionNav(null);
   }, [views, view, setSectionNav]);
 
@@ -613,7 +620,7 @@ export default function PGManagement() {
                   <div>
                     <div className="flex flex-wrap items-center gap-2.5">
                       <h3 className="font-bold text-slate-900 text-base">{claim.tenant.name}</h3>
-                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${claim.status === 'PENDING' ? 'border-amber-200 bg-amber-50 text-amber-800' : claim.status === 'APPROVED' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-800'}`}>{claim.status}</span>
+                      <StatusPill status={claim.status} />
                     </div>
                     <p className="mt-1 text-xs text-slate-600 font-medium">{claim.property.name} · {claim.rentEntry.entryType} {claim.rentEntry.period} · ₹{claim.amount.toLocaleString('en-IN')}</p>
                     <p className="mt-0.5 text-xs text-slate-400">UPI reference: {claim.reference} · Submitted {new Date(claim.createdAt).toLocaleString()}</p>
@@ -711,11 +718,13 @@ export default function PGManagement() {
 
             {view === 'services' && <OwnerServices canEditSettings={summary.canManageStaff} />}
 
-            {view === 'properties' && <section className="grid gap-8 pt-2 xl:grid-cols-[minmax(0,1.3fr)_minmax(340px,0.7fr)]">
+            {view === 'properties' && <section className={`grid gap-8 pt-2 ${showPropertyForm ? 'xl:grid-cols-[minmax(0,1.3fr)_minmax(340px,0.7fr)]' : ''}`}>
               <div>
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-base font-bold text-slate-900">Your properties</h2>
-                  <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">{properties.length} properties</span>
+                  <p className="text-muted">{properties.length} {properties.length === 1 ? 'PG' : 'PGs'}</p>
+                  {summary.canManageStaff && !showPropertyForm && (
+                    <button type="button" onClick={() => { startNewProperty(); setPropertyFormOpen(true); }} className="btn-primary inline-flex items-center gap-1.5"><Plus className="h-4 w-4" aria-hidden="true" />Add PG</button>
+                  )}
                 </div>
                 <div className="space-y-3">
                   {properties.map((property) => {
@@ -787,10 +796,10 @@ export default function PGManagement() {
                   <button disabled={saving} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-navy-900 px-4 py-2.5 text-xs font-bold text-white hover:bg-slate-800 transition-colors shadow-xs disabled:opacity-60"><Plus className="h-4 w-4" />Add room</button>
                 </form>}
               </div>
-              {summary.canManageStaff && <form onSubmit={saveProperty} className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm h-fit">
+              {summary.canManageStaff && showPropertyForm && <form onSubmit={saveProperty} className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm h-fit">
                 <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                  <h2 className="font-bold text-slate-900 text-sm">{editingPropertyId ? 'Edit property' : 'Add a property'}</h2>
-                  <button type="button" onClick={startNewProperty} className="text-xs font-bold text-navy-900 hover:underline">New</button>
+                  <h2 className="font-bold text-slate-900 text-sm">{editingPropertyId ? 'Edit PG' : 'Add a PG'}</h2>
+                  {properties.length > 0 && <button type="button" onClick={() => { startNewProperty(); setPropertyFormOpen(false); }} className="text-sm font-medium text-muted hover:text-navy-900">Close</button>}
                 </div>
                 <div className="mt-4 space-y-3">
                   <div>
@@ -847,7 +856,7 @@ export default function PGManagement() {
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="font-bold text-slate-900 text-base">{booking.residentName}</h3>
-                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${booking.status === 'PENDING' ? 'border-amber-200 bg-amber-50 text-amber-800' : booking.status === 'APPROVED' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>{booking.status.replace('_', ' ')}</span>
+                      <StatusPill status={booking.status} />
                     </div>
                     <p className="text-xs text-slate-600 font-medium">{booking.property.name} · {booking.property.locality}</p>
                     <p className="text-xs text-slate-500">{booking.phone} · Move-in {new Date(booking.moveInDate).toLocaleDateString()}{booking.bed ? ` · Room ${booking.bed.room.roomNumber}, ${booking.bed.label}` : ''}</p>
@@ -894,7 +903,7 @@ export default function PGManagement() {
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="font-bold text-slate-900 text-base">{row.request_type === 'MOVE' ? 'Move' : 'Swap'} · {row.requester}{row.partner ? ` ↔ ${row.partner}` : ''}</h3>
-                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${row.status === 'ACCEPTED' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : row.status === 'PENDING_MATCH' || row.status === 'PROPOSED' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>{row.status.replace('_', ' ')}</span>
+                      <StatusPill status={row.status} />
                     </div>
                     <p className="text-xs text-slate-600 font-medium">{row.property}{row.from_bed ? ` · from Room ${row.from_bed.room_number || '?'}, ${row.from_bed.label}` : ''}{row.to_bed ? ` → Room ${row.to_bed.room_number || '?'}, ${row.to_bed.label}` : ''}</p>
                     {row.reason && <p className="text-xs text-slate-500 italic">“{row.reason}”</p>}
@@ -920,11 +929,11 @@ export default function PGManagement() {
 
             {view === 'tenants' && <section className="space-y-4 pt-2">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-base font-bold text-slate-900">Tenants and KYC records</h2>
+                <p className="text-muted">{tenants.length} {tenants.length === 1 ? 'resident' : 'residents'}</p>
                 <div className="flex flex-wrap gap-1.5 p-1 bg-slate-100 rounded-xl">
                   {['', 'ACTIVE', 'NOTICE_PERIOD', 'RESERVED', 'CHECKED_OUT'].map((status) => (
                     <button key={status} onClick={() => setTenantFilter(status)} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${tenantFilter === status ? 'bg-white text-navy-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}>
-                      {status ? status.replace('_', ' ') : 'All'}
+                      {status ? statusLabel(status) : 'All'}
                     </button>
                   ))}
                 </div>
@@ -935,7 +944,7 @@ export default function PGManagement() {
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-bold text-base text-navy-900">{tenant.name}</h3>
-                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${tenant.status === 'ACTIVE' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : tenant.status === 'NOTICE_PERIOD' ? 'border-amber-200 bg-amber-50 text-amber-800' : tenant.status === 'RESERVED' ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>{tenant.status.replace('_', ' ')}</span>
+                        <StatusPill status={tenant.status} />
                       </div>
                       <p className="mt-1 text-xs text-slate-500 font-medium">{tenant.property.name} · {tenant.bed ? `Room ${tenant.bed.room.roomNumber}, ${tenant.bed.label}` : 'No bed assigned'}</p>
                       <p className="mt-1 text-xs text-slate-700 font-medium">{tenant.phone} · ₹{tenant.monthlyRent.toLocaleString('en-IN')} / month · Deposit ₹{tenant.depositReceived.toLocaleString('en-IN')} / ₹{tenant.depositAmount.toLocaleString('en-IN')}</p>
@@ -945,6 +954,7 @@ export default function PGManagement() {
                       {tenant.status === 'RESERVED' && <button onClick={() => void updateTenantStay(tenant.id, 'check-in')} className="rounded-xl bg-emerald-700 px-3.5 py-2 text-xs font-bold text-white hover:bg-emerald-800 transition-colors shadow-xs">Check in</button>}
                       {tenant.status === 'ACTIVE' && <button onClick={() => setCheckoutTenantId(checkoutTenantId === tenant.id ? '' : tenant.id)} className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 transition-colors">Check out</button>}
                       {tenant.status === 'CHECKED_OUT' && tenant.depositRefundStatus === 'PENDING' && <span className="inline-flex items-center rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2 text-xs font-bold text-amber-800">Refund due ₹{(tenant.depositRefundAmount || 0).toLocaleString('en-IN')}</span>}
+                      <button type="button" aria-expanded={editingTenantId === tenant.id} onClick={() => setEditingTenantId(editingTenantId === tenant.id ? '' : tenant.id)} className="btn-secondary min-h-9 px-3 py-1.5 text-xs">Edit details</button>
                       <button type="button" aria-expanded={recordsFor === tenant.id} onClick={() => setRecordsFor(recordsFor === tenant.id ? '' : tenant.id)} className="btn-secondary min-h-9 px-3 py-1.5 text-xs">Condition records</button>
                       {tenant.kycDocumentUrl && <button type="button" onClick={() => void viewKycDocument(tenant.kycDocumentUrl!)} className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors">View KYC</button>}
                       {tenant.kycDocumentUrl && !tenant.kycVerified && <button type="button" disabled={kycChecking === tenant.id} onClick={() => void runKycCheck(tenant.id)} className="btn-secondary min-h-9 px-3 py-1.5 text-xs">{kycChecking === tenant.id ? 'Reading…' : tenant.kycAiCheck ? 'Re-run AI check' : 'AI check'}</button>}
@@ -954,7 +964,7 @@ export default function PGManagement() {
                     </div>
                   </div>
                   {recordsFor === tenant.id && <ConditionRecords tenantId={tenant.id} viewer="staff" />}
-                  <form onSubmit={(event) => void updateTenant(event, tenant.id)} className="grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2 xl:grid-cols-4">
+                  {editingTenantId === tenant.id && <form onSubmit={(event) => void updateTenant(event, tenant.id)} className="grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2 xl:grid-cols-4">
                     <input name="permanentAddress" defaultValue={tenant.permanentAddress || ''} placeholder="Permanent address" className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white" />
                     <input name="institutionOrEmployer" defaultValue={tenant.institutionOrEmployer || ''} placeholder="College / employer" className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white" />
                     <input name="emergencyName" defaultValue={tenant.emergencyName || ''} placeholder="Emergency contact name" className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white" />
@@ -963,7 +973,7 @@ export default function PGManagement() {
                     <select name="kycType" defaultValue={tenant.kycType || ''} className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900 focus:bg-white"><option value="">KYC document type</option>{['AADHAAR', 'PAN', 'PASSPORT', 'DRIVING_LICENSE', 'STUDENT_ID', 'WORK_ID'].map((type) => <option key={type}>{type}</option>)}</select>
                     <input name="kycDocument" type="file" accept="image/*,application/pdf" className="rounded-xl border border-slate-200 bg-slate-50/50 px-2 py-1.5 text-xs sm:col-span-2 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-200 file:px-2.5 file:py-1 file:text-[11px] file:font-semibold" />
                     <button disabled={saving} className="rounded-xl bg-navy-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 transition-colors shadow-xs disabled:opacity-60">Save resident record</button>
-                  </form>
+                  </form>}
                   {checkoutTenantId === tenant.id && tenant.status === 'ACTIVE' && <form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void updateTenantStay(tenant.id, 'check-out', { depositDeductions: Number(form.get('depositDeductions') || 0), checkoutNote: String(form.get('checkoutNote') || '') }); }} className="grid gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-4 sm:grid-cols-[1fr_1.5fr_auto_auto]">
                     <label className="text-xs font-bold text-slate-700">Deposit deductions (₹, max {(tenant.depositReceived || 0).toLocaleString('en-IN')})<input name="depositDeductions" type="number" min="0" max={tenant.depositReceived || 0} defaultValue="0" className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900" /></label>
                     <label className="text-xs font-bold text-slate-700">Inspection / checkout note<input name="checkoutNote" placeholder="Room condition, damages…" className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-navy-900" /></label>
@@ -994,7 +1004,7 @@ export default function PGManagement() {
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="font-bold text-slate-900 text-sm">{entry.tenant.name}</h3>
                           <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{entry.entryType} · {entry.period}</span>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${entry.status === 'PAID' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>{entry.status}</span>
+                          <StatusPill status={entry.status} />
                         </div>
                         <p className="mt-1 text-xs text-slate-500">{entry.tenant.property.name}{entry.tenant.bed ? ` · Room ${entry.tenant.bed.room.roomNumber}, ${entry.tenant.bed.label}` : ''} · Due {new Date(entry.dueDate).toLocaleDateString()}</p>
                         <p className="mt-1 text-xs font-semibold text-slate-800">₹{entry.paidAmount.toLocaleString('en-IN')} paid of ₹{entry.amount.toLocaleString('en-IN')}{entry.method ? ` · ${entry.method}` : ''}{entry.reference ? ` · Ref ${entry.reference}` : ''}</p>
@@ -1231,8 +1241,8 @@ export default function PGManagement() {
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-bold text-slate-900 text-sm">{ticket.title}</h3>
-                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${ticket.priority === 'URGENT' ? 'border-rose-200 bg-rose-50 text-rose-800' : ticket.priority === 'HIGH' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-blue-200 bg-blue-50 text-blue-800'}`}>{ticket.priority}</span>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">{ticket.status.replace('_', ' ')}</span>
+                        <StatusPill status={ticket.priority} />
+                        <StatusPill status={ticket.status} />
                       </div>
                       <p className="text-xs text-slate-500">{ticket.property.name} · {ticket.category}{ticket.tenant ? ` · ${ticket.tenant.name}` : ''}{ticket.assignedName ? ` · Assigned to ${ticket.assignedName}` : ''}</p>
                       <p className="text-xs text-slate-700 pt-1">{ticket.description}</p>

@@ -629,7 +629,7 @@ export default function PGDiscovery() {
   const labelClass = 'block text-sm font-medium text-navy-900';
 
   return (
-    <main className="min-h-screen bg-surface text-ink">
+    <main className="flex min-h-screen flex-col bg-surface text-ink">
       <a href="#results" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-2 focus:z-50 focus:rounded-[6px] focus:bg-white focus:px-3 focus:py-2">
         Skip to results
       </a>
@@ -753,13 +753,7 @@ export default function PGDiscovery() {
         </section>
       ) : (
         <section id="results" className="mx-auto max-w-7xl px-4 pb-16 pt-5 sm:px-6">
-          <div className="mb-4 sm:mb-5">
-            <h1 className="font-display text-[22px] font-bold leading-tight text-navy-900 sm:text-[32px]">PGs in Chennai, with the real monthly cost</h1>
-            <p className="mt-1 max-w-2xl text-muted">
-              <span className="sm:hidden">Rent, food and deposit up front. Live bed availability.</span>
-              <span className="hidden sm:inline">Rent, food and deposit shown up front. Beds are live from the owner's own register. Browse freely; you only verify your phone when you request a bed.</span>
-            </p>
-          </div>
+          <h1 className="sr-only">PGs in Chennai</h1>
           <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-hide sm:mx-0 sm:flex-wrap sm:px-0" role="group" aria-label="Quick filters">
             <label className={`relative inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border pl-3 pr-2 text-sm font-medium ${nearPlace ? 'border-navy-900 bg-amber-50 text-navy-900' : 'border-hairline bg-white text-ink hover:border-field-border'}`}>
               <MapPin className="h-4 w-4" aria-hidden="true" />
@@ -907,49 +901,13 @@ export default function PGDiscovery() {
         </section>
       )}
 
-      {!(activeTab === 'requests' && guestPhone) && (
-        <>
-          <section aria-labelledby="how-heading" className="border-t border-hairline bg-white">
-            <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6">
-              <h2 id="how-heading" className="font-display text-2xl font-bold text-navy-900">How a bed request works</h2>
-              <ol className="mt-6 grid gap-6 sm:grid-cols-3">
-                {[
-                  ['Compare honestly', 'Every listing shows rent, food and deposit, and which beds are free right now.'],
-                  ['Check the vibe', 'VibeCheck compares your sleep, tidiness and noise habits with the people already in each room. Names are never shown.'],
-                  ['Request with one code', 'Verify your phone once. The bed is held while the owner reviews, and you follow the reply in My requests.']
-                ].map(([title, body], index) => (
-                  <li key={title} className="flex gap-4">
-                    <span className="tabular flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-50 font-display font-bold text-navy-900">{index + 1}</span>
-                    <div>
-                      <h3 className="font-semibold text-navy-900">{title}</h3>
-                      <p className="mt-1 text-muted">{body}</p>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          </section>
-          <section aria-labelledby="owner-band-heading" className="bg-navy-900 text-white">
-            <div className="mx-auto flex max-w-7xl flex-col gap-5 px-4 py-12 sm:px-6 md:flex-row md:items-center md:justify-between">
-              <div className="max-w-xl">
-                <h2 id="owner-band-heading" className="font-display text-2xl font-bold text-white">Run a PG?</h2>
-                <p className="mt-1 text-white/80">Bed requests, rent, food, maintenance and staff in one workspace, with an assistant that drafts the routine work for you to confirm.</p>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <Link to={ROUTES.ownerRegister} className="inline-flex min-h-11 items-center rounded-full bg-white px-5 font-semibold text-navy-900 hover:bg-amber-50">List your PG</Link>
-                <Link to={ROUTES.ownerLogin} className="inline-flex min-h-11 items-center rounded-full px-5 font-semibold text-white ring-1 ring-white/30 hover:bg-white/10">Owner sign in</Link>
-              </div>
-            </div>
-          </section>
-        </>
-      )}
-
-      <footer className="border-t border-hairline bg-white">
+      <footer className="mt-auto border-t border-hairline bg-white">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-6 text-sm text-muted sm:px-6">
           <BrandLogo />
           <nav aria-label="Footer" className="flex flex-wrap gap-x-5 gap-y-2">
             <a href={residentHome} className="hover:text-navy-900">Residents</a>
-            <Link to={ROUTES.ownerLogin} className="hover:text-navy-900">For PG owners</Link>
+            <Link to={ROUTES.ownerRegister} className="font-medium text-navy-900 hover:underline">List your PG</Link>
+            <Link to={ROUTES.ownerLogin} className="hover:text-navy-900">Owner sign in</Link>
             <Link to="/privacy-policy" className="hover:text-navy-900">Privacy</Link>
             <Link to="/terms" className="hover:text-navy-900">Terms</Link>
           </nav>
@@ -1108,11 +1066,9 @@ export default function PGDiscovery() {
 
                       {selectedProperty.serviceSettings?.vibeCheck === false ? null : !vibeOpen ? (
                         <div className="rounded-[14px] border border-hairline px-4 py-3">
-                          <p className="font-medium text-navy-900">{vibeMatches ? 'Your VibeCheck is on' : 'Find the room that suits you'}</p>
+                          <p className="font-medium text-navy-900">{vibeMatches ? 'Sorted by VibeCheck' : 'Find roommates like you'}</p>
                           <p className="mt-0.5 text-sm text-muted">
-                            {vibeMatches
-                              ? 'Beds are sorted by how well your habits match the people already in each room.'
-                              : 'Tell us about your routine in your own words, or answer 8 quick questions. AI compares you with the people already living in each room. Only habits are shown, never who said what.'}
+                            {vibeMatches ? 'Best match first.' : 'Match beds by sleep, tidiness and noise.'}
                           </p>
                           <button type="button" onClick={() => setVibeOpen(true)} className="btn-secondary mt-3">
                             {vibeMatches ? 'Change my answers' : 'Take VibeCheck'}
@@ -1120,8 +1076,7 @@ export default function PGDiscovery() {
                         </div>
                       ) : (
                         <div className="rounded-[14px] border border-navy-900/20 px-4 py-4">
-                          <h3 className="font-sans text-base font-semibold">VibeCheck</h3>
-                          <div className="mt-3"><VibeProfileBuilder answers={vibeAnswers} summary={vibeSummary} onChange={(answers, summary) => { setVibeAnswers(answers); setVibeSummary(summary); }} /></div>
+                          <div><VibeProfileBuilder answers={vibeAnswers} summary={vibeSummary} onChange={(answers, summary) => { setVibeAnswers(answers); setVibeSummary(summary); }} /></div>
                           <div className="mt-4 flex flex-wrap gap-2">
                             <button type="button" disabled={!vibeComplete || vibeLoading} onClick={() => void runVibeCheck()} className="btn-secondary">
                               {vibeLoading && <Loader2 className="h-4 w-4 animate-spin" />} See my matches
@@ -1161,7 +1116,7 @@ export default function PGDiscovery() {
                           className={fieldClass}
                         />
                       </label>
-                      <p id="phone-hint" className="-mt-2 text-sm text-muted">We'll send a code to this number. The owner uses it to contact you.</p>
+                      <p id="phone-hint" className="-mt-2 text-sm text-muted">We'll text you a code.</p>
                       <label className={labelClass}>
                         Email <span className="font-normal text-muted">(optional)</span>
                         <input type="email" autoComplete="email" value={request.email} onChange={(event) => setRequest({ ...request, email: event.target.value })} className={fieldClass} />
@@ -1188,7 +1143,7 @@ export default function PGDiscovery() {
                           </div>
                         ))}
                       </dl>
-                      <p className="text-sm text-muted">Sending a request holds the bed while the owner reviews it. You'll see their reply in My requests, and you can cancel any time before they answer.</p>
+                      <p className="text-sm text-muted">The bed is held while the owner reviews. Cancel anytime.</p>
                       {phoneToken ? (
                         <p className="flex items-center gap-2 rounded-[10px] bg-positive-bg px-3 py-2.5 font-medium text-positive">
                           <Check className="h-4 w-4" aria-hidden="true" /> +{normalizePhoneDigits(request.phone)} is verified

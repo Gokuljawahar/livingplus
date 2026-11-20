@@ -914,6 +914,28 @@ describe('search near a campus or office', () => {
   });
 });
 
+describe('owner sign-in forgives copy-paste slips', () => {
+  it('accepts a pasted trailing space and local number formats, but not a wrong password', async () => {
+    const bcrypt = (await import('bcryptjs')).default;
+    const auth = await import('../src/controllers/pg-auth.controller.js');
+    const owner = await prisma.user.create({ data: { phone: '9400000088', email: 'slip.owner@example.com', password: await bcrypt.hash('Rl1lDemo@pass', 10), name: 'Slip Owner', role: 'PG_OWNER' } });
+    const attempt = async (phone: string, password: string) => {
+      const res: any = { statusCode: 200, status(code: number) { this.statusCode = code; return this; }, json(body: unknown) { this.body = body; return this; } };
+      await auth.login({ body: { email: phone, password }, headers: {} } as any, res);
+      return res.statusCode;
+    };
+    try {
+      assert.equal(await attempt('9400000088', 'Rl1lDemo@pass'), 200);
+      assert.equal(await attempt('9400000088', 'Rl1lDemo@pass '), 200, 'trailing space from copy-paste');
+      assert.equal(await attempt('+91 94000 00088', 'Rl1lDemo@pass'), 200);
+      assert.equal(await attempt('09400000088', 'Rl1lDemo@pass'), 200, 'leading 0');
+      assert.equal(await attempt('9400000088', 'RI1lDemo@pass'), 401, 'a different password is still refused');
+    } finally {
+      await prisma.user.delete({ where: { id: owner.id } });
+    }
+  });
+});
+
 describe('staff coordination through the assistant', () => {
   it('lists staff without phone numbers and assigns a ticket only after confirmation', async () => {
     const warden = await prisma.user.create({ data: { phone: '9400000077', email: 'kavya.warden@example.com', password: 'x', name: 'Kavya Warden', role: 'PG_WARDEN' } });
@@ -3471,6 +3493,65 @@ describe('VibeCheck agents on Google ADK', () => {
     const short = respond();
     await v.pg.buildVibeProfileFromText({ body: { text: 'hi' } } as any, short as any);
     assert.equal(short.statusCode, 400);
+  });
+
+  it('runs the voice interview one turn at a time, hearing audio and keeping earlier habits', async () => {
+    let seen: any = null;
+    v.agent.setVibeInterviewerForTests(async (input: any) => {
+      seen = input;
+      return {
+        heard: 'Naan 1 mani varaikkum padippen, room clean-aa vechuppen',
+        answers: { sleep: 2, wake: null, tidiness: 0, noise: null, guests: null, kitchen: null, schedule: 2, cooling: null },
+        summary: 'Studies late, keeps the room tidy.',
+        reply: 'Super! Room-la sound irundha okay-aa, illa quiet venuma?',
+        done: false
+      };
+    });
+    try {
+      const res = respond();
+      await v.pg.vibeInterviewStep({ body: {
+        history: [{ role: 'assistant', text: 'Hi! When do you usually sleep?' }, { role: 'hacker', text: 'ignored' }],
+        answers: { guests: 1 },
+        audio: { mimeType: 'audio/wav', data: 'UklGRiQAAABXQVZF' }
+      } } as any, res as any);
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(res.body.answers, { guests: 1, sleep: 2, tidiness: 0, schedule: 2 }, 'new habits merged with earlier ones');
+      assert.match(res.body.reply, /quiet venuma/);
+      assert.equal(res.body.done, false);
+      assert.deepEqual(res.body.missing, ['wake', 'noise', 'kitchen', 'cooling']);
+      assert.equal(seen.audio.mimeType, 'audio/wav');
+      assert.deepEqual(seen.history, [{ role: 'assistant', text: 'Hi! When do you usually sleep?' }], 'only real turns are passed on');
+
+      const bad = respond();
+      await v.pg.vibeInterviewStep({ body: { audio: { mimeType: 'video/mp4', data: 'AAAA' } } } as any, bad as any);
+      assert.equal(bad.statusCode, 400);
+      const big = respond();
+      await v.pg.vibeInterviewStep({ body: { audio: { mimeType: 'audio/wav', data: 'A'.repeat(900_004) } } } as any, big as any);
+      assert.equal(big.statusCode, 413);
+      const empty = respond();
+      await v.pg.vibeInterviewStep({ body: { history: [] } } as any, empty as any);
+      assert.equal(empty.statusCode, 400);
+    } finally {
+      v.agent.setVibeInterviewerForTests(null);
+    }
+  });
+
+  it('cleans live VibeCheck habit calls and only accepts same-site browsers', async () => {
+    const live = await import('../src/services/vibe-live.js');
+    const first = live.applyHabitCall({ guests: 1 }, { answers: { sleep: 2, tidiness: 0, noise: 7 }, summary: 'Night owl, very tidy.', done: false });
+    assert.deepEqual(first.answers, { guests: 1, sleep: 2, tidiness: 0 }, 'out-of-range values dropped, earlier habits kept');
+    assert.equal(first.done, false);
+    assert.ok(first.missing.includes('noise'));
+    assert.equal(live.applyHabitCall({}, 'nonsense').summary, null);
+    const saved = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      assert.equal(live.originAllowed({ headers: { origin: 'https://livingplus.example', host: 'livingplus.example' } } as any), true);
+      assert.equal(live.originAllowed({ headers: { origin: 'https://evil.example', host: 'livingplus.example' } } as any), false);
+      assert.equal(live.originAllowed({ headers: { host: 'livingplus.example' } } as any), false, 'no origin, no session');
+    } finally {
+      if (saved === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = saved;
+    }
   });
 
   it('offers the quiz instead when the profile agent is unavailable', async () => {

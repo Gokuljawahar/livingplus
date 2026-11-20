@@ -40,6 +40,44 @@ export declare function setVibeProfilerForTests(run: typeof profilerOverride): v
  * Throws VIBE_AI_UNAVAILABLE when no model is configured, so callers can offer the quiz.
  */
 export declare function buildVibeProfile(text: string, current?: VibeAnswers): Promise<VibeProfile>;
+/** One spoken (or typed) turn of the VibeCheck interview. */
+export interface VibeTurn {
+    role: 'assistant' | 'user';
+    text: string;
+}
+export interface VibeInterviewTurn {
+    heard: string;
+    answers: VibeAnswers;
+    summary: string | null;
+    reply: string;
+    done: boolean;
+    missing: string[];
+}
+declare let interviewerOverride: ((input: {
+    history: VibeTurn[];
+    known: VibeAnswers;
+    text?: string;
+    audio?: {
+        mimeType: string;
+        data: string;
+    };
+}) => Promise<unknown>) | null;
+/** Test hook: replace the interview model call (null restores). */
+export declare function setVibeInterviewerForTests(run: typeof interviewerOverride): void;
+/**
+ * One turn of the voice VibeCheck: Gemini hears the person's answer (audio or
+ * text), updates their habits, and says the next question. Throws
+ * VIBE_AI_UNAVAILABLE / VIBE_TURN_EMPTY.
+ */
+export declare function vibeInterviewTurn(input: {
+    history: VibeTurn[];
+    known: VibeAnswers;
+    text?: string;
+    audio?: {
+        mimeType: string;
+        data: string;
+    };
+}): Promise<VibeInterviewTurn>;
 declare let agentTextOverride: ((prompt: string) => Promise<string>) | null;
 /** Test hook: replace the matcher agent run with canned model text (null restores). */
 export declare function setVibeAgentForTests(run: typeof agentTextOverride): void;

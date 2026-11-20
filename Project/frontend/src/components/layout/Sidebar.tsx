@@ -140,10 +140,13 @@ export default function Sidebar() {
 
           {sectionNav && (
             <div className="space-y-1">
-              <p className="px-3 text-[13px] font-medium text-muted mb-2">{area === 'resident' ? 'Your stay' : 'Workspace'}</p>
-              {sectionNav.map((item) => (
+              {!sectionNav.some((item) => item.group) && <p className="px-3 text-[13px] font-medium text-muted mb-2">{area === 'resident' ? 'Your stay' : 'Workspace'}</p>}
+              {sectionNav.map((item, index) => (
+                <div key={item.id}>
+                {item.group && item.group !== sectionNav[index - 1]?.group && (
+                  <p className="px-3 pb-1 pt-4 text-[13px] font-medium text-muted">{item.group}</p>
+                )}
                 <button
-                  key={item.id}
                   onClick={() => {
                     item.onSelect();
                     if (window.innerWidth < 1024) close();
@@ -158,6 +161,7 @@ export default function Sidebar() {
                   <item.icon className="w-5 h-5" />
                   <span className="whitespace-nowrap">{item.label}</span>
                 </button>
+                </div>
               ))}
             </div>
           )}

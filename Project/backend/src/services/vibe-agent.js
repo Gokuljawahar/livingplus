@@ -112,6 +112,72 @@ export async function buildVibeProfile(text, current = {}) {
         missing: VIBE_QUESTIONS.filter((question) => answers[question.id] === undefined).map((question) => question.id)
     };
 }
+const interviewSchema = z.object({
+    heard: z.string().describe('What the person just said, transcribed in their own language and script; empty if nothing intelligible'),
+    answers: vibeProfileSchema.shape.answers,
+    summary: z.string().describe('One or two short sentences about their lifestyle habits so far, in English'),
+    reply: z.string().describe('What to say next, in the language the person is using: a warm one-line acknowledgement plus the next single question, or a short closing line when done. At most 30 words, no lists.'),
+    done: z.boolean().describe('True once sleep, tidiness and noise are known and nothing else important is missing, or after six questions')
+});
+function interviewInstruction() {
+    const scale = VIBE_QUESTIONS.map((question) => `- ${question.id}: ${question.question} 0 = ${question.options[0].label}, 1 = ${question.options[1].label}, 2 = ${question.options[2].label}`).join('\n');
+    return [
+        'You are VibeCheck, a friendly voice interviewer that helps someone moving into paying-guest housing find compatible roommates.',
+        'Have a short, natural conversation (about five questions) to learn these habits:',
+        scale,
+        'Each turn you get the conversation so far, the habits already known, and the person\'s new answer (audio or text).',
+        'Update answers with everything you can infer from the whole conversation; use null only for habits still unknown. Keep earlier answers unless the person corrects them.',
+        'Ask about one habit at a time, the most important missing one first (sleep, tidiness, noise, then guests, schedule, wake, kitchen, cooling). Sound like a person, not a form: acknowledge what they said in a few words first.',
+        'Reply in the language the person speaks (Tamil, Hindi, English or a mix). Keep the summary in English.',
+        'Never ask about or record religion, caste, diet, gender, health, politics or family background, even if mentioned.',
+        'When done, the reply thanks them and says you will now match them with rooms.'
+    ].join('\n');
+}
+let interviewerOverride = null;
+/** Test hook: replace the interview model call (null restores). */
+export function setVibeInterviewerForTests(run) {
+    interviewerOverride = run;
+}
+/**
+ * One turn of the voice VibeCheck: Gemini hears the person's answer (audio or
+ * text), updates their habits, and says the next question. Throws
+ * VIBE_AI_UNAVAILABLE / VIBE_TURN_EMPTY.
+ */
+export async function vibeInterviewTurn(input) {
+    const text = (input.text || '').trim().slice(0, 1000);
+    if (!text && !input.audio)
+        throw new Error('VIBE_TURN_EMPTY');
+    const model = vibeModelName();
+    if (!interviewerOverride && (!aiEnabled() || !model))
+        throw new Error('VIBE_AI_UNAVAILABLE');
+    const history = input.history.slice(-12).map((turn) => `${turn.role === 'assistant' ? 'VibeCheck' : 'Person'}: ${turn.text.slice(0, 500)}`).join('\n');
+    const known = Object.entries(input.known).map(([id, value]) => `${id}=${value}`).join(', ') || 'none yet';
+    let raw;
+    if (interviewerOverride) {
+        raw = await interviewerOverride({ ...input, ...(text ? { text } : {}) });
+    }
+    else {
+        const parts = [
+            { text: `Conversation so far:\n${history || '(just started)'}\n\nHabits already known: ${known}\n\nThe person's new answer${input.audio ? ' is in the audio clip' : `: ${text}`}.` }
+        ];
+        if (input.audio)
+            parts.push({ inlineData: { mimeType: input.audio.mimeType, data: input.audio.data } });
+        raw = await generateStructured({ system: interviewInstruction(), parts, schema: interviewSchema, model: model });
+    }
+    const parsed = interviewSchema.parse(raw);
+    const found = cleanVibeAnswers(Object.fromEntries(Object.entries(parsed.answers).filter(([, value]) => value !== null))) ?? {};
+    const answers = { ...input.known, ...found };
+    const missing = VIBE_QUESTIONS.filter((question) => answers[question.id] === undefined).map((question) => question.id);
+    const turns = input.history.filter((turn) => turn.role === 'user').length + 1;
+    return {
+        heard: (parsed.heard || text).trim().slice(0, 500),
+        answers,
+        summary: cleanVibeSummary(parsed.summary),
+        reply: parsed.reply.trim().slice(0, 300),
+        done: parsed.done || turns >= 8 || missing.length === 0,
+        missing
+    };
+}
 // ---------------------------------------------------------------- matcher
 const vibeJudgment = z.object({
     score: z.number().describe('Compatibility score, 0 (clash) to 100 (perfect match)'),

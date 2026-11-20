@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getJwtSecret } from './utils/auth-config.js';
+import { attachVibeLive } from './services/vibe-live.js';
 
 // Load .env before any other imports so env vars are available at module init time
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -50,6 +51,7 @@ const server = app.listen(PORT, async () => {
       .catch((error) => logger.warn({ err: error }, '[search] Startup indexing failed'));
   }
 });
+attachVibeLive(server);
 
 server.on('error', (err) => {
   logger.error({ err: err }, 'Server error');

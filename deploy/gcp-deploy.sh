@@ -19,8 +19,10 @@
 #                        verify token is generated into Secret Manager and printed.
 #   ALERT_EMAIL          email for Cloud Monitoring alerts (site down, server errors);
 #                        without it, incidents still show in the Cloud Console.
-#   AI_MODEL             default: google:gemini-4-hydrogen (newest GA Gemini with
-#                        tool calling and structured output, Nov 2026)
+#   AI_MODEL             default: google:gemini-3.8-flash (stable, tool calling and
+#                        structured output, high default quota). gemini-4-hydrogen
+#                        also works but new projects get a very low per-minute quota
+#                        (429s on multi-step tool calls) until it is raised.
 #   AI_MODEL_OPTIONS     default: {"thinkingConfig":{"thinkingLevel":"MEDIUM"}} (Gemini 4
 #                        thinks at HIGH by default; MEDIUM keeps chat responsive)
 #   AI_BACKEND=vertex|studio  default vertex (Vertex AI with the service account,
@@ -58,7 +60,7 @@ DB_NAME="${DB_NAME:-livingplus}"
 DB_USER="${DB_USER:-livingplus}"
 BUCKET="${BUCKET:-${PROJECT_ID}-livingplus-uploads}"
 SA_NAME="${SA_NAME:-livingplus-run}"
-AI_MODEL="${AI_MODEL:-google:gemini-4-hydrogen}"
+AI_MODEL="${AI_MODEL:-google:gemini-3.8-flash}"
 if [ -z "${AI_MODEL_OPTIONS:-}" ]; then AI_MODEL_OPTIONS='{"thinkingConfig":{"thinkingLevel":"MEDIUM"}}'; fi
 # Gemini models are served from the "global" Vertex AI location; not every model is in every region.
 AI_LOCATION="${AI_LOCATION:-global}"
