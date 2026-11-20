@@ -78,17 +78,19 @@ function AppRoutes() {
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/terms" element={<TermsAndConditions />} />
 
-        {/* Resident site: one per PG. */}
+        {/* Resident site: one per PG (nested section routes support deep links & back button). */}
         <Route path="/stay" element={<ResidentFinder />} />
         <Route path="/stay/:slug" element={<ResidentPortal />} />
+        <Route path="/stay/:slug/:section" element={<ResidentPortal />} />
 
-        {/* Owner site. */}
+        {/* Owner site (nested section routes support deep links & back button). */}
         <Route path="/owner/login" element={<StaffLogin />} />
         <Route path="/owner/register" element={<RegisterPage />} />
         <Route path="/owner/forgot-password" element={<ForgotPassword />} />
         <Route element={<ProtectedRoute roles={['PG_OWNER', 'PG_WARDEN']}><AppLayout /></ProtectedRoute>}>
           <Route path="/owner" element={<PGManagement />} />
           <Route path="/owner/account" element={<ChangePassword />} />
+          <Route path="/owner/:section" element={<PGManagement />} />
         </Route>
 
         {/* Old addresses keep working. */}

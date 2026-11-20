@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, useWatch, type FieldErrors, type FieldValues } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -40,6 +41,14 @@ type Expense = { id: string; category: string; amount: number; spentOn: string; 
 type ElecBill = { id: string; period: string; totalAmount: number; status: string; splitJson: string; property: { name: string } };
 type Staff = { id: string; name: string; phone: string; email?: string | null; role: string; property: { id: string; name: string } };
 type WorkspaceView = 'overview' | 'properties' | 'bookings' | 'roomchanges' | 'tenants' | 'activity' | 'rent' | 'payments' | 'expenses' | 'utilities' | 'maintenance' | 'reports' | 'staff' | 'services';
+const OWNER_ROUTE_SLUGS: Record<WorkspaceView, string> = {
+  overview: '', properties: 'properties', bookings: 'bookings', roomchanges: 'room-changes', tenants: 'tenants',
+  activity: 'pulse', rent: 'rent', payments: 'payments', expenses: 'expenses', utilities: 'utilities',
+  maintenance: 'maintenance', reports: 'reports', staff: 'staff', services: 'services'
+};
+const OWNER_VIEW_BY_SLUG: Record<string, WorkspaceView> = Object.fromEntries(
+  Object.entries(OWNER_ROUTE_SLUGS).filter(([, slug]) => slug).map(([view, slug]) => [slug, view as WorkspaceView])
+);
 type Summary = { properties: number; totalBeds: number; occupiedBeds: number; occupancyRate: number; pendingBookings: number; openTickets: number; rentOutstanding: number; canManageStaff: boolean; staffRoles?: string[] };
 type RoomChangeBed = { bed_id: string; label: string; room_number: string | null; floor: number | null; room_type: string | null } | null;
 type RoomChangeRow = { request_id: string; request_type: string; status: string; property: string | null; requester: string | null; partner: string | null; from_bed: RoomChangeBed; to_bed: RoomChangeBed; reason: string | null; created_at: string };
@@ -109,7 +118,13 @@ async function fetchWorkspace(): Promise<Workspace> {
 }
 
 export default function PGManagement() {
-  const [chosenView, setView] = useState<WorkspaceView>('overview');
+  const { section } = useParams<{ section?: string }>();
+  const navigate = useNavigate();
+  const chosenView: WorkspaceView = (section && OWNER_VIEW_BY_SLUG[section]) || 'overview';
+  const setView = useCallback((next: WorkspaceView) => {
+    const slug = OWNER_ROUTE_SLUGS[next];
+    navigate(slug ? `/owner/${slug}` : '/owner');
+  }, [navigate]);
   const [rejectingClaimId, setRejectingClaimId] = useState('');
   const [claimRejectionReason, setClaimRejectionReason] = useState('');
   const [reminding, setReminding] = useState(false);

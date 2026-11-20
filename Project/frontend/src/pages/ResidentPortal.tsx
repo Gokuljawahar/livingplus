@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -11,7 +11,7 @@ import { useAuth } from '../context/auth';
 import { SidebarProvider } from '../context/SidebarContext';
 import { useSidebar } from '../context/sidebar';
 import Sidebar from '../components/layout/Sidebar';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { RESIDENT_SITE_KEY, RESIDENT_TOKEN_KEY } from '../utils/session';
 import { ROUTES } from '../utils/app-areas';
 import { useOtpCooldown } from '../hooks/useOtpCooldown';
@@ -101,7 +101,18 @@ export default function ResidentPortal() {
 /** A saved resident session counts only on the PG site it was opened on. */
 const hasSessionFor = (slug: string) => Boolean(localStorage.getItem(RESIDENT_TOKEN_KEY)) && localStorage.getItem(RESIDENT_SITE_KEY) === slug;
 
+type ResidentTab = 'stays' | 'money' | 'food' | 'orders' | 'services' | 'maintenance' | 'roomchange' | 'notifications' | 'profile';
+const RESIDENT_TAB_SLUGS: Record<ResidentTab, string> = {
+  stays: '', money: 'money', food: 'food', orders: 'orders', services: 'services',
+  maintenance: 'maintenance', roomchange: 'room-change', notifications: 'notifications', profile: 'profile'
+};
+const RESIDENT_TAB_BY_SLUG: Record<string, ResidentTab> = Object.fromEntries(
+  Object.entries(RESIDENT_TAB_SLUGS).filter(([, slug]) => slug).map(([tab, slug]) => [slug, tab as ResidentTab])
+);
+
 function ResidentPortalView({ site }: { site: PgSite }) {
+  const { section } = useParams<{ section?: string }>();
+  const navigate = useNavigate();
   const { login, logout: clearSession } = useAuth();
   const { setSectionNav, toggle } = useSidebar();
   const [step, setStep] = useState<'phone' | 'code' | 'portal'>(() => (hasSessionFor(site.slug) ? 'portal' : 'phone'));
@@ -110,7 +121,11 @@ function ResidentPortalView({ site }: { site: PgSite }) {
   const challenge = useRef<PhoneChallenge<'TENANT_LOGIN'> | null>(null);
   const [loading, setLoading] = useState(false);
   const { cooldown, startCooldown } = useOtpCooldown();
-  const [activeTab, setActiveTab] = useState<'stays' | 'money' | 'food' | 'orders' | 'services' | 'maintenance' | 'roomchange' | 'notifications' | 'profile'>('stays');
+  const activeTab: ResidentTab = (section && RESIDENT_TAB_BY_SLUG[section]) || 'stays';
+  const setActiveTab = useCallback((next: ResidentTab) => {
+    const tabSlug = RESIDENT_TAB_SLUGS[next];
+    navigate(tabSlug ? `/stay/${site.slug}/${tabSlug}` : `/stay/${site.slug}`);
+  }, [navigate, site.slug]);
   const [ticketFormFor, setTicketFormFor] = useState('');
   const [profileEditingFor, setProfileEditingFor] = useState('');
   const [profileFile, setProfileFile] = useState<File | null>(null);
