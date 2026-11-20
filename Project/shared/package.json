@@ -14,6 +14,9 @@
     }
   },
   "files": ["dist"],
+  "peerDependencies": {
+    "zod": "4.6.7"
+  },
   "scripts": {
     "build": "node ../backend/node_modules/typescript/bin/tsc -p tsconfig.json"
   }

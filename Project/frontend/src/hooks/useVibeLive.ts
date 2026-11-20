@@ -2,7 +2,10 @@
 // relay and plays Gemini's spoken replies. The mic is paused while Gemini is
 // speaking (half duplex), so it never hears and answers itself.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { VibeAnswers } from '@livingplus/shared';
+import { z } from 'zod';
+import { createLiveProtocol, type LiveClientMessage, type VibeAnswers } from '@livingplus/shared';
+
+const { parseLiveServerMessage } = createLiveProtocol(z);
 
 export type LiveStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'ended' | 'failed';
 export interface LiveTurn { role: 'assistant' | 'user'; text: string }
@@ -140,8 +143,8 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
       socketRef.current = socket;
       const timeout = window.setTimeout(() => resolve(false), 12000);
       socket.onmessage = (event) => {
-        let message: Record<string, unknown>;
-        try { message = JSON.parse(String(event.data)); } catch { return; }
+        const message = parseLiveServerMessage(String(event.data));
+        if (!message) return;
         switch (message.type) {
           case 'ready':
             window.clearTimeout(timeout);
@@ -149,14 +152,14 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
             resolve(true);
             break;
           case 'audio':
-            playChunk(String(message.data));
+            playChunk(message.data);
             setStatus('speaking');
             break;
           case 'said':
-            appendText('assistant', String(message.text));
+            appendText('assistant', message.text);
             break;
           case 'heard':
-            appendText('user', String(message.text));
+            appendText('user', message.text);
             break;
           case 'interrupted':
             stopPlayback();
@@ -170,15 +173,13 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
           }
           case 'habits':
             if (message.done) doneRef.current = true;
-            habitsRef.current({ answers: (message.answers as VibeAnswers) ?? {}, summary: (message.summary as string | null) ?? null, done: Boolean(message.done) });
+            habitsRef.current({ answers: message.answers as VibeAnswers, summary: message.summary, done: message.done });
             break;
           case 'error':
-            setError(String(message.message || 'The live voice connection dropped.'));
+            setError(message.message || 'The live voice connection dropped.');
             break;
           case 'end':
             setStatus('ended');
-            break;
-          default:
             break;
         }
       };
@@ -197,7 +198,8 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     node.onaudioprocess = (event) => {
       const socket = socketRef.current;
       if (!socket || socket.readyState !== WebSocket.OPEN || speakingNow()) return;
-      socket.send(JSON.stringify({ type: 'audio', data: toBase64(downsample(event.inputBuffer.getChannelData(0), micCtx.sampleRate)) }));
+      const frame: LiveClientMessage = { type: 'audio', data: toBase64(downsample(event.inputBuffer.getChannelData(0), micCtx.sampleRate)) };
+      socket.send(JSON.stringify(frame));
     };
     return true;
   }, [stop]);
@@ -207,7 +209,8 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     if (!socket || socket.readyState !== WebSocket.OPEN || !text.trim()) return false;
     stopPlayback();
     appendText('user', text.trim());
-    socket.send(JSON.stringify({ type: 'text', text: text.trim() }));
+    const frame: LiveClientMessage = { type: 'text', text: text.trim() };
+    socket.send(JSON.stringify(frame));
     return true;
   }, []);
 

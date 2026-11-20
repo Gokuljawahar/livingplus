@@ -10,7 +10,10 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
-    "types": []
+    "types": [],
+    "paths": {
+      "zod": ["../backend/node_modules/zod"]
+    }
   },
   "include": ["src"]
 }

@@ -12,7 +12,10 @@ import type { IncomingMessage, Server } from 'http';
 import type { Duplex } from 'stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type, type FunctionDeclaration, type FunctionResponse, type LiveServerMessage, type Session } from '@google/genai';
-import { cleanVibeAnswers, cleanVibeSummary, VIBE_QUESTIONS, vibeTopicsFor, type VibeAnswers } from '@livingplus/shared';
+import { z } from 'zod';
+import { cleanVibeAnswers, cleanVibeSummary, createLiveProtocol, VIBE_QUESTIONS, vibeTopicsFor, type LiveServerMessage as RelayServerMessage, type VibeAnswers } from '@livingplus/shared';
+
+const { parseLiveClientMessage } = createLiveProtocol(z);
 import { prisma } from '../db/index.js';
 import { asSystem } from '../db/context.js';
 import { aiEnabled, resolveGoogleAuth } from './ai-provider.js';
@@ -98,9 +101,10 @@ async function liveClient(): Promise<GoogleGenAI> {
 
 const visitorOf = (req: IncomingMessage) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0]!.trim();
 
-/** Attaches the live VibeCheck WebSocket endpoint to the HTTP server. */
+/** Attaches the live VibeCheck and owner briefing WebSocket endpoints to the HTTP server. */
 export function attachVibeLive(server: Server): void {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 });
+  // Connection limits are tracked in memory per Cloud Run instance (not shared across instances).
   const perVisitor = new Map<string, number>();
   let open = 0;
 
@@ -160,7 +164,7 @@ interface LiveSessionSpec {
  * MAX_SESSION_MS or when either side closes.
  */
 async function relayLive(client: WebSocket, spec: LiveSessionSpec): Promise<void> {
-  const send = (message: Record<string, unknown>) => { if (client.readyState === client.OPEN) client.send(JSON.stringify(message)); };
+  const send = (message: RelayServerMessage) => { if (client.readyState === client.OPEN) client.send(JSON.stringify(message)); };
   let live: Session | null = null;
   let heardFromUser = false;
   const timer = setTimeout(() => { send({ type: 'end', reason: 'time' }); client.close(); }, MAX_SESSION_MS);
@@ -214,16 +218,15 @@ async function relayLive(client: WebSocket, spec: LiveSessionSpec): Promise<void
   live.sendClientContent({ turns: [{ role: 'user', parts: [{ text: spec.kickoff }] }], turnComplete: true });
 
   client.on('message', (raw) => {
-    let message: any;
-    try { message = JSON.parse(String(raw)); } catch { return; }
-    if (!live) return;
-    if (message?.type === 'audio' && typeof message.data === 'string' && message.data.length < 200_000 && /^[A-Za-z0-9+/=]+$/.test(message.data)) {
+    const message = parseLiveClientMessage(String(raw));
+    if (!message || !live) return;
+    if (message.type === 'audio') {
       heardFromUser = true;
       live.sendRealtimeInput({ audio: { data: message.data, mimeType: 'audio/pcm;rate=16000' } });
-    } else if (message?.type === 'text' && typeof message.text === 'string' && message.text.trim()) {
+    } else if (message.type === 'text') {
       heardFromUser = true;
-      live.sendClientContent({ turns: [{ role: 'user', parts: [{ text: message.text.trim().slice(0, 1000) }] }], turnComplete: true });
-    } else if (message?.type === 'pause') {
+      live.sendClientContent({ turns: [{ role: 'user', parts: [{ text: message.text }] }], turnComplete: true });
+    } else if (message.type === 'pause') {
       live.sendRealtimeInput({ audioStreamEnd: true });
     }
   });
@@ -233,7 +236,7 @@ async function relayLive(client: WebSocket, spec: LiveSessionSpec): Promise<void
 async function runSession(client: WebSocket, propertyId: string | null): Promise<void> {
   const topics = vibeTopicsFor(await loadPlace(propertyId));
   let known: VibeAnswers = {};
-  const send = (message: Record<string, unknown>) => { if (client.readyState === client.OPEN) client.send(JSON.stringify(message)); };
+  const send = (message: RelayServerMessage) => { if (client.readyState === client.OPEN) client.send(JSON.stringify(message)); };
   await relayLive(client, {
     label: 'VibeCheck',
     instruction: liveInstruction(topics),
