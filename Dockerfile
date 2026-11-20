@@ -40,10 +40,11 @@ ENV NODE_ENV=production \
 COPY --from=backend /shared /shared
 COPY --from=backend /app/package.json ./package.json
 COPY --from=backend /app/node_modules ./node_modules
-COPY --from=backend /app/src ./src
+COPY --from=backend /app/dist ./dist
 COPY --from=backend /app/prisma ./prisma
+COPY --from=backend /app/dist/prisma/seed-pg.js ./prisma/seed-pg.js
 COPY --from=frontend /app/frontend/dist ./public
 USER node
 EXPOSE 8080
 # Migrations take a database lock, so instances starting together are safe.
-CMD ["sh", "-c", "node node_modules/prisma/build/index.js migrate deploy && node src/index.js"]
+CMD ["sh", "-c", "node node_modules/prisma/build/index.js migrate deploy && node dist/index.js"]
