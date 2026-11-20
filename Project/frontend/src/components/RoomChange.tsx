@@ -43,11 +43,11 @@ async function fetchRoomChangeData(): Promise<{ rows: SwapRequest[]; matchData: 
 }
 
 function statusStyle(status: string): string {
-  if (status === 'ACCEPTED') return 'border-emerald-300 text-emerald-800';
-  if (status === 'PROPOSED') return 'border-blue-300 text-blue-800';
-  if (status === 'COMPLETED') return 'border-slate-400 text-slate-600';
+  if (status === 'ACCEPTED') return 'border-positive/30 text-positive';
+  if (status === 'PROPOSED') return 'border-info/30 text-info';
+  if (status === 'COMPLETED') return 'border-field-border text-muted';
   if (status === 'PENDING_MATCH') return 'border-amber-300 text-amber-800';
-  return 'border-slate-300 text-slate-500';
+  return 'border-hairline text-muted';
 }
 
 function bedLabel(bed: BedView | null): string {
@@ -125,25 +125,25 @@ export default function RoomChange() {
   return (
     <div className="space-y-4">
       {incoming.map((row) => (
-        <article key={row.request_id} className="border border-blue-300 bg-white p-5">
+        <article key={row.request_id} className="border border-info/30 bg-white p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-semibold text-navy-900">{row.counterparty?.display_name || 'A resident'} wants to swap with you</h2>
             <span className={`border px-2 py-0.5 text-xs font-semibold ${statusStyle(row.status)}`}>{row.status.replace('_', ' ')}</span>
           </div>
-          <p className="mt-1 text-sm text-slate-600">They are in {row.counterparty?.current_room ? `room ${row.counterparty.current_room}` : 'another room'}{row.reason ? ` · “${row.reason}”` : ''}</p>
-          <p className="mt-1 text-sm text-slate-600">Your warden confirms the move only if you accept.</p>
+          <p className="mt-1 text-sm text-muted">They are in {row.counterparty?.current_room ? `room ${row.counterparty.current_room}` : 'another room'}{row.reason ? ` · “${row.reason}”` : ''}</p>
+          <p className="mt-1 text-sm text-muted">Your warden confirms the move only if you accept.</p>
           <div className="mt-3 flex gap-2">
             <button
               disabled={acting !== ''}
               onClick={() => void act(`accept-${row.request_id}`, () => api.post(`/pg/tenant/room-changes/${row.request_id}/response`, { decision: 'ACCEPT' }), 'Swap accepted — waiting for staff confirmation')}
-              className="inline-flex items-center gap-1.5 bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 bg-positive px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
             >
               {acting === `accept-${row.request_id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Accept swap
             </button>
             <button
               disabled={acting !== ''}
               onClick={() => void act(`decline-${row.request_id}`, () => api.post(`/pg/tenant/room-changes/${row.request_id}/response`, { decision: 'DECLINE' }), 'Proposal declined')}
-              className="inline-flex items-center gap-1.5 border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 border border-hairline px-3 py-2 text-sm font-semibold text-ink disabled:opacity-60"
             >
               {acting === `decline-${row.request_id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}Decline
             </button>
@@ -152,30 +152,30 @@ export default function RoomChange() {
       ))}
 
       {openMine.map((row) => (
-        <article key={row.request_id} className="border border-slate-200 bg-white p-5">
+        <article key={row.request_id} className="border border-hairline bg-white p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-semibold text-navy-900">Your {row.request_type === 'MOVE' ? 'move' : 'swap'} request</h2>
             <span className={`border px-2 py-0.5 text-xs font-semibold ${statusStyle(row.status)}`}>{row.status.replace('_', ' ')}</span>
           </div>
-          {row.request_type === 'MOVE' && row.offered_bed && <p className="mt-1 text-sm text-slate-600">To {bedLabel(row.offered_bed)}</p>}
-          {row.reason && <p className="mt-1 text-sm text-slate-600">“{row.reason}”</p>}
+          {row.request_type === 'MOVE' && row.offered_bed && <p className="mt-1 text-sm text-muted">To {bedLabel(row.offered_bed)}</p>}
+          {row.reason && <p className="mt-1 text-sm text-muted">“{row.reason}”</p>}
           {row.status === 'PROPOSED' && row.counterparty && (
-            <p className="mt-1 text-sm text-slate-600">Proposed to {row.counterparty.display_name}{row.offered_bed ? ` · ${bedLabel(row.offered_bed)}` : ''} — waiting for their answer.</p>
+            <p className="mt-1 text-sm text-muted">Proposed to {row.counterparty.display_name}{row.offered_bed ? ` · ${bedLabel(row.offered_bed)}` : ''} — waiting for their answer.</p>
           )}
-          {row.status === 'ACCEPTED' && <p className="mt-1 text-sm text-slate-600">Both sides agreed — your warden or owner confirms the move next.</p>}
+          {row.status === 'ACCEPTED' && <p className="mt-1 text-sm text-muted">Both sides agreed — your warden or owner confirms the move next.</p>}
           {row.request_type === 'SWAP' && row.status === 'PENDING_MATCH' && (
-            <div className="mt-3 border-t border-slate-100 pt-3">
+            <div className="mt-3 border-t border-hairline pt-3">
               <h3 className="text-sm font-semibold text-navy-900">Possible swap partners</h3>
-              {!matches?.candidates?.length && <p className="mt-1 text-sm text-slate-500">No other swap requests yet. Check back later.</p>}
+              {!matches?.candidates?.length && <p className="mt-1 text-sm text-muted">No other swap requests yet. Check back later.</p>}
               {matches?.candidates?.map((candidate) => (
-                <div key={candidate.their_request_id} className="mt-2 flex flex-col gap-2 border border-slate-200 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div key={candidate.their_request_id} className="mt-2 flex flex-col gap-2 border border-hairline p-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="font-medium">{candidate.partner.display_name}
-                      <span className={`ml-2 border px-1.5 py-0.5 text-[11px] font-semibold ${candidate.compatibility === 'MATCH' ? 'border-emerald-300 text-emerald-800' : 'border-slate-300 text-slate-500'}`}>
+                      <span className={`ml-2 border px-1.5 py-0.5 text-xs font-semibold ${candidate.compatibility === 'MATCH' ? 'border-positive/30 text-positive' : 'border-hairline text-muted'}`}>
                         {candidate.compatibility === 'MATCH' ? 'Good match' : 'Open'}
                       </span>
                     </p>
-                    <p className="text-sm text-slate-600">{candidate.offered_bed ? bedLabel(candidate.offered_bed) : 'No bed listed'}</p>
+                    <p className="text-sm text-muted">{candidate.offered_bed ? bedLabel(candidate.offered_bed) : 'No bed listed'}</p>
                   </div>
                   <button
                     disabled={acting !== ''}
@@ -192,24 +192,24 @@ export default function RoomChange() {
       ))}
 
       {!openMine.length && (
-        <form onSubmit={openRequest} className="border border-slate-200 bg-white p-5">
+        <form onSubmit={openRequest} className="border border-hairline bg-white p-5">
           <h2 className="font-semibold text-navy-900">Request a room change</h2>
-          <p className="mt-1 text-sm text-slate-600">Swap with another resident, or move to a vacant bed. The other side and your warden confirm before anything moves.</p>
+          <p className="mt-1 text-sm text-muted">Swap with another resident, or move to a vacant bed. The other side and your warden confirm before anything moves.</p>
           <div className="mt-3 flex gap-2">
             {(['SWAP', 'MOVE'] as const).map((type) => (
               <button
                 key={type}
                 type="button"
                 onClick={() => pickType(type)}
-                className={`border px-3 py-2 text-sm font-semibold ${form.type === type ? 'border-navy-900 bg-navy-900 text-white' : 'border-slate-300 text-slate-700'}`}
+                className={`border px-3 py-2 text-sm font-semibold ${form.type === type ? 'border-navy-900 bg-navy-900 text-white' : 'border-hairline text-ink'}`}
               >
                 {type === 'SWAP' ? 'Swap rooms' : 'Move rooms'}
               </button>
             ))}
           </div>
           {form.type === 'MOVE' && (
-            <label className="mt-3 block text-sm text-slate-700">Choose a vacant bed
-              <select required value={form.bedId} onChange={(event) => setForm((current) => ({ ...current, bedId: event.target.value }))} className="mt-1 block w-full border border-slate-300 px-3 py-2">
+            <label className="mt-3 block text-sm text-ink">Choose a vacant bed
+              <select required value={form.bedId} onChange={(event) => setForm((current) => ({ ...current, bedId: event.target.value }))} className="mt-1 block w-full border border-hairline px-3 py-2">
                 <option value="">Select a bed…</option>
                 {vacantBeds.map((bed) => <option key={bed.bed_id} value={bed.bed_id}>{bedLabel(bed)}{bed.monthly_rent ? ` · ₹${bed.monthly_rent.toLocaleString('en-IN')}` : ''}</option>)}
               </select>
@@ -217,16 +217,16 @@ export default function RoomChange() {
           )}
           {form.type === 'SWAP' && (
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="block text-sm text-slate-700">Preferred floor (optional)
-                <input value={form.floor} onChange={(event) => setForm((current) => ({ ...current, floor: event.target.value }))} placeholder="e.g. low" className="mt-1 block w-full border border-slate-300 px-3 py-2" />
+              <label className="block text-sm text-ink">Preferred floor (optional)
+                <input value={form.floor} onChange={(event) => setForm((current) => ({ ...current, floor: event.target.value }))} placeholder="e.g. low" className="mt-1 block w-full border border-hairline px-3 py-2" />
               </label>
-              <label className="block text-sm text-slate-700">Anything else (optional)
-                <input value={form.note} onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} placeholder="e.g. quiet, early riser" className="mt-1 block w-full border border-slate-300 px-3 py-2" />
+              <label className="block text-sm text-ink">Anything else (optional)
+                <input value={form.note} onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} placeholder="e.g. quiet, early riser" className="mt-1 block w-full border border-hairline px-3 py-2" />
               </label>
             </div>
           )}
-          <label className="mt-3 block text-sm text-slate-700">Reason (optional)
-            <input value={form.reason} onChange={(event) => setForm((current) => ({ ...current, reason: event.target.value }))} maxLength={500} placeholder="Why do you want to change rooms?" className="mt-1 block w-full border border-slate-300 px-3 py-2" />
+          <label className="mt-3 block text-sm text-ink">Reason (optional)
+            <input value={form.reason} onChange={(event) => setForm((current) => ({ ...current, reason: event.target.value }))} maxLength={500} placeholder="Why do you want to change rooms?" className="mt-1 block w-full border border-hairline px-3 py-2" />
           </label>
           <button disabled={acting !== ''} className="mt-3 inline-flex items-center gap-2 bg-navy-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
             {acting === 'new' && <Loader2 className="h-4 w-4 animate-spin" />}Open request
@@ -235,12 +235,12 @@ export default function RoomChange() {
       )}
 
       {past.length > 0 && (
-        <div className="border border-slate-200 bg-white p-5">
+        <div className="border border-hairline bg-white p-5">
           <h2 className="font-semibold text-navy-900">Earlier requests</h2>
-          <div className="mt-2 divide-y divide-slate-100">
+          <div className="mt-2 divide-y divide-hairline">
             {past.map((row) => (
               <div key={row.request_id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                <span className="text-slate-600">{row.request_type === 'MOVE' ? 'Move' : 'Swap'}{row.offered_bed ? ` · ${bedLabel(row.offered_bed)}` : ''}</span>
+                <span className="text-muted">{row.request_type === 'MOVE' ? 'Move' : 'Swap'}{row.offered_bed ? ` · ${bedLabel(row.offered_bed)}` : ''}</span>
                 <span className={`border px-2 py-0.5 text-xs font-semibold ${statusStyle(row.status)}`}>{row.status.replace('_', ' ')}</span>
               </div>
             ))}

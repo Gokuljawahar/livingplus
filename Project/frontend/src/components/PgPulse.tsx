@@ -165,7 +165,7 @@ export default function PgPulse({ onGo }: { onGo: (target: PulseTarget) => void 
           <h2 id="timeline-heading" className="text-lg font-semibold">What happened</h2>
           <div className="flex gap-1 rounded-full bg-surface p-1" role="group" aria-label="Filter">
             {([['all', 'All'], ['ai', 'Done by the assistant']] as const).map(([value, label]) => (
-              <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)} className={`rounded-full px-3 py-1.5 text-sm font-medium ${filter === value ? 'bg-white text-navy-900 shadow-xs' : 'text-muted hover:text-navy-900'}`}>{label}</button>
+              <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)} className={`rounded-full px-3 py-1.5 text-sm font-medium ${filter === value ? 'bg-white text-navy-900' : 'text-muted hover:text-navy-900'}`}>{label}</button>
             ))}
           </div>
         </div>

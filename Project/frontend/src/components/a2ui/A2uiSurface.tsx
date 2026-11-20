@@ -68,7 +68,7 @@ function A2uiNode({ id, byId, model, onAction }: NodeProps) {
       const text = textOf(resolveValue(node.text, model));
       if (!text) return null;
       if (node.variant === 'heading') return <p className="text-sm font-bold text-navy-900">{text}</p>;
-      if (node.variant === 'caption') return <p className="text-[11px] font-medium text-muted">{text}</p>;
+      if (node.variant === 'caption') return <p className="text-xs font-medium text-muted">{text}</p>;
       return <p className="leading-relaxed text-ink">{text}</p>;
     }
     case 'Button': {

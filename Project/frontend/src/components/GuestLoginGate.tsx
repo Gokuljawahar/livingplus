@@ -82,16 +82,16 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
           <Building2 className="h-4 w-4" /> Guests
         </p>
         <h1 className="mt-1 text-2xl font-bold text-navy-900">My booking requests</h1>
-        <p className="mt-2 text-sm text-slate-500">
+        <p className="mt-2 text-sm text-muted">
           Verify the phone number you used when requesting a bed.
         </p>
       </div>
         {step === 'phone' ? (
           <form onSubmit={requestCode} className="mt-5 space-y-3">
-            <label className="block text-sm font-medium text-slate-700">
+            <label className="block text-sm font-medium text-ink">
               Phone number
               <span className="relative mt-1.5 block">
-                <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
                 <input
                   required
                   type="tel"
@@ -99,7 +99,7 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
                   onChange={(event) => setPhone(event.target.value)}
                   placeholder="98765 43210"
                   autoComplete="tel"
-                  className="w-full border border-slate-300 py-2.5 pl-10 pr-3 text-sm"
+                  className="w-full border border-hairline py-2.5 pl-10 pr-3 text-sm"
                 />
               </span>
             </label>
@@ -112,8 +112,8 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
           </form>
         ) : (
           <form onSubmit={verifyCode} className="mt-5 space-y-3">
-            <p className="flex items-center gap-1.5 text-sm text-slate-600">
-              <ShieldCheck className="h-4 w-4 text-emerald-700" /> Code sent to +{normalizePhoneDigits(phone)}
+            <p className="flex items-center gap-1.5 text-sm text-muted">
+              <ShieldCheck className="h-4 w-4 text-positive" /> Code sent to +{normalizePhoneDigits(phone)}
             </p>
             <input
               required
@@ -123,7 +123,7 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
               placeholder="6-digit code"
               inputMode="numeric"
               autoComplete="one-time-code"
-              className="w-full border border-slate-300 px-3 py-2.5 text-sm"
+              className="w-full border border-hairline px-3 py-2.5 text-sm"
             />
             <button
               disabled={loading}
@@ -131,12 +131,12 @@ export default function GuestLoginGate({ onVerified }: GuestLoginGateProps) {
             >
               {loading && <Loader2 className="h-4 w-4 animate-spin" />} Verify & see requests
             </button>
-            <button type="button" onClick={() => setStep('phone')} className="text-sm font-semibold text-slate-500">
+            <button type="button" onClick={() => setStep('phone')} className="text-sm font-semibold text-muted">
               Use a different number
             </button>
           </form>
         )}
-        <p className="mt-5 border-t border-slate-100 pt-4 text-center text-sm text-slate-500">
+        <p className="mt-5 border-t border-hairline pt-4 text-center text-sm text-muted">
           <Link to={ROUTES.guestHome} className="font-bold text-navy-900 hover:underline">Back to PGs</Link>
           {' · '}Already living in a PG?{' '}
           <a href={ROUTES.residentFinder} className="font-bold text-navy-900 hover:underline">Resident sign in</a>

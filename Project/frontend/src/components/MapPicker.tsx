@@ -166,7 +166,7 @@ function MapPickerView({ onAddressChange, onLocationSelect, defaultAddress, init
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="relative w-full h-[300px] rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-slate-100">
+      <div className="relative w-full h-[300px] rounded-[var(--radius-button)] overflow-hidden border border-hairline bg-surface">
         {loading ? (
           <div className="absolute inset-0 flex items-center justify-center text-navy-900 z-10">
             <Loader2 className="w-8 h-8 animate-spin" />
@@ -176,20 +176,20 @@ function MapPickerView({ onAddressChange, onLocationSelect, defaultAddress, init
         {/* Search Bar Overlay */}
         <div className="absolute top-3 left-3 right-14 z-10">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
             <input
               type="text"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search for an area or address..."
               aria-label="Search for an area or address"
-              className="w-full bg-white rounded-lg py-2.5 pl-9 pr-4 text-sm shadow-md border-none focus:ring-2 focus:ring-navy-900 outline-none"
+              className="w-full bg-white rounded-[var(--radius-field)] py-2.5 pl-9 pr-4 text-sm shadow-md border-none focus:ring-2 focus:ring-navy-900 outline-none"
             />
             {suggestions.length > 0 && (
-              <ul role="listbox" className="absolute left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-lg bg-white text-sm shadow-lg">
+              <ul role="listbox" className="absolute left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-[var(--radius-field)] bg-white text-sm shadow-lg">
                 {suggestions.map((suggestion) => (
                   <li key={suggestion.placePrediction!.placeId}>
-                    <button type="button" role="option" aria-selected={false} onClick={() => void choose(suggestion)} className="w-full px-3 py-2 text-left hover:bg-slate-100">
+                    <button type="button" role="option" aria-selected={false} onClick={() => void choose(suggestion)} className="w-full px-3 py-2 text-left hover:bg-surface">
                       {suggestion.placePrediction!.text.toString()}
                     </button>
                   </li>
@@ -224,7 +224,7 @@ function MapPickerView({ onAddressChange, onLocationSelect, defaultAddress, init
           <button
             type="button"
             onClick={handleLocateMe}
-            className="absolute bottom-4 right-4 bg-white p-2 rounded-full shadow-md border border-slate-100 text-slate-700 hover:text-navy-900 transition-colors z-10"
+            className="absolute bottom-4 right-4 bg-white p-2 rounded-full shadow-md border border-hairline text-ink hover:text-navy-900 transition-colors z-10"
             title="Locate Me"
           >
             <Crosshair className="w-5 h-5" />
@@ -232,15 +232,15 @@ function MapPickerView({ onAddressChange, onLocationSelect, defaultAddress, init
         )}
       </div>
 
-      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-        <p className="text-xs text-slate-500 font-medium mb-1">Selected Address</p>
+      <div className="bg-surface p-3 rounded-[var(--radius-field)] border border-hairline">
+        <p className="text-xs text-muted font-medium mb-1">Selected Address</p>
         <div className="flex items-center gap-2">
           {addressLoading ? (
             <Loader2 className="w-4 h-4 animate-spin text-navy-900" />
           ) : (
             <MapPin className="w-4 h-4 text-navy-900 shrink-0" />
           )}
-          <p className="text-sm text-slate-800 line-clamp-2">
+          <p className="text-sm text-ink line-clamp-2">
             {currentAddress || 'Move the map to select an address...'}
           </p>
         </div>

@@ -37,7 +37,7 @@ export default function LogoLoader({ onComplete }: { onComplete?: () => void }) 
             `}
             style={{ transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
           >
-            <div className="bg-navy-900 text-white p-3 rounded-xl shadow-lg transform -skew-x-6">
+            <div className="bg-navy-900 text-white p-3 rounded-[var(--radius-button)] shadow-lg transform -skew-x-6">
               <Home className="w-8 h-8" strokeWidth={2.5} />
             </div>
           </div>
@@ -49,7 +49,7 @@ export default function LogoLoader({ onComplete }: { onComplete?: () => void }) 
             `}
             style={{ transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
           >
-            <div className="bg-navy-900 text-white p-3 rounded-xl shadow-lg transform skew-x-6">
+            <div className="bg-navy-900 text-white p-3 rounded-[var(--radius-button)] shadow-lg transform skew-x-6">
               <Home className="w-8 h-8" strokeWidth={2.5} />
             </div>
           </div>
@@ -87,7 +87,7 @@ export default function LogoLoader({ onComplete }: { onComplete?: () => void }) 
             ${phase >= 2 ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'}
           `}
         >
-          <h1 className="text-4xl font-bold tracking-tight text-slate-900">Living Plus</h1>
+          <h1 className="text-4xl font-bold tracking-tight text-ink">Living Plus</h1>
         </div>
 
       </div>

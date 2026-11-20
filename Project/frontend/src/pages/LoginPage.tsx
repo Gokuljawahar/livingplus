@@ -88,28 +88,28 @@ export default function LoginPage() {
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <img src={logo} alt="Living Plus" className="h-36 sm:h-24 w-auto mx-auto mb-4 object-contain" />
-          <h1 className="text-2xl font-bold text-slate-900">Owner sign in</h1>
-          <p className="text-slate-500 mt-2">Sign in to run your PG: bookings, residents, rent and more</p>
+          <h1 className="text-2xl font-bold text-ink">Owner sign in</h1>
+          <p className="text-muted mt-2">Sign in to run your PG: bookings, residents, rent and more</p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8">
+        <div className="bg-white rounded-[var(--radius-card)] border border-hairline p-8">
           <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-6">
             <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2">Mobile number</label>
+              <label className="block text-xs font-bold text-muted mb-2">Mobile number</label>
               <div className="relative">
-                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted" />
                 <input
                   type="text"
                   aria-label="Mobile number"
                   {...register('email', { onChange: () => clearErrors('root.server') })}
-                  className="w-full bg-slate-50 border-slate-100 rounded-xl py-3 pl-11 pr-4 text-sm focus:ring-2 focus:ring-navy-900 focus:bg-white transition-all"
+                  className="w-full bg-surface border-hairline rounded-[var(--radius-button)] py-3 pl-11 pr-4 text-sm focus:ring-2 focus:ring-navy-900 focus:bg-white transition-all"
                   placeholder="Enter mobile number"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2">Password</label>
+              <label className="block text-xs font-bold text-muted mb-2">Password</label>
               <Controller
                 name="password"
                 control={control}
@@ -122,19 +122,19 @@ export default function LoginPage() {
                       field.onChange(value);
                       clearErrors('root.server');
                     }}
-                    inputClassName={error ? 'focus:ring-red-500 border-red-200' : 'focus:ring-navy-900'}
+                    inputClassName={error ? 'focus:ring-negative border-negative/30' : 'focus:ring-navy-900'}
                   />
                 )}
               />
               {error && (
-                <p role="alert" className="text-red-500 text-xs mt-2 font-medium">{error}</p>
+                <p role="alert" className="text-negative text-xs mt-2 font-medium">{error}</p>
               )}
             </div>
 
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" className="rounded border-slate-300 text-navy-900 focus:ring-navy-900" />
-                <span className="text-xs text-slate-500 font-medium">Remember me</span>
+                <input type="checkbox" className="rounded border-hairline text-navy-900 focus:ring-navy-900" />
+                <span className="text-xs text-muted font-medium">Remember me</span>
               </label>
               <button
                 type="button"
@@ -148,7 +148,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full btn-primary justify-center py-3.5 text-base shadow-lg shadow-blue-900/10 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full btn-primary justify-center py-3.5 text-base disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -164,15 +164,15 @@ export default function LoginPage() {
           {googleConfig && (
             <>
               <div className="flex items-center gap-3 my-6" aria-hidden="true">
-                <div className="h-px flex-1 bg-slate-100" />
-                <span className="text-xs font-bold text-slate-400 ">or</span>
-                <div className="h-px flex-1 bg-slate-100" />
+                <div className="h-px flex-1 bg-surface" />
+                <span className="text-xs font-bold text-muted ">or</span>
+                <div className="h-px flex-1 bg-surface" />
               </div>
               <button
                 type="button"
                 onClick={onGoogleSignIn}
                 disabled={googleLoading || loading}
-                className="w-full flex items-center justify-center gap-3 py-3.5 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-700 hover:bg-slate-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full flex items-center justify-center gap-3 py-3.5 rounded-[var(--radius-button)] border border-hairline bg-white text-sm font-bold text-ink hover:bg-surface transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {googleLoading ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
@@ -191,14 +191,14 @@ export default function LoginPage() {
             </>
           )}
 
-          <div className="mt-8 pt-6 border-t border-slate-100 text-center">
-              <p className="mb-3 text-sm text-slate-600">
+          <div className="mt-8 pt-6 border-t border-hairline text-center">
+              <p className="mb-3 text-sm text-muted">
                 New to Living Plus? <Link to={ROUTES.ownerRegister} className="text-navy-900 font-bold hover:underline">Register your PG</Link>
               </p>
-            <p className="text-xs text-slate-500 font-medium">
+            <p className="text-xs text-muted font-medium">
               Need help? <button onClick={() => setShowSupportModal(true)} className="text-navy-900 font-bold hover:underline">Contact support</button>
             </p>
-            <p className="mt-3 text-xs text-slate-500">
+            <p className="mt-3 text-xs text-muted">
               Looking for a PG? <a href={ROUTES.guestHome} className="font-bold text-navy-900 hover:underline">Browse PGs</a>
               {' · '}Resident? <a href={ROUTES.residentFinder} className="font-bold text-navy-900 hover:underline">Sign in on your PG's site</a>
             </p>
@@ -208,35 +208,35 @@ export default function LoginPage() {
 
       {/* Support Modal */}
       {showSupportModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-ink/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
             <div className="p-8">
               <button
                 onClick={() => setShowSupportModal(false)}
-                className="absolute right-6 top-6 p-2 hover:bg-slate-100 rounded-full transition-colors"
+                className="absolute right-6 top-6 p-2 hover:bg-surface rounded-full transition-colors"
               >
-                <X className="w-5 h-5 text-slate-400" />
+                <X className="w-5 h-5 text-muted" />
               </button>
 
               <div className="text-center mb-6">
-                <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <div className="w-16 h-16 bg-info-bg rounded-[var(--radius-card)] flex items-center justify-center mx-auto mb-4">
                   <MessageCircle className="w-8 h-8 text-navy-900" />
                 </div>
-                <h3 className="text-xl font-bold text-slate-900">Contact support</h3>
-                <p className="text-sm text-slate-500 mt-2 leading-relaxed">
+                <h3 className="text-xl font-bold text-ink">Contact support</h3>
+                <p className="text-sm text-muted mt-2 leading-relaxed">
                   Please reach out to your administrator to reset your password or for any account assistance.
                 </p>
               </div>
 
-              <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 text-center">
-                <p className="text-xs text-slate-600 leading-relaxed">
+              <div className="bg-surface border border-hairline rounded-[var(--radius-card)] p-4 text-center">
+                <p className="text-xs text-muted leading-relaxed">
                   For password resets or login credentials, contact your property manager or system administrator directly.
                 </p>
               </div>
 
               <button
                 onClick={() => setShowSupportModal(false)}
-                className="w-full mt-6 py-3 bg-navy-900 text-white rounded-xl font-bold hover:bg-navy-900 transition-all"
+                className="w-full mt-6 py-3 bg-navy-900 text-white rounded-[var(--radius-button)] font-bold hover:bg-navy-900 transition-all"
               >
                 Close
               </button>

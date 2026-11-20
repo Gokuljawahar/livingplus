@@ -10,21 +10,21 @@ export default function PrivacyPolicy() {
   return (
     <div className="min-h-screen bg-surface">
       {/* Header */}
-      <div className="bg-white border-b border-slate-100 sticky top-0 z-10">
+      <div className="bg-white border-b border-hairline sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 flex items-center gap-4">
           <button
             onClick={() => navigate(-1)}
-            className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500"
+            className="p-2 hover:bg-surface rounded-full transition-colors text-muted"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-emerald-50 rounded-xl flex items-center justify-center">
+            <div className="w-9 h-9 bg-positive-bg rounded-[var(--radius-button)] flex items-center justify-center">
               <Shield className="w-5 h-5 text-navy-900" />
             </div>
             <div>
-              <h1 className="text-base font-bold text-slate-900">Privacy Policy</h1>
-              <p className="text-xs text-slate-400">Living Plus</p>
+              <h1 className="text-base font-bold text-ink">Privacy Policy</h1>
+              <p className="text-xs text-muted">Living Plus</p>
             </div>
           </div>
         </div>
@@ -32,10 +32,10 @@ export default function PrivacyPolicy() {
 
       {/* Content */}
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 pb-16">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 sm:p-10 space-y-8">
+        <div className="bg-white rounded-[var(--radius-card)] border border-hairline p-6 sm:p-10 space-y-8">
 
           <div>
-            <p className="text-sm text-slate-500 leading-relaxed">
+            <p className="text-sm text-muted leading-relaxed">
               Please read this privacy policy carefully. By accessing or using the website/mobile application, you agree to be bound by the terms described herein. If you do not agree to all of these terms, please do not use the website/mobile application. Using the website/mobile application will be considered as a deemed acceptance of this policy.
             </p>
           </div>
@@ -145,8 +145,8 @@ export default function PrivacyPolicy() {
             </p>
           </Section>
 
-          <div className="pt-4 border-t border-slate-100">
-            <p className="text-xs text-slate-400 text-center">
+          <div className="pt-4 border-t border-hairline">
+            <p className="text-xs text-muted text-center">
               For any questions regarding this Privacy Policy, please reach out to our support team.
             </p>
           </div>
@@ -159,8 +159,8 @@ export default function PrivacyPolicy() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
-      <h2 className="text-base font-bold text-slate-900 border-l-4 border-amber-500 pl-3">{title}</h2>
-      <div className="text-sm text-slate-600 leading-relaxed space-y-3 pl-1">
+      <h2 className="text-base font-bold text-ink border-l-4 border-amber-500 pl-3">{title}</h2>
+      <div className="text-sm text-muted leading-relaxed space-y-3 pl-1">
         {children}
       </div>
     </div>

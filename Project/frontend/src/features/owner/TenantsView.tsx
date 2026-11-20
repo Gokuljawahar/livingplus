@@ -121,7 +121,7 @@ export default function TenantsView({ tenants, canManageStaff, onStayAction, onC
               key={status}
               onClick={() => setTenantFilter(status)}
               className={`rounded-[var(--radius-field)] px-3 py-1.5 text-xs font-bold transition-all ${
-                tenantFilter === status ? 'bg-canvas text-navy-900 shadow-xs' : 'text-muted hover:text-ink'
+                tenantFilter === status ? 'bg-canvas text-navy-900' : 'text-muted hover:text-ink'
               }`}
             >
               {status ? statusLabel(status) : 'All'}

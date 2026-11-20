@@ -101,14 +101,14 @@ export default function RegisterPage() {
       {showLoader && <LogoLoader onComplete={() => {
         if (nextLoginUrl) window.location.assign(nextLoginUrl);
       }} />}
-      <div className="min-h-screen lg:h-screen bg-slate-50 flex">
+      <div className="min-h-screen lg:h-screen bg-surface flex">
         {/* Left Side: Animated Illustration */}
         <div className="hidden lg:flex w-[45%] bg-navy-900 text-white p-8 lg:p-10 flex-col justify-between relative overflow-hidden">
           {/* Background Patterns */}
           <div className="absolute inset-0 opacity-10">
             <div className="absolute top-20 left-10 w-64 h-64 bg-white rounded-full mix-blend-overlay filter blur-3xl opacity-50 animate-blob"></div>
             <div className="absolute top-40 right-10 w-72 h-72 bg-amber-500 rounded-full mix-blend-overlay filter blur-3xl opacity-50 animate-blob animation-delay-2000"></div>
-            <div className="absolute -bottom-8 left-20 w-80 h-80 bg-blue-400 rounded-full mix-blend-overlay filter blur-3xl opacity-50 animate-blob animation-delay-4000"></div>
+            <div className="absolute -bottom-8 left-20 w-80 h-80 bg-info-bg rounded-full mix-blend-overlay filter blur-3xl opacity-50 animate-blob animation-delay-4000"></div>
           </div>
 
           <div className="relative z-10">
@@ -120,45 +120,45 @@ export default function RegisterPage() {
               <h1 className="text-3xl font-bold leading-tight">
                 Run your PG with room to grow
               </h1>
-              <p className="text-blue-100 text-base max-w-md leading-relaxed">
+              <p className="text-info text-base max-w-md leading-relaxed">
                 Keep rooms, booking requests, residents, rent and maintenance together in one workspace.
               </p>
 
               <div className="space-y-5 mt-8">
-                <div className="flex items-center gap-3 text-blue-50">
-                  <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
+                <div className="flex items-center gap-3 text-info">
+                  <div className="w-10 h-10 rounded-[var(--radius-button)] bg-white/10 flex items-center justify-center">
                     <Building2 className="w-5 h-5" />
                   </div>
                   <div>
                     <h3 className="font-semibold text-base">Property setup</h3>
-                    <p className="text-blue-200/80 text-xs">Organize rooms and beds</p>
+                    <p className="text-info/80 text-xs">Organize rooms and beds</p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 text-blue-50">
-                  <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
+                <div className="flex items-center gap-3 text-info">
+                  <div className="w-10 h-10 rounded-[var(--radius-button)] bg-white/10 flex items-center justify-center">
                     <BedDouble className="w-5 h-5" />
                   </div>
                   <div>
                     <h3 className="font-semibold text-base">Booking requests</h3>
-                    <p className="text-blue-200/80 text-xs">Review requests and move-ins</p>
+                    <p className="text-info/80 text-xs">Review requests and move-ins</p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 text-blue-50">
-                  <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
+                <div className="flex items-center gap-3 text-info">
+                  <div className="w-10 h-10 rounded-[var(--radius-button)] bg-white/10 flex items-center justify-center">
                     <ClipboardList className="w-5 h-5" />
                   </div>
                   <div>
                     <h3 className="font-semibold text-base">Daily operations</h3>
-                    <p className="text-blue-200/80 text-xs">Track occupancy and maintenance</p>
+                    <p className="text-info/80 text-xs">Track occupancy and maintenance</p>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="relative z-10 text-blue-200 text-sm mt-8">
+          <div className="relative z-10 text-info text-sm mt-8">
             © {new Date().getFullYear()} Living Plus. All rights reserved.
           </div>
         </div>
@@ -166,7 +166,7 @@ export default function RegisterPage() {
         {/* Right Side: Registration Form */}
         <div className="flex-1 flex flex-col justify-start py-8 lg:py-12 px-4 sm:px-6 lg:px-20 xl:px-32 relative min-h-screen lg:min-h-0 lg:overflow-y-auto">
           <div className="absolute top-8 right-8 hidden lg:block">
-            <Link to="/" className="text-sm font-medium text-slate-500 hover:text-navy-900 transition-colors">
+            <Link to="/" className="text-sm font-medium text-muted hover:text-navy-900 transition-colors">
               Back to home
             </Link>
           </div>
@@ -175,36 +175,36 @@ export default function RegisterPage() {
             {/* Mobile Header */}
             <div className="lg:hidden mb-8 text-center">
               <img src={logoBlack} alt="Living Plus" className="h-36 mx-auto mb-4 object-contain" />
-              <h2 className="text-xl font-bold tracking-tight text-slate-900">
+              <h2 className="text-xl font-bold tracking-tight text-ink">
                 Create Your PG Account
               </h2>
-              <p className="mt-2 text-sm text-slate-500">
+              <p className="mt-2 text-sm text-muted">
                 Set up your property operations
               </p>
             </div>
 
             <div className="hidden lg:block mb-10">
-              <h2 className="text-3xl font-bold tracking-tight text-slate-900">
+              <h2 className="text-3xl font-bold tracking-tight text-ink">
                 Create Your PG Account
               </h2>
-              <p className="mt-2 text-sm text-slate-500">
+              <p className="mt-2 text-sm text-muted">
                 Set up your property operations
               </p>
             </div>
 
             {/* Progress Bar */}
-            <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mb-6">
+            <div className="w-full bg-surface h-1.5 rounded-full overflow-hidden mb-6">
               <div
                 className="bg-navy-900 h-full transition-all duration-500 ease-out"
                 style={{ width: `${(step / 2) * 100}%` }}
               />
             </div>
 
-            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+            <div className="bg-white rounded-3xl p-6 border border-hairline">
               {step === 1 && (
                 <div className="space-y-6 animate-in slide-in-from-right fade-in duration-500">
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Owner phone (Login ID)</label>
+                    <label className="block text-sm font-medium text-ink mb-2">Owner phone (Login ID)</label>
                     <Controller
                       name="phone"
                       control={control}
@@ -212,11 +212,11 @@ export default function RegisterPage() {
                         <PhoneInput value={field.value} onChange={field.onChange} onBlur={field.onBlur} placeholder="Phone number" error={!!errors.phone} required />
                       )}
                     />
-                    {errors.phone && <p className="mt-1 text-xs text-red-500">{errors.phone.message}</p>}
+                    {errors.phone && <p className="mt-1 text-xs text-negative">{errors.phone.message}</p>}
                   </div>
 
                   {codeSent && (
-                    <label className="block text-sm font-medium text-slate-700">
+                    <label className="block text-sm font-medium text-ink">
                       Code sent to {phone}
                       <input aria-label="6-digit verification code" value={code} onChange={(event) => setCode(event.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={6}
                         className="tabular mt-2 block w-full rounded-[6px] border border-field-border px-3 py-2.5 tracking-[0.2em]" />
@@ -226,7 +226,7 @@ export default function RegisterPage() {
                   <button
                     onClick={() => void handleContinue()}
                     disabled={loading || verifying || phone.replace(/\D/g, '').length !== 12 || (codeSent && code.length < 6)}
-                    className="w-full py-4 bg-navy-900 hover:bg-navy-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mt-8 disabled:opacity-70 disabled:cursor-not-allowed"
+                    className="w-full py-4 bg-navy-900 hover:bg-navy-700 text-white rounded-[var(--radius-button)] font-medium transition-colors flex items-center justify-center gap-2 mt-8 disabled:opacity-70 disabled:cursor-not-allowed"
                   >
                     {verifying && <Loader2 className="h-4 w-4 animate-spin" />}
                     {codeSent ? 'Verify and continue' : 'Send code'}
@@ -240,58 +240,58 @@ export default function RegisterPage() {
 
 
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Owner name</label>
+                    <label className="block text-sm font-medium text-ink mb-2">Owner name</label>
                     <div className="relative">
                       <input
                         type="text"
                         aria-label="Owner name"
                         {...register('name')}
-                        className={`w-full px-4 py-3 bg-slate-50 border-slate-200 rounded-xl focus:ring-navy-900 focus:border-navy-900 ${errors.name ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
+                        className={`w-full px-4 py-3 bg-surface border-hairline rounded-[var(--radius-button)] focus:ring-navy-900 focus:border-navy-900 ${errors.name ? 'border-negative/30 focus:border-negative focus:ring-negative' : ''}`}
                         placeholder="Your full name"
                       />
                     </div>
-                    {errors.name && <p className="mt-1 text-xs text-red-500">{errors.name.message}</p>}
+                    {errors.name && <p className="mt-1 text-xs text-negative">{errors.name.message}</p>}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">PG / Hostel name</label>
+                    <label className="block text-sm font-medium text-ink mb-2">PG / Hostel name</label>
                     <input
                       type="text"
                       aria-label="PG / Hostel name"
                       {...register('propertyName')}
-                      className={`w-full border border-slate-200 bg-slate-50 px-4 py-3 focus:border-navy-900 focus:ring-navy-900 ${errors.propertyName ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
+                      className={`w-full border border-hairline bg-surface px-4 py-3 focus:border-navy-900 focus:ring-navy-900 ${errors.propertyName ? 'border-negative/30 focus:border-negative focus:ring-negative' : ''}`}
                       placeholder="e.g. Cedar House PG"
                     />
-                    {errors.propertyName && <p className="mt-1 text-xs text-red-500">{errors.propertyName.message}</p>}
+                    {errors.propertyName && <p className="mt-1 text-xs text-negative">{errors.propertyName.message}</p>}
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
-                    <label className="block text-sm font-medium text-slate-700">Street address
-                      <input {...register('propertyAddress')} className="mt-1.5 w-full border border-slate-200 bg-slate-50 px-3 py-2.5" placeholder="Building and street" />
-                      {errors.propertyAddress && <span className="mt-1 block text-xs text-red-500">{errors.propertyAddress.message}</span>}
+                    <label className="block text-sm font-medium text-ink">Street address
+                      <input {...register('propertyAddress')} className="mt-1.5 w-full border border-hairline bg-surface px-3 py-2.5" placeholder="Building and street" />
+                      {errors.propertyAddress && <span className="mt-1 block text-xs text-negative">{errors.propertyAddress.message}</span>}
                     </label>
-                    <label className="block text-sm font-medium text-slate-700">Locality
-                      <input {...register('locality')} className="mt-1.5 w-full border border-slate-200 bg-slate-50 px-3 py-2.5" placeholder="Neighbourhood" />
-                      {errors.locality && <span className="mt-1 block text-xs text-red-500">{errors.locality.message}</span>}
+                    <label className="block text-sm font-medium text-ink">Locality
+                      <input {...register('locality')} className="mt-1.5 w-full border border-hairline bg-surface px-3 py-2.5" placeholder="Neighbourhood" />
+                      {errors.locality && <span className="mt-1 block text-xs text-negative">{errors.locality.message}</span>}
                     </label>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
-                    <label className="block text-sm font-medium text-slate-700">City
-                      <input {...register('city')} className="mt-1.5 w-full border border-slate-200 bg-slate-50 px-3 py-2.5" />
+                    <label className="block text-sm font-medium text-ink">City
+                      <input {...register('city')} className="mt-1.5 w-full border border-hairline bg-surface px-3 py-2.5" />
                     </label>
-                    <label className="block text-sm font-medium text-slate-700">Resident policy
-                      <select {...register('genderPolicy')} className="mt-1.5 w-full border border-slate-200 bg-white px-3 py-2.5">
+                    <label className="block text-sm font-medium text-ink">Resident policy
+                      <select {...register('genderPolicy')} className="mt-1.5 w-full border border-hairline bg-white px-3 py-2.5">
                         <option value="ANY">All residents</option><option value="MEN">Men</option><option value="WOMEN">Women</option>
                       </select>
                     </label>
                   </div>
-                  <label className="block text-sm font-medium text-slate-700">Public WhatsApp contact <span className="font-normal text-slate-400">(optional)</span>
+                  <label className="block text-sm font-medium text-ink">Public WhatsApp contact <span className="font-normal text-muted">(optional)</span>
                     <Controller name="contactPhone" control={control} render={({ field }) => <PhoneInput value={field.value} onChange={field.onChange} className="mt-1.5" />} />
                   </label>
 
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Set Password</label>
+                    <label className="block text-sm font-medium text-ink mb-2">Set Password</label>
                     <Controller
                       name="password"
                       control={control}
@@ -302,15 +302,15 @@ export default function RegisterPage() {
                       ariaLabel="Set password"
                       required={false}
                       onChange={field.onChange}
-                      inputClassName={`border border-slate-200 px-4 ${errors.password ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'focus:border-navy-900 focus:ring-navy-900'}`}
+                      inputClassName={`border border-hairline px-4 ${errors.password ? 'border-negative/30 focus:border-negative focus:ring-negative' : 'focus:border-navy-900 focus:ring-navy-900'}`}
                     />
                       )}
                     />
-                    {errors.password ? <p className="mt-1 text-xs text-red-500">{errors.password.message}</p> : <p className="mt-1 text-xs text-slate-400">Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special</p>}
+                    {errors.password ? <p className="mt-1 text-xs text-negative">{errors.password.message}</p> : <p className="mt-1 text-xs text-muted">Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special</p>}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Confirm Password</label>
+                    <label className="block text-sm font-medium text-ink mb-2">Confirm Password</label>
                     <Controller
                       name="confirmPassword"
                       control={control}
@@ -321,19 +321,19 @@ export default function RegisterPage() {
                       ariaLabel="Confirm password"
                       required={false}
                       onChange={field.onChange}
-                      inputClassName={`border border-slate-200 px-4 ${errors.confirmPassword ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'focus:border-navy-900 focus:ring-navy-900'}`}
+                      inputClassName={`border border-hairline px-4 ${errors.confirmPassword ? 'border-negative/30 focus:border-negative focus:ring-negative' : 'focus:border-navy-900 focus:ring-navy-900'}`}
                     />
                       )}
                     />
                     {errors.confirmPassword && (
-                      <p className="mt-1 text-xs text-red-500">{errors.confirmPassword.message}</p>
+                      <p className="mt-1 text-xs text-negative">{errors.confirmPassword.message}</p>
                     )}
                   </div>
 
                   <button
                     onClick={handleSubmit(onRegister)}
                     disabled={loading}
-                    className="w-full py-3 bg-navy-900 hover:bg-navy-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mt-4 disabled:opacity-70"
+                    className="w-full py-3 bg-navy-900 hover:bg-navy-700 text-white rounded-[var(--radius-button)] font-medium transition-colors flex items-center justify-center gap-2 mt-4 disabled:opacity-70"
                   >
                     {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Create PG owner account'}
                   </button>
@@ -341,14 +341,14 @@ export default function RegisterPage() {
               )}
             </div>
 
-            <div className="mt-8 text-center text-sm text-slate-500">
+            <div className="mt-8 text-center text-sm text-muted">
               Already have an account?{' '}
               <Link to={ROUTES.ownerLogin} className="font-semibold text-navy-900 hover:underline">
                 Sign in
               </Link>
             </div>
             <div className="mt-6 text-center lg:hidden">
-              <Link to="/" className="text-sm font-medium text-slate-500 hover:text-navy-900 transition-colors flex items-center justify-center gap-1">
+              <Link to="/" className="text-sm font-medium text-muted hover:text-navy-900 transition-colors flex items-center justify-center gap-1">
                 &larr; Back to home
               </Link>
             </div>

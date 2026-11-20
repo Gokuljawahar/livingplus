@@ -34,7 +34,7 @@ export default function Sidebar() {
       )}
 
       <aside className={`
-        fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 flex flex-col h-screen transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-auto
+        fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-hairline flex flex-col h-screen transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-auto
         ${isOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
         <div className="relative flex h-16 shrink-0 items-center px-6">
@@ -55,7 +55,7 @@ export default function Sidebar() {
               if (item.children) {
                 return (
                   <div key={item.label} className="mb-2">
-                    <div className="flex items-center gap-3 px-3 py-2 text-slate-500 font-medium">
+                    <div className="flex items-center gap-3 px-3 py-2 text-muted font-medium">
                       <item.icon className="w-5 h-5" />
                       <span>{item.label}</span>
                     </div>
@@ -64,7 +64,7 @@ export default function Sidebar() {
                         if (child.children) {
                           return (
                             <div key={child.label} className="mb-2">
-                              <div className="flex items-center gap-3 px-3 py-2 text-slate-500 text-sm font-medium">
+                              <div className="flex items-center gap-3 px-3 py-2 text-muted text-sm font-medium">
                                 <span>{child.label}</span>
                               </div>
                               <div className="pl-4 space-y-1 mt-1">
@@ -77,10 +77,10 @@ export default function Sidebar() {
                                       onClick={() => {
                                         if (window.innerWidth < 1024) close();
                                       }}
-                                      className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all text-sm ${
+                                      className={`flex items-center gap-3 px-3 py-2 rounded-[var(--radius-button)] transition-all text-sm ${
                                         isActive 
-                                          ? 'bg-amber-50 text-navy-900 font-bold border-r-4 border-amber-500 rounded-r-none shadow-xs' 
-                                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'
+                                          ? 'bg-amber-50 text-navy-900 font-bold border-r-4 border-amber-500 rounded-r-none' 
+                                          : 'text-muted hover:bg-surface hover:text-ink font-medium'
                                       }`}
                                     >
                                       {subChild.icon && <subChild.icon className="w-4 h-4" />}
@@ -101,10 +101,10 @@ export default function Sidebar() {
                             onClick={() => {
                               if (window.innerWidth < 1024) close();
                             }}
-                            className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all text-sm ${
+                            className={`flex items-center gap-3 px-3 py-2 rounded-[var(--radius-button)] transition-all text-sm ${
                               isActive 
-                                ? 'bg-amber-50 text-navy-900 font-bold border-r-4 border-amber-500 rounded-r-none shadow-xs' 
-                                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'
+                                ? 'bg-amber-50 text-navy-900 font-bold border-r-4 border-amber-500 rounded-r-none' 
+                                : 'text-muted hover:bg-surface hover:text-ink font-medium'
                             }`}
                           >
                             {child.icon && <child.icon className="w-4 h-4" />}
@@ -125,10 +125,10 @@ export default function Sidebar() {
                   onClick={() => {
                     if (window.innerWidth < 1024) close();
                   }}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all text-sm ${
+                  className={`flex items-center gap-3 px-3 py-2 rounded-[var(--radius-button)] transition-all text-sm ${
                     isActive 
-                      ? 'bg-amber-50 text-navy-900 font-bold border-r-4 border-amber-500 rounded-r-none shadow-xs' 
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'
+                      ? 'bg-amber-50 text-navy-900 font-bold border-r-4 border-amber-500 rounded-r-none' 
+                      : 'text-muted hover:bg-surface hover:text-ink font-medium'
                   }`}
                 >
                   <item.icon className="w-5 h-5" />
@@ -168,7 +168,7 @@ export default function Sidebar() {
 
         </nav>
 
-        <div className="p-6 shrink-0 bg-white border-t border-slate-100">
+        <div className="p-6 shrink-0 bg-white border-t border-hairline">
           <button 
                 onClick={() => {
                   logout();
@@ -177,7 +177,7 @@ export default function Sidebar() {
                     window.location.reload();
                   }
                 }}
-            className="flex items-center gap-3 px-3 py-2 text-slate-500 hover:text-slate-900 w-full transition-colors rounded-lg hover:bg-slate-50"
+            className="flex items-center gap-3 px-3 py-2 text-muted hover:text-ink w-full transition-colors rounded-[var(--radius-field)] hover:bg-surface"
           >
             <LogOut className="w-5 h-5" />
             <span>Sign out</span>

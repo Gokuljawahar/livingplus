@@ -16,8 +16,8 @@ export default function ResidentSiteLink({ slug }: { slug: string }) {
   return (
     <div className="flex flex-wrap items-center gap-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs">
       <Link2 className="h-4 w-4 shrink-0 text-amber-700" />
-      <span className="font-semibold text-slate-700">Resident site</span>
-      <span className="min-w-0 flex-1 truncate font-mono text-slate-600" title={url}>{url}</span>
+      <span className="font-semibold text-ink">Resident site</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-muted" title={url}>{url}</span>
       <button type="button" onClick={() => void copy()} aria-label="Copy resident link" className="inline-flex items-center gap-1 font-semibold text-navy-900 hover:underline"><Copy className="h-3.5 w-3.5" /> Copy</button>
       <a href={url} target="_blank" rel="noreferrer" aria-label="Open resident site" className="inline-flex items-center gap-1 font-semibold text-navy-900 hover:underline"><ExternalLink className="h-3.5 w-3.5" /> Open</a>
     </div>

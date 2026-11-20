@@ -296,16 +296,16 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
       aria-label="PG assistant"
       className="fixed bottom-6 right-6 z-50 flex h-[520px] w-[min(94vw,400px)] flex-col rounded-3xl border border-hairline bg-white shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
     >
-      <header className="flex items-center justify-between bg-navy-900 px-5 py-3.5 text-white shadow-xs">
+      <header className="flex items-center justify-between bg-navy-900 px-5 py-3.5 text-white">
         <div className="flex items-center gap-2.5">
-          <div className="h-8 w-8 rounded-xl bg-amber-500 text-navy-900 flex items-center justify-center font-bold shadow-xs">
+          <div className="h-8 w-8 rounded-[var(--radius-button)] bg-amber-500 text-navy-900 flex items-center justify-center font-bold">
             <MessageCircle className="h-4.5 w-4.5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <p className="text-sm font-bold tracking-tight">LivingPlus Assistant</p>
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live
+              <span className="inline-flex items-center gap-1 text-xs font-semibold text-positive bg-positive/40 px-2 py-0.5 rounded-full border border-positive/20">
+                <span className="h-1.5 w-1.5 rounded-full bg-positive-bg animate-pulse" /> Live
               </span>
             </div>
             <p className="text-[13px] text-white/75">Answers from your PG's live records</p>
@@ -329,7 +329,7 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
         <button
           onClick={() => setOpen(false)}
           aria-label="Close assistant"
-          className="rounded-full p-1.5 text-blue-200 hover:bg-white/10 hover:text-white transition-colors"
+          className="rounded-full p-1.5 text-info hover:bg-white/10 hover:text-white transition-colors"
         >
           <X className="h-4 w-4" />
         </button>
@@ -338,10 +338,10 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
       <div className="flex-1 space-y-3 overflow-y-auto p-4 text-xs sm:text-sm bg-surface">
         {!messages.length && (
           <div className="space-y-3 pt-2">
-            <div className="rounded-2xl border border-blue-100 bg-white p-4 shadow-xs">
+            <div className="rounded-[var(--radius-card)] border border-info/30 bg-white p-4">
               <p className="text-ink leading-relaxed font-medium">{copy.welcome}</p>
               {limited && (
-                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/70 p-2.5 text-[11px] text-amber-900 font-medium leading-relaxed">
+                <div className="mt-3 rounded-[var(--radius-button)] border border-amber-200 bg-amber-50/70 p-2.5 text-xs text-amber-900 font-medium leading-relaxed">
                   🔒 <strong>Guest mode:</strong> Onboard as a resident on your PG's site to unlock voice notes and photo-based maintenance reporting.
                 </div>
               )}
@@ -349,7 +349,7 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
 
             {/* Quick Suggestion Chips */}
             <div className="pt-2">
-              <p className="text-[11px] font-bold text-muted px-1 mb-2">Try asking</p>
+              <p className="text-xs font-bold text-muted px-1 mb-2">Try asking</p>
               <div className="flex flex-wrap gap-1.5">
                 {SUGGESTED_PROMPTS[persona].map((promptText) => (
                   <button
@@ -374,8 +374,8 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
             key={i}
             className={`max-w-[88%] px-3.5 py-2.5 text-xs sm:text-sm leading-relaxed ${
               msg.from === 'user'
-                ? 'ml-auto rounded-2xl rounded-tr-xs bg-navy-900 text-white shadow-xs font-medium'
-                : 'rounded-2xl rounded-tl-xs bg-white text-ink border border-hairline'
+                ? 'ml-auto rounded-[var(--radius-card)] rounded-tr-xs bg-navy-900 text-white font-medium'
+                : 'rounded-[var(--radius-card)] rounded-tl-xs bg-white text-ink border border-hairline'
             }`}
           >
             <ReactMarkdown
@@ -399,7 +399,7 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
         ))}
 
         {(busy || transcribing) && (
-          <div className="flex items-center gap-2 text-xs text-muted bg-white px-3 py-2 rounded-2xl w-fit border border-hairline">
+          <div className="flex items-center gap-2 text-xs text-muted bg-white px-3 py-2 rounded-[var(--radius-card)] w-fit border border-hairline">
             <Loader2 className="h-3.5 w-3.5 animate-spin text-navy-900" />
             <span>Thinking…</span>
           </div>
@@ -408,15 +408,15 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
 
       {photo && (
         <div className="flex items-center gap-2 border-t border-hairline bg-surface p-2 text-xs text-muted">
-          <img src={photo} alt="Attached issue" className="h-10 w-10 object-cover rounded-lg border border-hairline" />
+          <img src={photo} alt="Attached issue" className="h-10 w-10 object-cover rounded-[var(--radius-field)] border border-hairline" />
           <span className="font-medium">Photo attached to message</span>
           <button onClick={() => setPhoto(null)} aria-label="Remove photo" className="ml-auto p-1 hover:bg-hairline rounded-full transition-colors"><X className="h-3.5 w-3.5" /></button>
         </div>
       )}
 
       {recording && (
-        <div className="flex items-center gap-2 border-t border-red-200 bg-red-50 p-2.5 text-xs font-semibold text-red-700 animate-pulse">
-          <span className="h-2 w-2 rounded-full bg-red-600" />
+        <div className="flex items-center gap-2 border-t border-negative/30 bg-negative-bg p-2.5 text-xs font-semibold text-negative animate-pulse">
+          <span className="h-2 w-2 rounded-full bg-negative" />
           <span>Recording voice note… tap stop to transcribe (max {MAX_RECORD_SECONDS}s)</span>
         </div>
       )}
@@ -440,7 +440,7 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
       <form onSubmit={(e) => { e.preventDefault(); void send(); }} className="flex items-center gap-2 border-t border-hairline bg-white p-3">
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { void attachPhoto(e.target.files?.[0]); e.target.value = ''; }} />
         {!limited && (
-          <button type="button" onClick={() => fileRef.current?.click()} aria-label="Attach a photo" className="p-2 text-muted hover:text-navy-900 hover:bg-surface rounded-xl transition-colors" title="Attach issue photo">
+          <button type="button" onClick={() => fileRef.current?.click()} aria-label="Attach a photo" className="p-2 text-muted hover:text-navy-900 hover:bg-surface rounded-[var(--radius-button)] transition-colors" title="Attach issue photo">
             <ImagePlus className="h-4.5 w-4.5" />
           </button>
         )}
@@ -450,14 +450,14 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
           onChange={(e) => setInput(e.target.value)}
           placeholder={copy.placeholder}
           aria-label={copy.placeholder}
-          className="w-full rounded-xl border border-field-border bg-surface px-3.5 py-2 text-xs sm:text-sm font-medium outline-none focus:bg-white focus:ring-2 focus:ring-navy-900/15 focus:border-navy-900 transition-all"
+          className="w-full rounded-[var(--radius-button)] border border-field-border bg-surface px-3.5 py-2 text-xs sm:text-sm font-medium outline-none focus:bg-white focus:ring-2 focus:ring-navy-900/15 focus:border-navy-900 transition-all"
         />
         {!limited && (
           <button
             type="button"
             onClick={() => void toggleRecording()}
             aria-label={recording ? 'Stop recording' : 'Record a voice note'}
-            className={`p-2 rounded-xl transition-colors ${recording ? 'text-red-600 bg-red-50' : 'text-muted hover:text-navy-900 hover:bg-surface'}`}
+            className={`p-2 rounded-[var(--radius-button)] transition-colors ${recording ? 'text-negative bg-negative-bg' : 'text-muted hover:text-navy-900 hover:bg-surface'}`}
             title={recording ? 'Stop voice note' : 'Record voice note'}
           >
             {recording ? <Square className="h-4.5 w-4.5" /> : <Mic className="h-4.5 w-4.5" />}
@@ -466,7 +466,7 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
         <button
           disabled={busy || !input.trim()}
           aria-label="Send"
-          className="btn-primary p-2.5 rounded-xl shadow-xs disabled:opacity-40 transition-all"
+          className="btn-primary p-2.5 rounded-[var(--radius-button)] disabled:opacity-40 transition-all"
         >
           <Send className="h-4 w-4" />
         </button>

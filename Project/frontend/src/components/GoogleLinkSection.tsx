@@ -50,9 +50,9 @@ export default function GoogleLinkSection() {
   };
 
   return (
-    <section aria-labelledby="google-link-heading" className="mt-6 rounded-3xl border border-slate-100 bg-white p-8 shadow-sm">
-      <h2 id="google-link-heading" className="text-sm font-bold text-slate-400">Sign in with Google</h2>
-      <p className="mt-2 text-sm text-slate-600">
+    <section aria-labelledby="google-link-heading" className="mt-6 rounded-3xl border border-hairline bg-white p-8">
+      <h2 id="google-link-heading" className="text-sm font-bold text-muted">Sign in with Google</h2>
+      <p className="mt-2 text-sm text-muted">
         {linked
           ? 'A Google account is linked. You can sign in with Google or with your password.'
           : 'Link your Google account to sign in with one tap next time.'}
@@ -61,7 +61,7 @@ export default function GoogleLinkSection() {
         type="button"
         onClick={() => void (linked ? unlink() : link())}
         disabled={busy}
-        className="mt-4 inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        className="mt-4 inline-flex items-center gap-2 rounded-[var(--radius-button)] border border-hairline px-4 py-2.5 text-sm font-semibold text-ink hover:bg-surface disabled:opacity-50"
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : linked ? <Unlink className="h-4 w-4" /> : <Link2 className="h-4 w-4" />}
         {linked ? 'Unlink Google account' : 'Link Google account'}

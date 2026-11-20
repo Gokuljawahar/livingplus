@@ -42,12 +42,12 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({
   return (
     <div className="relative">
       {icon && (
-        <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${error ? 'text-red-400' : 'text-slate-400'}`}>
+        <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${error ? 'text-negative' : 'text-muted'}`}>
           {icon}
         </div>
       )}
-      <div className={`flex items-center bg-slate-50 border rounded-xl transition-all overflow-hidden ${className} ${disabled ? 'opacity-60 cursor-not-allowed' : ''} ${error ? 'border-red-500 ring-2 ring-red-500/20 bg-red-50/30' : 'border-slate-100 focus-within:ring-2 focus-within:ring-navy-900 focus-within:bg-white'}`}>
-        <div className={`flex items-center justify-center px-3 py-3 border-r font-bold text-sm transition-colors ${error ? 'bg-red-50 border-red-100 text-red-500' : 'bg-slate-100 border-slate-200 text-slate-500'} ${icon ? 'pl-11' : ''}`}>
+      <div className={`flex items-center bg-surface border rounded-[var(--radius-button)] transition-all overflow-hidden ${className} ${disabled ? 'opacity-60 cursor-not-allowed' : ''} ${error ? 'border-negative ring-2 ring-negative/20 bg-negative-bg/30' : 'border-hairline focus-within:ring-2 focus-within:ring-navy-900 focus-within:bg-white'}`}>
+        <div className={`flex items-center justify-center px-3 py-3 border-r font-bold text-sm transition-colors ${error ? 'bg-negative-bg border-negative/30 text-negative' : 'bg-surface border-hairline text-muted'} ${icon ? 'pl-11' : ''}`}>
           +91
         </div>
         <input
@@ -57,7 +57,7 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({
           value={displayValue}
           onChange={handleChange}
           onBlur={onBlur}
-          className="w-full bg-transparent border-none py-3 px-4 text-sm focus:ring-0 placeholder:text-slate-300"
+          className="w-full bg-transparent border-none py-3 px-4 text-sm focus:ring-0 placeholder:text-muted"
           placeholder={placeholder}
           name={name}
           autoComplete={autoComplete}
