@@ -138,3 +138,33 @@ export function cleanVibeSummary(input: unknown): string | null {
   const text = input.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, VIBE_SUMMARY_MAX);
   return text || null;
 }
+
+/** What VibeCheck knows about the PG being matched (public listing data only). */
+export interface VibePlace {
+  name?: string;
+  locality?: string;
+  amenities?: string[];
+  rooms?: { hasAc?: boolean | null; foodIncluded?: boolean | null; foodCharge?: number | null }[];
+}
+
+/**
+ * Which lifestyle topics matter for this PG. A PG with no shared kitchen makes
+ * kitchen use irrelevant; with no AC rooms, room temperature is not shared.
+ * `facts` describe the PG for the conversation; `skip` lists habit ids to leave out.
+ */
+export function vibeTopicsFor(place: VibePlace | null | undefined): { skip: string[]; facts: string[] } {
+  if (!place) return { skip: [], facts: [] };
+  const amenities = (place.amenities ?? []).map((item) => item.toLowerCase());
+  const rooms = place.rooms ?? [];
+  const skip: string[] = [];
+  const facts: string[] = [];
+  if (place.name) facts.push(`The PG is ${place.name}${place.locality ? ` in ${place.locality}` : ''}.`);
+  if (amenities.some((item) => item.includes('kitchen'))) facts.push('Residents share a kitchen.');
+  else { skip.push('kitchen'); facts.push('There is no shared kitchen for residents.'); }
+  if (rooms.some((room) => room.hasAc)) facts.push('Some rooms have AC, shared by roommates.');
+  else { skip.push('cooling'); facts.push('Rooms have no AC.'); }
+  if (rooms.some((room) => room.foodIncluded || (room.foodCharge ?? 0) > 0) || amenities.some((item) => item.includes('meal') || item.includes('food'))) {
+    facts.push('The PG serves meals.');
+  }
+  return { skip, facts };
+}

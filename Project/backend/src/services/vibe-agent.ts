@@ -151,8 +151,8 @@ const interviewSchema = z.object({
   heard: z.string().describe('What the person just said, transcribed in their own language and script; empty if nothing intelligible'),
   answers: vibeProfileSchema.shape.answers,
   summary: z.string().describe('One or two short sentences about their lifestyle habits so far, in English'),
-  reply: z.string().describe('What to say next, in the language the person is using: a warm one-line acknowledgement plus the next single question, or a short closing line when done. At most 30 words, no lists.'),
-  done: z.boolean().describe('True once sleep, tidiness and noise are known and nothing else important is missing, or after six questions')
+  reply: z.string().describe('What you say next as their PG buddy, in their language and style: a short, natural reaction and at most one follow-up, or a warm closing line when done. At most 30 words, no lists.'),
+  done: z.boolean().describe('True once you have a good feel for their sleep, tidiness and noise and the chat has reached a natural pause, or after about eight exchanges')
 });
 
 export interface VibeInterviewTurn {
@@ -164,20 +164,24 @@ export interface VibeInterviewTurn {
   missing: string[];
 }
 
-function interviewInstruction(): string {
+function interviewInstruction(topics: { skip: string[]; facts: string[] } = { skip: [], facts: [] }): string {
   const scale = VIBE_QUESTIONS.map((question) =>
     `- ${question.id}: ${question.question} 0 = ${question.options[0].label}, 1 = ${question.options[1].label}, 2 = ${question.options[2].label}`
   ).join('\n');
   return [
-    'You are VibeCheck, a friendly voice interviewer that helps someone moving into paying-guest housing find compatible roommates.',
-    'Have a short, natural conversation (about five questions) to learn these habits:',
+    "You are the user's PG buddy: a friendly, easy-going senior who knows PG life well, chatting with someone who is about to move into one. Behind the scenes you are getting to know how they live, so they can be matched with roommates they will get along with.",
+    "Talk like a friend, not an interviewer. Never run through a list of questions, never say words like habits, questionnaire, score or profile, and never ask two questions at once.",
+    "Open casually by asking whether they are studying or working these days, then follow their lead: react to what they say with genuine interest, a little warmth or humour, and ask natural follow-ups about their day, work or study, weekends, hobbies and how they like their space. Never assume where they are from, that they are new to Chennai, or why they chose it, and don't ask why they like the city; build only on what they actually tell you.",
+    "Work out their lifestyle from what they tell you rather than asking directly. 'Exams are coming, I'm up most nights' tells you about sleep and noise; 'I hate a messy room' tells you about tidiness; 'my friends come over to play FIFA' tells you about guests and noise.",
+    "The things you are quietly learning: sleep time, wake time, tidiness, noise they make or tolerate, how often friends visit, study or work schedule, shared kitchen use, and preferred room temperature. Sleep, tidiness and noise matter most; if one of those is still unclear late in the chat, bring it up casually in passing, never as a direct survey question.",
+    "Keep each turn short and spoken: one or two sentences. Use the language and style they use (Tamil, Hindi, English, Tanglish or Hinglish) and switch when they switch.",
+    "Never ask about or note religion, caste, diet, gender, health, politics or family background, even if they bring it up; just move on kindly.",
+    "Each turn you get the conversation so far, what you have inferred already, and their new message (audio or text). Update answers with everything you can infer from the whole conversation; use null only for things still unknown, and keep earlier answers unless they correct them.",
+    "reply is what you say next as their buddy: react to what they said and keep the chat going with one natural follow-up. When you have a good feel for sleep, tidiness and noise and the chat reaches a natural pause, or after about eight exchanges, set done to true and wrap up warmly, saying you'll now show rooms where they'd fit in.",
+    'Record what you infer in answers using these values:',
     scale,
-    'Each turn you get the conversation so far, the habits already known, and the person\'s new answer (audio or text).',
-    'Update answers with everything you can infer from the whole conversation; use null only for habits still unknown. Keep earlier answers unless the person corrects them.',
-    'Ask about one habit at a time, the most important missing one first (sleep, tidiness, noise, then guests, schedule, wake, kitchen, cooling). Sound like a person, not a form: acknowledge what they said in a few words first.',
-    'Reply in the language the person speaks (Tamil, Hindi, English or a mix). Keep the summary in English.',
-    'Never ask about or record religion, caste, diet, gender, health, politics or family background, even if mentioned.',
-    'When done, the reply thanks them and says you will now match them with rooms.'
+    ...(topics.facts.length ? [`About the PG they are looking at: ${topics.facts.join(' ')}`] : []),
+    ...(topics.skip.length ? [`These don't apply at this PG, so never bring them up and leave them null: ${topics.skip.join(', ')}.`] : [])
   ].join('\n');
 }
 
@@ -192,7 +196,8 @@ export function setVibeInterviewerForTests(run: typeof interviewerOverride): voi
  * text), updates their habits, and says the next question. Throws
  * VIBE_AI_UNAVAILABLE / VIBE_TURN_EMPTY.
  */
-export async function vibeInterviewTurn(input: { history: VibeTurn[]; known: VibeAnswers; text?: string; audio?: { mimeType: string; data: string } }): Promise<VibeInterviewTurn> {
+export async function vibeInterviewTurn(input: { history: VibeTurn[]; known: VibeAnswers; text?: string; audio?: { mimeType: string; data: string }; topics?: { skip: string[]; facts: string[] } }): Promise<VibeInterviewTurn> {
+  const topics = input.topics ?? { skip: [], facts: [] };
   const text = (input.text || '').trim().slice(0, 1000);
   if (!text && !input.audio) throw new Error('VIBE_TURN_EMPTY');
   const model = vibeModelName();
@@ -207,12 +212,12 @@ export async function vibeInterviewTurn(input: { history: VibeTurn[]; known: Vib
       { text: `Conversation so far:\n${history || '(just started)'}\n\nHabits already known: ${known}\n\nThe person's new answer${input.audio ? ' is in the audio clip' : `: ${text}`}.` }
     ];
     if (input.audio) parts.push({ inlineData: { mimeType: input.audio.mimeType, data: input.audio.data } });
-    raw = await generateStructured({ system: interviewInstruction(), parts, schema: interviewSchema, model: model! });
+    raw = await generateStructured({ system: interviewInstruction(topics), parts, schema: interviewSchema, model: model! });
   }
   const parsed = interviewSchema.parse(raw);
-  const found = cleanVibeAnswers(Object.fromEntries(Object.entries(parsed.answers).filter(([, value]) => value !== null))) ?? {};
+  const found = cleanVibeAnswers(Object.fromEntries(Object.entries(parsed.answers).filter(([id, value]) => value !== null && !topics.skip.includes(id)))) ?? {};
   const answers = { ...input.known, ...found };
-  const missing = VIBE_QUESTIONS.filter((question) => answers[question.id] === undefined).map((question) => question.id);
+  const missing = VIBE_QUESTIONS.filter((question) => !topics.skip.includes(question.id) && answers[question.id] === undefined).map((question) => question.id);
   const turns = input.history.filter((turn) => turn.role === 'user').length + 1;
   return {
     heard: (parsed.heard || text).trim().slice(0, 500),

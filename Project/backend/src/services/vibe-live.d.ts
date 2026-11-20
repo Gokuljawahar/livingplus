@@ -3,7 +3,7 @@ import { type VibeAnswers } from '@livingplus/shared';
 export declare const VIBE_LIVE_PATH = "/api/pg/vibecheck/live";
 export declare const vibeLiveEnabled: () => boolean;
 /** Cleans one record_habits call and merges it into what is already known. */
-export declare function applyHabitCall(known: VibeAnswers, args: unknown): {
+export declare function applyHabitCall(known: VibeAnswers, args: unknown, skip?: string[]): {
     answers: VibeAnswers;
     summary: string | null;
     done: boolean;

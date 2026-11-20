@@ -1076,7 +1076,7 @@ export default function PGDiscovery() {
                         </div>
                       ) : (
                         <div className="rounded-[14px] border border-navy-900/20 px-4 py-4">
-                          <div><VibeProfileBuilder answers={vibeAnswers} summary={vibeSummary} onChange={(answers, summary) => { setVibeAnswers(answers); setVibeSummary(summary); }} /></div>
+                          <div><VibeProfileBuilder propertyId={selectedProperty.id} answers={vibeAnswers} summary={vibeSummary} onChange={(answers, summary) => { setVibeAnswers(answers); setVibeSummary(summary); }} /></div>
                           <div className="mt-4 flex flex-wrap gap-2">
                             <button type="button" disabled={!vibeComplete || vibeLoading} onClick={() => void runVibeCheck()} className="btn-secondary">
                               {vibeLoading && <Loader2 className="h-4 w-4 animate-spin" />} See my matches

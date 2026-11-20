@@ -1,49 +1,59 @@
 import { WebSocketServer } from 'ws';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
-import { cleanVibeAnswers, cleanVibeSummary, VIBE_QUESTIONS } from '@livingplus/shared';
+import { cleanVibeAnswers, cleanVibeSummary, VIBE_QUESTIONS, vibeTopicsFor } from '@livingplus/shared';
+import { prisma } from '../app.js';
+import { asSystem } from '../db/context.js';
 import { aiEnabled, resolveGoogleAuth } from './ai-provider.js';
 import { logger } from '../utils/logger.js';
 export const VIBE_LIVE_PATH = '/api/pg/vibecheck/live';
-const MAX_SESSION_MS = 4 * 60 * 1000;
+const MAX_SESSION_MS = 6 * 60 * 1000;
 const MAX_PER_VISITOR = 2;
 const MAX_PER_INSTANCE = Math.max(1, Number(process.env.VIBE_LIVE_MAX_SESSIONS) || 25);
 const liveModel = () => (process.env.VIBE_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio').trim();
 const liveLocation = () => (process.env.VIBE_LIVE_LOCATION || 'us-central1').trim();
 export const vibeLiveEnabled = () => aiEnabled() && process.env.VIBE_LIVE_ENABLED !== 'false';
-const habitProperties = Object.fromEntries(VIBE_QUESTIONS.map((question) => [question.id, {
-        type: Type.NUMBER,
-        description: `${question.question} 0 = ${question.options[0].label}, 1 = ${question.options[1].label}, 2 = ${question.options[2].label}. Leave out if unknown.`
-    }]));
-const recordHabits = {
-    name: 'record_habits',
-    description: 'Save the lifestyle habits learned so far (every habit you can infer from the whole conversation) and a short English summary. Call after every answer.',
-    parameters: {
-        type: Type.OBJECT,
-        properties: {
-            answers: { type: Type.OBJECT, properties: habitProperties },
-            summary: { type: Type.STRING, description: 'One or two short sentences about their habits, in English' },
-            done: { type: Type.BOOLEAN, description: 'True once sleep, tidiness and noise are known and nothing else important is missing, or after five questions' }
-        },
-        required: ['answers', 'summary', 'done']
-    }
-};
-function liveInstruction() {
+/** The record_habits tool, offering only the habits that matter for this PG. */
+function recordHabitsFor(skip) {
+    const habitProperties = Object.fromEntries(VIBE_QUESTIONS.filter((question) => !skip.includes(question.id)).map((question) => [question.id, {
+            type: Type.NUMBER,
+            description: `${question.question} 0 = ${question.options[0].label}, 1 = ${question.options[1].label}, 2 = ${question.options[2].label}. Leave out if unknown.`
+        }]));
+    return {
+        name: 'record_habits',
+        description: 'Save what you have picked up about how they live (everything you can infer from the whole conversation) and a short English summary. Call after they share something new.',
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                answers: { type: Type.OBJECT, properties: habitProperties },
+                summary: { type: Type.STRING, description: 'One or two short sentences about how they live, in English' },
+                done: { type: Type.BOOLEAN, description: 'True once you have a good feel for their sleep, tidiness and noise and the chat has reached a natural pause, or after about eight exchanges' }
+            },
+            required: ['answers', 'summary', 'done']
+        }
+    };
+}
+function liveInstruction(topics) {
+    const skipped = VIBE_QUESTIONS.filter((question) => topics.skip.includes(question.id)).map((question) => question.question.replace(/\?$/, '').toLowerCase());
     return [
-        'You are VibeCheck, a warm voice host that helps someone moving into paying-guest housing in India find compatible roommates.',
-        'Have a short spoken conversation, about five questions, to learn their sleep time, wake time, tidiness, noise, guests, study or work schedule, kitchen use and room temperature.',
-        'Ask one question at a time, most important first: sleep, tidiness, noise. Keep every turn short: a few words acknowledging their answer, then one question. Never list options unless they seem unsure.',
-        'Speak in the language they use (Tamil, Hindi, English or a mix) and switch if they switch.',
-        'Start by speaking: greet them in one short line and ask about sleep. Only after they answer, call record_habits with all habits you can infer so far and a short English summary; never call it before their first answer.',
-        'Never ask about or record religion, caste, diet, gender, health, politics or family background, even if they mention it.',
-        'When done, thank them in one line and say you will now show rooms that match.'
+        "You are the user's PG buddy: a friendly, easy-going senior who knows PG life well, chatting with someone who is about to move into one. Behind the scenes you are getting to know how they live, so they can be matched with roommates they will get along with.",
+        "Talk like a friend, not an interviewer. Never run through a list of questions, never say words like habits, questionnaire, score or profile, and never ask two questions at once.",
+        "Open casually by asking whether they are studying or working these days, then follow their lead: react to what they say with genuine interest, a little warmth or humour, and ask natural follow-ups about their day, work or study, weekends, hobbies and how they like their space. Never assume where they are from, that they are new to Chennai, or why they chose it, and don't ask why they like the city; build only on what they actually tell you.",
+        "Work out their lifestyle from what they tell you rather than asking directly. 'Exams are coming, I'm up most nights' tells you about sleep and noise; 'I hate a messy room' tells you about tidiness; 'my friends come over to play FIFA' tells you about guests and noise.",
+        "The things you are quietly learning: sleep time, wake time, tidiness, noise they make or tolerate, how often friends visit, study or work schedule, shared kitchen use, and preferred room temperature. Sleep, tidiness and noise matter most; if one of those is still unclear late in the chat, bring it up casually in passing, never as a direct survey question.",
+        "Keep each turn short and spoken: one or two sentences. Use the language and style they use (Tamil, Hindi, English, Tanglish or Hinglish) and switch when they switch.",
+        "Never ask about or note religion, caste, diet, gender, health, politics or family background, even if they bring it up; just move on kindly.",
+        "After each thing they share that tells you something new, call record_habits with everything you can infer so far (leave out what you don't know) and a short English summary. Never call it before they have said anything.",
+        "After roughly six to eight exchanges, or once you have a good feel for sleep, tidiness and noise and the conversation reaches a natural pause, set done to true and wrap up warmly in one line, saying you'll now show them rooms where they'd fit in.",
+        ...(topics.facts.length ? [`About the PG they are looking at: ${topics.facts.join(' ')}`] : []),
+        ...(skipped.length ? [`These don't apply at this PG, so never bring them up: ${skipped.join('; ')}.`] : [])
     ].join(' ');
 }
 /** Cleans one record_habits call and merges it into what is already known. */
-export function applyHabitCall(known, args) {
+export function applyHabitCall(known, args, skip = []) {
     const input = (args && typeof args === 'object' ? args : {});
-    const found = cleanVibeAnswers(input.answers) ?? {};
+    const found = Object.fromEntries(Object.entries(cleanVibeAnswers(input.answers) ?? {}).filter(([id]) => !skip.includes(id)));
     const answers = { ...known, ...found };
-    const missing = VIBE_QUESTIONS.filter((question) => answers[question.id] === undefined).map((question) => question.id);
+    const missing = VIBE_QUESTIONS.filter((question) => !skip.includes(question.id) && answers[question.id] === undefined).map((question) => question.id);
     return { answers, summary: cleanVibeSummary(typeof input.summary === 'string' ? input.summary : null), done: input.done === true || missing.length === 0, missing };
 }
 /** Same-site browsers only (any origin in development). */
@@ -96,11 +106,25 @@ export function attachVibeLive(server) {
                 else
                     perVisitor.delete(visitor);
             });
-            void runSession(client);
+            const propertyId = new URL(req.url || '/', 'http://local').searchParams.get('propertyId') || '';
+            void runSession(client, /^[A-Za-z0-9-]{8,64}$/.test(propertyId) ? propertyId : null);
         });
     });
 }
-async function runSession(client) {
+/** Public listing data for the PG the person is looking at, if any. */
+async function loadPlace(propertyId) {
+    if (!propertyId)
+        return null;
+    return asSystem('VibeCheck live reads a public PG listing', () => prisma.pGProperty.findFirst({
+        where: { id: propertyId, status: 'ACTIVE' },
+        select: { name: true, locality: true, amenities: true, rooms: { where: { status: 'ACTIVE' }, select: { hasAc: true, foodIncluded: true, foodCharge: true } } }
+    })).then((place) => place && {
+        ...place,
+        amenities: Array.isArray(place.amenities) ? place.amenities.filter((item) => typeof item === 'string') : []
+    }).catch(() => null);
+}
+async function runSession(client, propertyId) {
+    const topics = vibeTopicsFor(await loadPlace(propertyId));
     const send = (message) => { if (client.readyState === client.OPEN)
         client.send(JSON.stringify(message)); };
     let known = {};
@@ -134,7 +158,7 @@ async function runSession(client) {
                     return { ...base, response: { error: 'unknown tool' } };
                 if (!heardFromUser)
                     return { ...base, response: { saved: false, note: 'Wait for their answer before recording habits.' } };
-                const result = applyHabitCall(known, call.args);
+                const result = applyHabitCall(known, call.args, topics.skip);
                 known = result.answers;
                 send({ type: 'habits', ...result });
                 return { ...base, response: { saved: true, still_missing: result.missing } };
@@ -148,10 +172,10 @@ async function runSession(client) {
             model: liveModel(),
             config: {
                 responseModalities: [Modality.AUDIO],
-                systemInstruction: { parts: [{ text: liveInstruction() }] },
+                systemInstruction: { parts: [{ text: liveInstruction(topics) }] },
                 inputAudioTranscription: {},
                 outputAudioTranscription: {},
-                tools: [{ functionDeclarations: [recordHabits] }]
+                tools: [{ functionDeclarations: [recordHabitsFor(topics.skip)] }]
             },
             callbacks: {
                 onmessage: onMessage,
@@ -171,7 +195,7 @@ async function runSession(client) {
         return;
     }
     send({ type: 'ready' });
-    live.sendClientContent({ turns: [{ role: 'user', parts: [{ text: 'Start now: greet me in one short line and ask your first question.' }] }], turnComplete: true });
+    live.sendClientContent({ turns: [{ role: 'user', parts: [{ text: '(The person just joined the call. Say hi like a friend in one short line and casually ask whether they are studying or working these days.)' }] }], turnComplete: true });
     client.on('message', (raw) => {
         let message;
         try {

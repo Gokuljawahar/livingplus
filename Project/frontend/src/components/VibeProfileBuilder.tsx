@@ -16,12 +16,14 @@ interface VibeProfileBuilderProps {
   answers: VibeAnswers;
   summary: string;
   onChange: (answers: VibeAnswers, summary: string) => void;
+  /** The PG being matched, so the conversation only covers what applies there. */
+  propertyId?: string;
 }
 
 type Turn = { role: 'assistant' | 'user'; text: string };
 type InterviewReply = { heard: string; answers: VibeAnswers; summary: string | null; reply: string; done: boolean };
 
-const OPENING = "Hi! Let's find roommates who fit you. When do you usually go to sleep?";
+const OPENING = "Hey! I'm your PG buddy. Studying or working these days?";
 const MAX_SECONDS = 20;
 
 /** Speaks a line in the voice that matches its script (Tamil, Hindi or English). */
@@ -49,7 +51,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
-export default function VibeProfileBuilder({ answers, summary, onChange }: VibeProfileBuilderProps) {
+export default function VibeProfileBuilder({ answers, summary, onChange, propertyId }: VibeProfileBuilderProps) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [started, setStarted] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -71,7 +73,7 @@ export default function VibeProfileBuilder({ answers, summary, onChange }: VibeP
   const startVoice = async () => {
     setError('');
     setMode('live');
-    if (await live.start()) return;
+    if (await live.start(propertyId)) return;
     // Live voice unavailable: fall back to tap-to-talk turns.
     setMode('tap');
     setError('Live voice is busy right now, so tap the mic for each answer instead.');
@@ -103,7 +105,7 @@ export default function VibeProfileBuilder({ answers, summary, onChange }: VibeP
     setThinking(true);
     if (shown) setTurns([...history, { role: 'user', text: shown }]);
     try {
-      const result = (await api.post('/pg/vibecheck/interview', { history, answers, ...input })).data as InterviewReply;
+      const result = (await api.post('/pg/vibecheck/interview', { history, answers, ...(propertyId ? { propertyId } : {}), ...input })).data as InterviewReply;
       const heard = result.heard || shown;
       setTurns([...history, ...(heard ? [{ role: 'user' as const, text: heard }] : []), { role: 'assistant', text: result.reply }]);
       onChange(result.answers, result.summary ?? summary);
@@ -185,7 +187,7 @@ export default function VibeProfileBuilder({ answers, summary, onChange }: VibeP
           <div className="flex items-center justify-between border-b border-hairline px-4 py-2">
             <p className="inline-flex items-center gap-2 text-sm font-medium text-navy-900">
               <span className={`h-2.5 w-2.5 rounded-full ${live.status === 'speaking' ? 'animate-pulse bg-amber-500' : live.status === 'listening' ? 'animate-pulse bg-positive' : 'bg-hairline'}`} aria-hidden="true" />
-              {live.status === 'connecting' ? 'Connecting…' : live.status === 'speaking' ? 'VibeCheck is speaking' : live.status === 'listening' ? 'Listening, just talk' : 'Call ended'}
+              {live.status === 'connecting' ? 'Connecting…' : live.status === 'speaking' ? 'Your PG buddy is talking' : live.status === 'listening' ? 'Listening, just talk' : 'Chat ended'}
             </p>
             {live.status !== 'ended' && live.status !== 'failed' && (
               <button type="button" onClick={live.end} className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-negative hover:bg-negative-bg">
@@ -195,7 +197,7 @@ export default function VibeProfileBuilder({ answers, summary, onChange }: VibeP
           </div>
           <div className="max-h-64 space-y-2 overflow-y-auto px-4 py-3" aria-live="polite">
             {live.status === 'connecting' && (
-              <p className="inline-flex items-center gap-2 text-sm text-muted"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Starting a voice call with VibeCheck…</p>
+              <p className="inline-flex items-center gap-2 text-sm text-muted"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Calling your PG buddy…</p>
             )}
             {live.turns.map((turn, index) => (
               <p key={index} className={`w-fit max-w-[85%] rounded-[14px] px-3 py-2 text-[15px] ${turn.role === 'assistant' ? 'bg-surface text-ink' : 'ml-auto bg-navy-900 text-white'}`}>
@@ -222,8 +224,8 @@ export default function VibeProfileBuilder({ answers, summary, onChange }: VibeP
           >
             <Mic className="h-7 w-7 text-amber-500" aria-hidden="true" />
           </button>
-          <p className="font-medium text-navy-900">Talk to VibeCheck</p>
-          <p className="text-sm text-muted">Tamil, Hindi or English · about a minute</p>
+          <p className="font-medium text-navy-900">Chat with your PG buddy</p>
+          <p className="text-sm text-muted">Just talk, in Tamil, Hindi or English. We\u2019ll find roommates like you.</p>
           <button type="button" onClick={() => { setMode('tap'); begin(false); setTyping(true); }} className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-navy-700 hover:underline">
             <Keyboard className="h-4 w-4" aria-hidden="true" /> Type instead
           </button>
@@ -307,7 +309,7 @@ export default function VibeProfileBuilder({ answers, summary, onChange }: VibeP
 
       {learned.length > 0 && (
         <div>
-          <p className="text-sm font-medium text-navy-900">{done ? 'Your vibe' : 'What I’ve learned'}</p>
+          <p className="text-sm font-medium text-navy-900">{done ? 'Your vibe' : 'Picking up on'}</p>
           {summary && <p className="mt-0.5 text-sm text-muted">{summary}</p>}
           <ul className="mt-2 flex flex-wrap gap-1.5">
             {learned.map((item) => (

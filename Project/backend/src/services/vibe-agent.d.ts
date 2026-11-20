@@ -77,6 +77,10 @@ export declare function vibeInterviewTurn(input: {
         mimeType: string;
         data: string;
     };
+    topics?: {
+        skip: string[];
+        facts: string[];
+    };
 }): Promise<VibeInterviewTurn>;
 declare let agentTextOverride: ((prompt: string) => Promise<string>) | null;
 /** Test hook: replace the matcher agent run with canned model text (null restores). */

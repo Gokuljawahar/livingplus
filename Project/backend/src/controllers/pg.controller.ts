@@ -21,7 +21,7 @@ import { asSystem } from '../db/context.js';
 import { guestPhoneFrom } from '../utils/guest-token.js';
 import { checkKycDocument } from '../services/kyc-check.js';
 import { buildVibeProfile, vibeInterviewTurn, scoreVibeRooms } from '../services/vibe-agent.js';
-import { cleanServiceSettings, cleanVibeAnswers, cleanVibeSummary, isStaffRole, isBloodGroup, isGenderPolicy, isKycType, isValidUpiId, LIMITS, MESSAGES, vibeMatch, type VibeAnswers } from '@livingplus/shared';
+import { cleanServiceSettings, cleanVibeAnswers, cleanVibeSummary, isStaffRole, isBloodGroup, isGenderPolicy, isKycType, isValidUpiId, LIMITS, MESSAGES, vibeMatch, type VibeAnswers, vibeTopicsFor } from '@livingplus/shared';
 import { cancelBookingBody, checkOutTenantBody, createMaintenanceTicketBody, createOwnerExpenseBody, createPropertyBody, createPropertyStaffBody, createRoomBody, createTenantTicketBody, markDepositRefundedBody, proposeElectricityBillBody, sendRentRemindersBody, updateBedStatusBody, updateBookingStatusBody, updateMaintenanceStatusBody, updatePropertyBody, updateResidentProfileBody, updateTenantProfileBody } from '../validation/request.schemas.js';
 
 function phoneVariants(phone: string): string[] {
@@ -759,7 +759,13 @@ export const vibeInterviewStep = async (req: Request, res: Response): Promise<an
   }
   if (!text && !audio) return res.status(400).json({ message: 'Say or type your answer first' });
   try {
-    res.json(await vibeInterviewTurn({ history, known: cleanVibeAnswers(body.answers) ?? {}, ...(text ? { text } : {}), ...(audio ? { audio } : {}) }));
+    const propertyId = typeof body.propertyId === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(body.propertyId) ? body.propertyId : '';
+    const place = propertyId ? await db.pGProperty.findFirst({
+      where: { id: propertyId, status: 'ACTIVE' },
+      select: { name: true, locality: true, amenities: true, rooms: { where: { status: 'ACTIVE' }, select: { hasAc: true, foodIncluded: true, foodCharge: true } } }
+    }) : null;
+    const topics = vibeTopicsFor(place && { ...place, amenities: Array.isArray(place.amenities) ? place.amenities.filter((item: unknown): item is string => typeof item === 'string') : [] });
+    res.json(await vibeInterviewTurn({ history, known: cleanVibeAnswers(body.answers) ?? {}, topics, ...(text ? { text } : {}), ...(audio ? { audio } : {}) }));
   } catch (error: any) {
     if (error?.message === 'VIBE_AI_UNAVAILABLE') return res.status(503).json({ code: 'VIBE_AI_UNAVAILABLE', message: 'Voice VibeCheck is not available right now. Answer the quick questions instead.' });
     logger.warn({ err: error }, 'VibeCheck interview turn failed');

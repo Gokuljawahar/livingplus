@@ -29,18 +29,18 @@ describe('VibeProfileBuilder (voice VibeCheck)', () => {
     } });
     render(<Harness />);
     await userEvent.click(screen.getByRole('button', { name: /Type instead/ }));
-    expect(screen.getByText(/When do you usually go to sleep\?/)).toBeInTheDocument();
+    expect(screen.getByText(/Studying or working these days\?/)).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText('Your answer'), 'Naan 1 mani varaikkum padippen');
     await userEvent.click(screen.getByRole('button', { name: 'Send answer' }));
 
     expect(api.post).toHaveBeenCalledWith('/pg/vibecheck/interview', {
-      history: [{ role: 'assistant', text: "Hi! Let's find roommates who fit you. When do you usually go to sleep?" }],
+      history: [{ role: 'assistant', text: "Hey! I'm your PG buddy. Studying or working these days?" }],
       answers: {},
       text: 'Naan 1 mani varaikkum padippen'
     });
     expect(await screen.findByText('Nice! How tidy do you keep your room?')).toBeInTheDocument();
     expect(screen.getByText('Night owl who studies late.')).toBeInTheDocument();
-    expect(screen.getByText('What I’ve learned')).toBeInTheDocument();
+    expect(screen.getByText('Picking up on')).toBeInTheDocument();
   });
 
   it('keeps the conversation going after an error and offers the quick questions', async () => {
@@ -58,7 +58,7 @@ describe('VibeProfileBuilder (voice VibeCheck)', () => {
     render(<Harness />);
     await userEvent.click(screen.getByRole('button', { name: 'Start voice VibeCheck' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('tap the mic for each answer instead');
-    expect(screen.getByText(/When do you usually go to sleep\?/)).toBeInTheDocument();
+    expect(screen.getByText(/Studying or working these days\?/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tap to answer' })).toBeInTheDocument();
   });
 });

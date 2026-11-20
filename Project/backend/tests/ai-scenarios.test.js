@@ -3348,6 +3348,39 @@ describe('VibeCheck agents on Google ADK', () => {
             v.agent.setVibeInterviewerForTests(null);
         }
     });
+    it('only talks about what applies at the PG: no kitchen or AC questions where there is none', async () => {
+        const shared = await import('@livingplus/shared');
+        const live = await import('../src/services/vibe-live.js');
+        const noKitchen = shared.vibeTopicsFor({ name: 'Palm Grove', locality: 'Perungudi', amenities: ['Wi-Fi', 'Meals'], rooms: [{ hasAc: false, foodIncluded: true }] });
+        assert.deepEqual(noKitchen.skip, ['kitchen', 'cooling']);
+        assert.ok(noKitchen.facts.includes('There is no shared kitchen for residents.'));
+        assert.deepEqual(shared.vibeTopicsFor({ amenities: ['Shared kitchen'], rooms: [{ hasAc: true }] }).skip, []);
+        const result = live.applyHabitCall({}, { answers: { sleep: 2, kitchen: 2, cooling: 0 }, summary: 'Night owl.', done: false }, noKitchen.skip);
+        assert.deepEqual(result.answers, { sleep: 2 }, 'kitchen and cooling answers are dropped where they do not apply');
+        assert.ok(!result.missing.includes('kitchen') && !result.missing.includes('cooling'));
+        let seen = null;
+        v.agent.setVibeInterviewerForTests(async (input) => {
+            seen = input;
+            return { heard: 'Working', answers: { sleep: 1, wake: null, tidiness: null, noise: null, guests: null, kitchen: 2, schedule: null, cooling: null }, summary: 'Works days.', reply: 'Nice!', done: false };
+        });
+        try {
+            const prop = await prisma.pGProperty.create({ data: { name: 'No Kitchen House', address: '9, Test Road', locality: 'Adyar', city: 'Chennai', genderPolicy: 'ANY', amenities: ['Wi-Fi'], houseRules: [], status: 'ACTIVE' } });
+            try {
+                const res = respond();
+                await v.pg.vibeInterviewStep({ body: { propertyId: prop.id, text: 'Working at a bank' } }, res);
+                assert.equal(res.statusCode, 200);
+                assert.deepEqual(res.body.answers, { sleep: 1 }, 'kitchen answer dropped for a PG without a kitchen');
+                assert.ok(seen.topics.skip.includes('kitchen'));
+                assert.ok(seen.topics.facts.some((fact) => fact.includes('No Kitchen House')));
+            }
+            finally {
+                await prisma.pGProperty.delete({ where: { id: prop.id } });
+            }
+        }
+        finally {
+            v.agent.setVibeInterviewerForTests(null);
+        }
+    });
     it('cleans live VibeCheck habit calls and only accepts same-site browsers', async () => {
         const live = await import('../src/services/vibe-live.js');
         const first = live.applyHabitCall({ guests: 1 }, { answers: { sleep: 2, tidiness: 0, noise: 7 }, summary: 'Night owl, very tidy.', done: false });

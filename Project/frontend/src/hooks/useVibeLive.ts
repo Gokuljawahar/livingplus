@@ -29,8 +29,9 @@ function downsample(input: Float32Array, rate: number): Uint8Array {
   return new Uint8Array(pcm.buffer);
 }
 
-export function liveUrl(): string {
-  return `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/pg/vibecheck/live`;
+export function liveUrl(propertyId?: string): string {
+  const query = propertyId ? `?propertyId=${encodeURIComponent(propertyId)}` : '';
+  return `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/pg/vibecheck/live${query}`;
 }
 
 export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
@@ -105,7 +106,7 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
   useEffect(() => stop, [stop]);
 
   /** Opens the live session. Resolves false if it could not start (caller falls back). */
-  const start = useCallback(async (): Promise<boolean> => {
+  const start = useCallback(async (propertyId?: string): Promise<boolean> => {
     setError('');
     setTurns([]);
     doneRef.current = false;
@@ -133,7 +134,7 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     micRef.current = { stream, ctx: micCtx, node };
 
     const opened = await new Promise<boolean>((resolve) => {
-      const socket = new WebSocket(liveUrl());
+      const socket = new WebSocket(liveUrl(propertyId));
       socketRef.current = socket;
       const timeout = window.setTimeout(() => resolve(false), 12000);
       socket.onmessage = (event) => {

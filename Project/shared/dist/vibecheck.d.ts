@@ -34,3 +34,23 @@ export declare function vibeMatch(person: VibeAnswers, roommates: VibeAnswers[])
 export declare const VIBE_SUMMARY_MAX = 300;
 /** A one- or two-sentence habits-only summary, trimmed and single-line. Null when empty. */
 export declare function cleanVibeSummary(input: unknown): string | null;
+/** What VibeCheck knows about the PG being matched (public listing data only). */
+export interface VibePlace {
+    name?: string;
+    locality?: string;
+    amenities?: string[];
+    rooms?: {
+        hasAc?: boolean | null;
+        foodIncluded?: boolean | null;
+        foodCharge?: number | null;
+    }[];
+}
+/**
+ * Which lifestyle topics matter for this PG. A PG with no shared kitchen makes
+ * kitchen use irrelevant; with no AC rooms, room temperature is not shared.
+ * `facts` describe the PG for the conversation; `skip` lists habit ids to leave out.
+ */
+export declare function vibeTopicsFor(place: VibePlace | null | undefined): {
+    skip: string[];
+    facts: string[];
+};
