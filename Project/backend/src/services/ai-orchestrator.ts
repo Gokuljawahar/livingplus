@@ -24,8 +24,8 @@ import { createEvent, createRunConfig, FunctionTool, InMemoryRunner, isLlmCallsL
 import type { Content, Schema } from '@google/genai';
 import { db } from '../db/index.js';
 import { actorFromRequest, parseToolArgs, toolCatalogue, toolDefinitionsFor, type Actor } from './ai-tools.js';
-import { modelFailure, type ModelStep, type ModelTurn, type ToolDefinition } from './ai-provider.js';
-import { AgentModelLlm, generateModelStep as generateStep, INVALID_ARGS, stripEmptyTextParts } from './adk-adapter.js';
+import { modelFailure, type ModelStep, type ModelTurn } from './ai-provider.js';
+import { AgentModelLlm, INVALID_ARGS, stripEmptyTextParts } from './adk-adapter.js';
 import { loadThreadState, saveThreadState, type ChatThreadState, type PendingAction } from './ai-checkpointer.js';
 import { confirmationSurface, surfacesForOutcomes, type A2uiMessage } from './a2ui.js';
 import { logger } from '../utils/logger.js';

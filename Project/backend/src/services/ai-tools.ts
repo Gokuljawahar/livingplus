@@ -232,7 +232,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ property_id: z.string().optional() }),
     requiresConfirmation: false,
     roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args, deps) => {
+    execute: async (actor, args) => {
       const requestedPropertyId = String(args.property_id || actor.propertyId || '');
       if (!requestedPropertyId) throw new Error('PROPERTY_REQUIRED');
       if (['PG_OWNER', 'PG_WARDEN'].includes(actor.role) && !actor.propertyIds.includes(requestedPropertyId)) throw new Error('FORBIDDEN');
@@ -250,7 +250,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ property_id: z.string(), room_id: z.string().optional() }),
     requiresConfirmation: false,
     roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args, deps) => {
+    execute: async (actor, args) => {
       const requestedPropertyId = actor.role === 'PG_TENANT' && actor.propertyId ? actor.propertyId : String(args.property_id || '');
       if (!requestedPropertyId) throw new Error('PROPERTY_REQUIRED');
       if (['PG_OWNER', 'PG_WARDEN'].includes(actor.role) && !actor.propertyIds.includes(requestedPropertyId)) throw new Error('FORBIDDEN');
@@ -325,7 +325,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ booking_ref: z.string(), phone: z.string() }),
     requiresConfirmation: false,
     roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args, deps) => {
+    execute: async (actor, args) => {
       // Guests look up by reference and phone (checked below), across PGs by design.
       const booking: any = await asSystem('guest booking status by reference and phone', () => db.pGBooking.findUnique({
         where: { bookingRef: String(args.booking_ref) },
@@ -400,7 +400,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ property_id: z.string().describe('Optional; the current resident PG host is used automatically.').optional(), title: z.string(), description: z.string(), category: z.string().optional(), image_key: z.string().optional() }),
     requiresConfirmation: true,
     roles: ['PG_TENANT'],
-    execute: async (actor, args, deps) => {
+    execute: async (actor, args) => {
       const propertyId = actor.propertyId;
       if (!propertyId || !actor.propertyIds.includes(propertyId) || (args.property_id && String(args.property_id) !== propertyId) || !actor.phones.length) throw new Error('FORBIDDEN');
       const tenant = await db.pGTenant.findFirst({ where: { propertyId, phone: { in: actor.phones }, status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } }, select: { id: true, bedId: true } });
@@ -424,7 +424,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ request_type: z.enum(['SWAP', 'MOVE']), to_bed_id: z.string().describe('Required for MOVE: a vacant bed id from find_room_change_matches. Never set for SWAP.').optional(), preferences: z.record(z.string(), z.unknown()).describe('Swap preferences such as floor or room type; unstated means flexible.').optional(), reason: z.string().optional() }),
     requiresConfirmation: true,
     roles: ['PG_TENANT'],
-    execute: async (actor, args, deps) => {
+    execute: async (actor, args) => {
       const { propertyId, tenant } = await residentRoomTenant(actor);
       const requestType = str(args.request_type).toUpperCase();
       if (requestType !== 'SWAP' && requestType !== 'MOVE') throw new Error('INVALID_REQUEST_TYPE');
@@ -544,7 +544,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ my_request_id: z.string(), their_request_id: z.string() }),
     requiresConfirmation: true,
     roles: ['PG_TENANT'],
-    execute: async (actor, args, deps) => {
+    execute: async (actor, args) => {
       const { propertyId, tenant } = await residentRoomTenant(actor);
       const mine = await db.pGRoomChangeRequest.findUnique({ where: { id: String(args.my_request_id) } });
       if (!mine || mine.propertyId !== propertyId || mine.requesterId !== tenant.id) throw new Error('FORBIDDEN');
@@ -581,7 +581,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ request_id: z.string(), decision: z.enum(['ACCEPT', 'DECLINE']) }),
     requiresConfirmation: true,
     roles: ['PG_TENANT'],
-    execute: async (actor, args, deps) => {
+    execute: async (actor, args) => {
       const { propertyId, tenant } = await residentRoomTenant(actor);
       const row = await db.pGRoomChangeRequest.findUnique({ where: { id: String(args.request_id) } });
       if (!row || row.propertyId !== propertyId || row.partnerId !== tenant.id) throw new Error('FORBIDDEN');
@@ -604,7 +604,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ status: z.string().describe('Optional status filter such as ACCEPTED or PENDING_MATCH.').optional() }),
     requiresConfirmation: false,
     roles: ['PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args = {}, deps) => {
+    execute: async (actor, args = {}) => {
       if (!actor.propertyIds.length) throw new Error('FORBIDDEN');
       const status = str(args.status).toUpperCase();
       const rows = await db.pGRoomChangeRequest.findMany({
@@ -637,7 +637,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ request_id: z.string(), decision: z.enum(['APPROVE_AND_MOVE', 'DECLINE']), note: z.string().optional() }),
     requiresConfirmation: true,
     roles: ['PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args, deps) => {
+    execute: async (actor, args) => {
       const row = await db.pGRoomChangeRequest.findUnique({
         where: { id: String(args.request_id) },
         include: { requester: true, partner: true }
@@ -715,7 +715,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ property_id: z.string().optional(), period: z.string().optional() }),
     requiresConfirmation: false,
     roles: ['PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args, deps) => {
+    execute: async (actor, args) => {
       const scopedPropertyId = args.property_id ? await resolveScopedPropertyId(actor, args.property_id) : null;
       if (args.property_id && !scopedPropertyId) throw new Error('FORBIDDEN');
       const scope = scopedPropertyId ? [scopedPropertyId] : actor.propertyIds;
@@ -740,7 +740,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ property_id: z.string().optional(), period: z.string().optional() }),
     requiresConfirmation: false,
     roles: ['PG_OWNER'],
-    execute: async (actor, args, deps) => {
+    execute: async (actor, args) => {
       const scopedPropertyId = args.property_id ? await resolveScopedPropertyId(actor, args.property_id) : null;
       if (args.property_id && !scopedPropertyId) throw new Error('FORBIDDEN');
       const scope = scopedPropertyId ? [scopedPropertyId] : actor.propertyIds;
@@ -761,7 +761,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ ticket_id: z.string(), status: z.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED']) }),
     requiresConfirmation: false,
     roles: ['PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args, deps) => {
+    execute: async (actor, args) => {
       const ticket = await db.pGMaintenanceTicket.findUnique({ where: { id: String(args.ticket_id) } });
       if (!ticket || !actor.propertyIds.includes(ticket.propertyId)) throw new Error('FORBIDDEN');
       const updated = await db.pGMaintenanceTicket.update({ where: { id: ticket.id }, data: { status: String(args.status) } });
@@ -775,7 +775,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ property_id: z.string() }),
     requiresConfirmation: false,
     roles: ['PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args = {}, deps) => {
+    execute: async (actor, args = {}) => {
       const propertyId = await resolveScopedPropertyId(actor, args.property_id);
       if (!propertyId) throw new Error('FORBIDDEN');
       const staff = await db.pGPropertyAccess.findMany({
@@ -795,7 +795,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ ticket_id: z.string(), staff_name: z.string() }),
     requiresConfirmation: true,
     roles: ['PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args = {}, deps) => {
+    execute: async (actor, args = {}) => {
       const ticket = await db.pGMaintenanceTicket.findUnique({ where: { id: String(args.ticket_id) } });
       if (!ticket || !actor.propertyIds.includes(ticket.propertyId)) throw new Error('FORBIDDEN');
       const wanted = str(args.staff_name).trim().toLowerCase();
@@ -818,7 +818,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ property_id: z.string().optional(), period: z.string().optional(), force: bool().optional() }),
     requiresConfirmation: true,
     roles: ['PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args = {}, deps) => {
+    execute: async (actor, args = {}) => {
       const scopedPropertyId = args.property_id ? await resolveScopedPropertyId(actor, args.property_id) : null;
       if (args.property_id && !scopedPropertyId) throw new Error('FORBIDDEN');
       const scope = scopedPropertyId ? [scopedPropertyId] : actor.propertyIds;
@@ -837,7 +837,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ property_id: z.string(), title: z.string(), message: z.string() }),
     requiresConfirmation: true,
     roles: ['PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args = {}, deps) => {
+    execute: async (actor, args = {}) => {
       const propertyId = await resolveScopedPropertyId(actor, args.property_id);
       if (!propertyId) throw new Error('FORBIDDEN');
       const residents = await db.pGTenant.findMany({
@@ -862,7 +862,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ property_id: z.string(), category: z.string().optional(), amount: num(), spent_on: z.string().optional(), note: z.string().optional() }),
     requiresConfirmation: true,
     roles: ['PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args = {}, deps) => {
+    execute: async (actor, args = {}) => {
       if (!actor.propertyIds.includes(String(args.property_id))) throw new Error('FORBIDDEN');
       const expense = await createExpense(db, actor.userId, {
         propertyId: String(args.property_id),
@@ -880,7 +880,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ property_id: z.string().optional(), period: z.string().optional() }),
     requiresConfirmation: false,
     roles: ['PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args = {}, deps) => {
+    execute: async (actor, args = {}) => {
       const scope = args.property_id ? [String(args.property_id)] : actor.propertyIds;
       if (args.property_id && !actor.propertyIds.includes(String(args.property_id))) throw new Error('FORBIDDEN');
       const { total, byCategory } = await listExpenses(db, scope, typeof args.period === 'string' ? args.period : undefined);
@@ -893,7 +893,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ property_id: z.string(), period: z.string(), total_amount: num() }),
     requiresConfirmation: false,
     roles: ['PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args = {}, deps) => {
+    execute: async (actor, args = {}) => {
       if (!actor.propertyIds.includes(String(args.property_id))) throw new Error('FORBIDDEN');
       const { proposeElectricityBill: propose } = await import('./pg-billing.js');
       const bill = await propose(db, actor.userId, {
@@ -913,7 +913,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ bill_id: z.string() }),
     requiresConfirmation: true,
     roles: ['PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args = {}, deps) => {
+    execute: async (actor, args = {}) => {
       const { approveElectricityBill: approve } = await import('./pg-billing.js');
       const result = await approve(db, actor.userId, String(args.bill_id), actor.propertyIds);
       return { bill_id: result.bill.id, status: result.bill.status, entries: result.entries };
@@ -925,7 +925,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ opt_out: bool() }),
     requiresConfirmation: true,
     roles: ['PG_TENANT'],
-    execute: async (actor, args = {}, deps) => {
+    execute: async (actor, args = {}) => {
       const { setMealPreference } = await import('./pg-billing.js');
       return setMealPreference(db, actor, args.opt_out === true);
     }
@@ -936,7 +936,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     schema: toolArgs({ recipient_phone: z.string(), template: z.enum(['booking_received', 'booking_approved', 'booking_rejected', 'rent_due', 'check_in_reminder']) }),
     requiresConfirmation: true,
     roles: ['PG_OWNER', 'PG_WARDEN'],
-    execute: async (actor, args, deps) => {
+    execute: async (actor, args) => {
       if (process.env.ENABLE_WHATSAPP_CLOUD_API !== 'true') {
         return { sent: false, skipped: 'channel-disabled' };
       }
