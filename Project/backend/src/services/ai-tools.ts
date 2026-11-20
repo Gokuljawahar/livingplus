@@ -4,8 +4,7 @@
 // model must never fabricate fields the tools did not return.
 
 import { randomUUID } from 'crypto';
-import { asSystem } from '../db/context.js';
-import { prisma } from '../app.js';
+import { asSystem, db } from '../db/index.js';
 import { consumePhoneToken } from '../controllers/pg-auth.controller.js';
 import {
   ACTIVE_ROOM_CHANGE_STATUSES,
@@ -23,10 +22,6 @@ import { periodOf } from '../utils/app-time.js';
 import { z } from 'zod';
 import { CHENNAI_LANDMARKS, distanceKm, findLandmark } from '@livingplus/shared';
 import { semanticScores, semanticSearchEnabled } from './semantic-search.js';
-
-const db = new Proxy({} as Record<string, any>, {
-  get: (_target, property) => (prisma as any)[property]
-});
 
 export interface Actor {
   userId: string | null;
@@ -811,7 +806,7 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
       const named = staff.filter((member: any) => (member.user?.name || '').toLowerCase().includes(wanted));
       if (!wanted || !named.length) throw new Error(`STAFF_NOT_FOUND: wardens and housekeeping here are ${staff.map((member: any) => member.user?.name).filter(Boolean).join(', ') || 'none yet'}`);
       if (named.length > 1) throw new Error(`STAFF_AMBIGUOUS: did you mean ${named.map((member: any) => member.user?.name).join(' or ')}?`);
-      const chosen = named[0];
+      const chosen = named[0]!;
       await db.pGMaintenanceTicket.update({ where: { id: ticket.id }, data: { assignedTo: chosen.userId } });
       logAudit(ticket.propertyId, actor.userId, 'TICKET_ASSIGNED_VIA_AI', 'PGMaintenanceTicket', ticket.id, chosen.role);
       return { ticket_id: ticket.id, title: ticket.title, assigned_to: chosen.user?.name, role: chosen.role };

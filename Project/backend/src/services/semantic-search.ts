@@ -10,14 +10,9 @@
 //
 // Enabled with ENABLE_SEMANTIC_SEARCH=true and AI_EMBEDDING_MODEL.
 import { createHash } from 'crypto';
-import { asSystem } from '../db/context.js';
-import { prisma } from '../app.js';
+import { asSystem, db } from '../db/index.js';
 import { createEmbeddings, embeddingModelId } from './ai-embeddings.js';
 import { logger } from '../utils/logger.js';
-
-const db = new Proxy({} as Record<string, any>, {
-  get: (_target, property) => (prisma as any)[property]
-});
 
 export const semanticSearchEnabled = (): boolean => process.env.ENABLE_SEMANTIC_SEARCH === 'true' && embeddingModelId().includes(':');
 
@@ -63,7 +58,7 @@ export function hasVectorColumn(): Promise<boolean> {
   if (!vectorColumn) {
     vectorColumn = db.$queryRawUnsafe(
       `SELECT 1 FROM information_schema.columns WHERE table_name = 'PGProperty' AND column_name = 'searchVector'`
-    ).then((rows: unknown[]) => rows.length > 0).catch(() => false);
+    ).then((rows) => Array.isArray(rows) && rows.length > 0).catch(() => false);
   }
   return vectorColumn!;
 }

@@ -13,7 +13,7 @@ import type { Duplex } from 'stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type, type FunctionDeclaration, type FunctionResponse, type LiveServerMessage, type Session } from '@google/genai';
 import { cleanVibeAnswers, cleanVibeSummary, VIBE_QUESTIONS, vibeTopicsFor, type VibeAnswers } from '@livingplus/shared';
-import { prisma } from '../app.js';
+import { prisma } from '../db/index.js';
 import { asSystem } from '../db/context.js';
 import { aiEnabled, resolveGoogleAuth } from './ai-provider.js';
 import { logger } from '../utils/logger.js';

@@ -8,7 +8,7 @@
 // owner first gets a one-minute pass (a short-lived signed token) and the
 // voice connection presents it.
 import jwt from 'jsonwebtoken';
-import { prisma } from '../app.js';
+import { prisma } from '../db/index.js';
 import { asSystem } from '../db/context.js';
 import { getJwtSecret } from '../utils/auth-config.js';
 import { pulseStats } from '../controllers/insights.controller.js';

@@ -4,11 +4,7 @@
 // schemas or connection pools. Rows left by earlier versions hold a bare
 // history array (or the "[]" default) and load as threads without pauses.
 import type { Content } from '@google/genai';
-import { prisma } from '../app.js';
-
-const db = new Proxy({} as Record<string, any>, {
-  get: (_target, property) => (prisma as any)[property]
-});
+import { db } from '../db/index.js';
 
 /** A sensitive call the thread is paused on, bound to who may confirm it. */
 export interface PendingAction {

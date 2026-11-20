@@ -1,9 +1,5 @@
-import { prisma } from '../app.js';
+import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
-
-const db = new Proxy({} as Record<string, any>, {
-  get: (_target, property) => (prisma as any)[property]
-});
 
 // Fire-and-forget: audit writes must never break an operation.
 export function logAudit(

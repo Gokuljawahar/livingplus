@@ -22,16 +22,12 @@
 import { randomBytes } from 'crypto';
 import { BaseLlm, createEvent, createRunConfig, FunctionTool, InMemoryRunner, isLlmCallsLimitExceededError, LlmAgent, type LlmRequest, type LlmResponse } from '@google/adk';
 import type { Content, Schema } from '@google/genai';
-import { prisma } from '../app.js';
+import { db } from '../db/index.js';
 import { actorFromRequest, parseToolArgs, toolCatalogue, toolDefinitionsFor, type Actor } from './ai-tools.js';
 import { modelFailure, modelTimeoutMs, type ModelStep, type ModelTurn, type ToolDefinition } from './ai-provider.js';
 import { loadThreadState, saveThreadState, type ChatThreadState, type PendingAction } from './ai-checkpointer.js';
 import { confirmationSurface, surfacesForOutcomes, type A2uiMessage } from './a2ui.js';
 import { logger } from '../utils/logger.js';
-
-const db = new Proxy({} as Record<string, any>, {
-  get: (_target, property) => (prisma as any)[property]
-});
 
 const MAX_ITERATIONS = 6;
 /** History entries (user/model turns) sent to the model. */

@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { prisma } from '../app.js';
+import { prisma } from '../db/index.js';
 import { actorFromRequest, parseToolArgs, toolCatalogue } from '../services/ai-tools.js';
 import { INVALID_REQUEST } from '../utils/validate.js';
 import { currentUser } from './pg.controller.js';

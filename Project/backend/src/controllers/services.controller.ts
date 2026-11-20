@@ -1,14 +1,13 @@
 // Meal orders and housekeeping bookings (buildathon answers Q1/Q4), plus the
 // per-PG service switches owners use to turn them on (the "modular console").
 import type { Request, Response } from 'express';
-import { prisma } from '../app.js';
+import type { Prisma } from '@prisma/client';
+import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
 import { logAudit } from '../services/pg-audit.js';
 import { appTimeZone } from '../utils/app-time.js';
 import { accessiblePropertyIds, canManageProperty, currentUser, ownStay } from './pg.controller.js';
 import { cleanServiceSettings, isSlotFor, ORDER_DAYS_AHEAD, type ServiceSettings } from '@livingplus/shared';
-
-const db = new Proxy({} as Record<string, any>, { get: (_target, property) => (prisma as any)[property] });
 
 /** "YYYY-MM-DD" for a date in the app time zone. */
 const dayKey = (at: Date): string => new Intl.DateTimeFormat('en-CA', { timeZone: appTimeZone(), year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
@@ -29,7 +28,7 @@ export const updateServiceSettings = async (req: Request, res: Response): Promis
   if (!await canManageProperty(req, propertyId, ['OWNER'])) return res.status(403).json({ message: 'Only the owner can change services' });
   try {
     const settings = cleanServiceSettings(req.body?.settings);
-    await db.pGProperty.update({ where: { id: propertyId }, data: { serviceSettings: settings } });
+    await db.pGProperty.update({ where: { id: propertyId }, data: { serviceSettings: settings as unknown as Prisma.InputJsonValue } });
     logAudit(propertyId, currentUser(req)?.id ?? null, 'SERVICES_UPDATED', 'PGProperty', propertyId, JSON.stringify({ meals: settings.mealOrders.enabled, housekeeping: settings.housekeeping.enabled }));
     res.json(settings);
   } catch (error) {
@@ -141,8 +140,9 @@ export const updateServiceOrderStatus = async (req: Request, res: Response): Pro
   if (!['CONFIRMED', 'DONE', 'CANCELLED'].includes(status)) return res.status(400).json({ message: 'Invalid status' });
   try {
     const order = await db.pGServiceOrder.findUnique({ where: { id: String(req.params.orderId) } });
-    const roles = Object.entries(TYPES_BY_ROLE).filter(([, types]) => types.includes(order?.type)).map(([role]) => role);
-    if (!order || !await canManageProperty(req, order.propertyId, roles)) return res.status(404).json({ message: 'Order not found' });
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+    const roles = Object.entries(TYPES_BY_ROLE).filter(([, types]) => types.includes(order.type)).map(([role]) => role);
+    if (!await canManageProperty(req, order.propertyId, roles)) return res.status(404).json({ message: 'Order not found' });
     if (['DONE', 'CANCELLED'].includes(order.status)) return res.status(409).json({ message: 'This order is already closed' });
     const updated = await db.pGServiceOrder.update({ where: { id: order.id }, data: { status } });
     res.json(updated);

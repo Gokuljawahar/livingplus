@@ -8,7 +8,7 @@
 // - Actions that need confirmation are confirmed by replying YES (or NO).
 // - Every webhook is checked against Meta's X-Hub-Signature-256.
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { prisma } from '../app.js';
+import { prisma } from '../db/index.js';
 import { asSystem, runAsDbUser } from '../db/context.js';
 import { logger } from '../utils/logger.js';
 

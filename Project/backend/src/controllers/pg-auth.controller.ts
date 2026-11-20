@@ -3,7 +3,7 @@ import { issueGuestToken } from '../utils/guest-token.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { createHash, randomInt, randomUUID, timingSafeEqual } from 'crypto';
-import { prisma } from '../app.js';
+import { prisma } from '../db/index.js';
 import { getJwtSecret } from '../utils/auth-config.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
 import { logger } from '../utils/logger.js';

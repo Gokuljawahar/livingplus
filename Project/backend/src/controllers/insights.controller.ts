@@ -8,7 +8,7 @@
 //   rules stand in when AI is off. Plate counts only, never names.
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { prisma } from '../app.js';
+import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
 import { accessiblePropertyIds, currentUser } from './pg.controller.js';
 import { issueBriefingPass } from '../services/owner-briefing.js';
@@ -16,7 +16,6 @@ import { vibeLiveEnabled } from '../services/vibe-live.js';
 import { aiEnabled, generateStructured } from '../services/ai-provider.js';
 import { cleanVibeAnswers } from '@livingplus/shared';
 
-const db = new Proxy({} as Record<string, any>, { get: (_target, property) => (prisma as any)[property] });
 const DAY = 24 * 60 * 60 * 1000;
 const rupees = (amount: number) => `₹${Math.round(amount).toLocaleString('en-IN')}`;
 

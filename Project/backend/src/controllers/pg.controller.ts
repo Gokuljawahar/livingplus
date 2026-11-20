@@ -1,7 +1,8 @@
 import type { Request, Response } from 'express';
+import type { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import bcrypt from 'bcryptjs';
-import { prisma } from '../app.js';
+import { db } from '../db/index.js';
 import { featureFlags, notifyWhatsAppSafely } from '../services/pg-notifications.js';
 import { consumePhoneToken } from './pg-auth.controller.js';
 import { logAudit } from '../services/pg-audit.js';
@@ -29,10 +30,6 @@ function phoneVariants(phone: string): string[] {
   const normalized = digits.length === 10 ? `91${digits}` : digits;
   return [...new Set([digits, normalized, normalized.length > 10 ? normalized.slice(-10) : normalized])];
 }
-
-const db = new Proxy({} as Record<string, any>, {
-  get: (_target, property) => (prisma as any)[property]
-});
 
 export function currentUser(req: Request): { id: string; role: string; propertyId?: string } | null {
   const user = (req as any).user;
@@ -231,11 +228,12 @@ export const listProperties = async (req: Request, res: Response): Promise<any> 
   try {
     await releaseExpiredBookingHolds();
     const hiddenPropertyIds = await ownStayPropertyIds(req);
+    const scopedId = requestPropertyId(req);
     const properties = await db.pGProperty.findMany({
       where: {
         status: 'ACTIVE',
         ...ownPropertyExclusionWhere(hiddenPropertyIds),
-        ...(requestPropertyId(req) ? { id: requestPropertyId(req) } : {}),
+        ...(scopedId ? { id: scopedId } : {}),
         ...(locality ? { locality: { contains: locality, mode: 'insensitive' } } : {}),
         ...(genderPolicy ? { genderPolicy: { in: [genderPolicy, 'ANY'] } } : {}),
         ...(search ? {
@@ -621,8 +619,9 @@ export const getPublicBookingStatus = async (req: Request, res: Response): Promi
   if (!phone) return res.status(400).json({ message: 'Phone number is required' });
 
   try {
-    const booking = await db.pGBooking.findUnique({
-      where: { bookingRef: String(req.params.bookingRef), ...(requestPropertyId(req) ? { propertyId: requestPropertyId(req) } : {}) },
+    const scopedId = requestPropertyId(req);
+    const booking = await db.pGBooking.findFirst({
+      where: { bookingRef: String(req.params.bookingRef), ...(scopedId ? { propertyId: scopedId } : {}) },
       include: {
         property: { select: { name: true, address: true, locality: true, city: true } },
         bed: { include: { room: { select: { roomNumber: true } } } }
@@ -782,8 +781,9 @@ export const vibeCheckProperty = async (req: Request, res: Response): Promise<an
   const answers = cleanVibeAnswers(req.body?.answers);
   if (!answers) return res.status(400).json({ message: 'Answer at least one VibeCheck question' });
   try {
+    const scopedId = requestPropertyId(req);
     const property = await db.pGProperty.findFirst({
-      where: { id: String(req.params.propertyId), status: 'ACTIVE', ...(requestPropertyId(req) ? { id: requestPropertyId(req) } : {}) },
+      where: { id: scopedId || String(req.params.propertyId), status: 'ACTIVE' },
       select: { id: true, serviceSettings: true, rooms: { where: { status: 'ACTIVE' }, select: { id: true, roomNumber: true, beds: { where: { status: 'AVAILABLE' }, select: { id: true, label: true } } } } }
     });
     if (!property) return res.status(404).json({ message: 'PG not found' });
@@ -869,7 +869,7 @@ async function runKycCheck(tenant: any): Promise<any> {
   const property = await db.pGProperty.findUnique({ where: { id: tenant.propertyId }, select: { serviceSettings: true } });
   if (!cleanServiceSettings(property?.serviceSettings).kycAi) throw new Error('KYC_AI_OFF');
   const check = await checkKycDocument({ fileKey: tenant.kycDocumentUrl, declaredType: tenant.kycType, residentName: tenant.name });
-  await db.pGTenant.update({ where: { id: tenant.id }, data: { kycAiCheck: check } });
+  await db.pGTenant.update({ where: { id: tenant.id }, data: { kycAiCheck: check as unknown as Prisma.InputJsonValue } });
   return check;
 }
 

@@ -5,13 +5,12 @@
 // Nothing is deducted automatically.
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { prisma } from '../app.js';
+import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
 import { canManageProperty } from './pg.controller.js';
 import { aiEnabled, generateStructured } from '../services/ai-provider.js';
 import { readStoredFile } from '../services/storage.js';
 
-const db = new Proxy({} as Record<string, any>, { get: (_target, property) => (prisma as any)[property] });
 const MONEY_ROLES = ['OWNER', 'ACCOUNTANT'];
 const MAX_PHOTOS_PER_SIDE = 4;
 
