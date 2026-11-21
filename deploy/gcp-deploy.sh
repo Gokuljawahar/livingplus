@@ -55,7 +55,7 @@ PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
 REGION="${REGION:-asia-south1}"
 SERVICE="${SERVICE:-livingplus}"
 REPO="${REPO:-livingplus}"
-SQL_INSTANCE="${SQL_INSTANCE:-livingplus-db}"
+SQL_INSTANCE="${SQL_INSTANCE:-livingplus-db2}"
 SQL_TIER="${SQL_TIER:-db-f1-micro}"
 DB_NAME="${DB_NAME:-livingplus}"
 DB_USER="${DB_USER:-livingplus}"
@@ -78,7 +78,7 @@ DRY_RUN="${DRY_RUN:-0}"
 [ -f deploy/cloudbuild.yaml ] || { echo "Run from the repository root." >&2; exit 1; }
 
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
-IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE}:$(date +%Y%m%d-%H%M%S)"
+IMAGE="${IMAGE:-${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE}:$(date +%Y%m%d-%H%M%S)}"
 SQL_CONNECTION="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}"
 
 step() { printf '\n==> %s\n' "$*"; }
@@ -157,11 +157,20 @@ else
   run gcloud sql users create "$DB_USER" --instance "$SQL_INSTANCE" --project "$PROJECT_ID" --password "$DB_PASSWORD"
 fi
 # Prisma and node-postgres both reach Cloud SQL through the Cloud Run unix socket.
-ensure_secret livingplus-database-url "postgresql://${DB_USER}:${DB_PASSWORD}@localhost/${DB_NAME}?host=/cloudsql/${SQL_CONNECTION}"
+EXPECTED_DB_URL="postgresql://${DB_USER}:${DB_PASSWORD}@localhost/${DB_NAME}?host=/cloudsql/${SQL_CONNECTION}"
+ensure_secret livingplus-database-url "$EXPECTED_DB_URL"
+if [ "$DRY_RUN" != "1" ] && [ "$(secret_value livingplus-database-url)" != "$EXPECTED_DB_URL" ]; then
+  printf '%s' "$EXPECTED_DB_URL" | gcloud secrets versions add livingplus-database-url --project "$PROJECT_ID" --data-file=- >/dev/null
+  echo "  secret livingplus-database-url updated to ${SQL_CONNECTION}"
+fi
 
 step "Building the image with Cloud Build"
-run gcloud builds submit --project "$PROJECT_ID" --region "$REGION" --config deploy/cloudbuild.yaml \
-  --substitutions "_IMAGE=${IMAGE},_VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY:-}" .
+if [ "${SKIP_BUILD:-0}" = "1" ]; then
+  echo "  SKIP_BUILD=1: reusing existing image ${IMAGE}"
+else
+  run gcloud builds submit --project "$PROJECT_ID" --region "$REGION" --config deploy/cloudbuild.yaml \
+    --substitutions "_IMAGE=${IMAGE},_VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY:-}" .
+fi
 
 step "Firebase Authentication"
 # Reads a value from a Firebase / Identity Toolkit REST endpoint (read-only).
@@ -222,7 +231,7 @@ else
   ENV_VARS+=",OTP_DEMO_MODE=true"
 fi
 run gcloud run deploy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --image "$IMAGE" \
-  --service-account "$SA_EMAIL" --add-cloudsql-instances "$SQL_CONNECTION" --allow-unauthenticated \
+  --service-account "$SA_EMAIL" --set-cloudsql-instances "$SQL_CONNECTION" --allow-unauthenticated \
   --memory 1Gi --cpu 1 --min-instances 0 --max-instances 3 --timeout 300 \
   --set-env-vars "$ENV_VARS" --set-secrets "$SECRETS"
 
