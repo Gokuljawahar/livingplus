@@ -1,250 +1,92 @@
-# LivingPlus - PG Booking and Management
+# Living Plus
 
-Public PG discovery, OTP-verified bookings, owner/warden operations, resident
-self-service, and a role-aware AI assistant. Express/TypeScript and Prisma
-(SQLite) power the API; React/Vite/Tailwind power the frontend.
+**PG (paying-guest) living in Chennai, run end to end: honest discovery for guests, a simple home for residents, and a calm workspace for owners, with Gemini doing the routine work and people approving anything that matters.**
 
-## Requirements
+Built for the Google Startup Buildathon 2026. The answers this build delivers on are in [`core MD-livingplus_buildathon_answers.md`](core%20MD-livingplus_buildathon_answers.md).
 
-- Node.js 22.12+ or a supported newer LTS, with npm. Vite also supports Node
-  20.19+, but not older Node 20 releases.
-- Two terminal windows, opened at the repository root (`D:\livingplus` below).
-- Internet for initial dependency installation. Local storage/SQLite need no
-  AWS, PostgreSQL, or Docker.
+## Three sites, one codebase
 
-Windows examples use `npm.cmd` / `npx.cmd` to avoid PowerShell's `npm.ps1`
-execution-policy restriction. On macOS/Linux use `npm` / `npx`.
+| Site | Path | Who | What they do |
+|---|---|---|---|
+| Guest | `/` | Students and young professionals looking for a PG | Browse with no sign-up. See the real monthly cost (rent, food, deposit), live bed availability, and how far each PG is from their campus or office (IIT Madras, Tidel Park, SIPCOT…). Take **VibeCheck** to see how they'd fit with each room. Request a bed with one phone code, then follow the reply in *My requests*. |
+| Resident | `/stay/<pg>` | People living in a PG | See what they owe and pay, report issues with photo or voice, order meals and cleaning, keep move-in condition records, update VibeCheck, request a room change, and read notices. |
+| Owner | `/owner` | PG owners and their staff | *Today* (what needs you), beds and bookings, tenants and KYC, the rent ledger and payment claims, expenses, utilities, maintenance, services, staff roles and reports. |
 
-## First-Time Setup
+## AI: the right Google tool for each job
 
-### Backend Configuration
-
-```powershell
-cd D:\livingplus\Project\backend
-npm.cmd ci
-if (!(Test-Path .env)) { Copy-Item .env.example .env }
-```
-
-Configure these values in `Project/backend/.env`:
-
-```dotenv
-DATABASE_URL="file:../database.db"
-PORT=4000
-LIVINGPLUS_ROOT_DOMAIN="livingplus.com"
-JWT_SECRET="<stable random secret, at least 32 characters>"
-ENCRYPTION_KEY="<64 hexadecimal characters>"
-UPLOAD_STORAGE="local"
-ADMIN_USERNAME="<your platform-admin login>"
-ADMIN_PASSWORD="<your platform-admin password>"
-```
-
-Generate independent values for JWT and encryption with this command, once
-for each value:
-
-```powershell
-node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
-```
-
-Keep `JWT_SECRET` stable across restarts or existing sessions become invalid.
-The backend loads `.env`, then `.env.local` **with override enabled**. Check
-both when a setting does not take effect. Never commit secrets.
-
-### Frontend Configuration
-
-Configure `Project/frontend/.env.local`:
-
-```dotenv
-VITE_ROOT_DOMAIN="livingplus.com"
-VITE_ENCRYPTION_KEY="<the exact same ENCRYPTION_KEY as the backend>"
-```
-
-Leave `VITE_API_BASE_URL` unset locally. Vite forwards `/api` to port 4000.
-For a separate API origin, this variable is the origin **without** an `/api`
-suffix. Frontend keys are browser-visible; payload encryption does not replace
-HTTPS or authorization. Restart Vite after changing frontend environment values.
-
-### Database
-
-```powershell
-cd D:\livingplus\Project\backend
-npx.cmd prisma validate
-npx.cmd prisma generate
-npx.cmd prisma db push
-```
-
-Run `db push` after schema changes too. Review warnings before proceeding; do
-not use `--force-reset` or `--accept-data-loss` on a DB you need. If generation
-reports Windows `EPERM` on Prisma's DLL, stop backend dev servers, regenerate,
-then restart. SQLite paths resolve relative to the schema; this URL places the
-database at `Project/backend/database.db`.
-
-## Start Both Apps
-
-**Terminal 1 - API:**
-
-```powershell
-cd D:\livingplus\Project\backend
-npm.cmd run dev
-```
-
-The API listens on `http://localhost:4000`. Startup assigns missing property
-slugs and runs rent/reminder schedulers against the configured database.
-
-**Terminal 2 - frontend:**
-
-```powershell
-cd D:\livingplus\Project\frontend
-npm.cmd ci
-npm.cmd run dev -- --host 0.0.0.0 --port 5173 --strictPort
-```
-
-Open `http://localhost:5173/`. Keep both terminals running. `Ctrl+C` stops each
-server. If 5173 is occupied, choose 5174 and use that port in every frontend
-URL. Changing the API port also requires updating the Vite proxy target.
-
-### Portal URLs
-
-| Persona | Local URL | Production URL |
+| Job | Built with | How |
 |---|---|---|
-| Visitor | `http://localhost:5173/` | `https://livingplus.com/` |
-| New owner signup | `http://localhost:5173/register` | `https://livingplus.com/register` |
-| PG owner/warden login | `http://{slug}.localhost:5173/login` | `https://{slug}.livingplus.com/login` |
-| PG operations | `http://{slug}.localhost:5173/owner/manage` | `https://{slug}.livingplus.com/owner/manage` |
-| Resident OTP login | `http://{slug}.localhost:5173/resident` | `https://{slug}.livingplus.com/resident` |
-| Platform admin | `http://localhost:5173/login` then `/pg/operators` | `https://admin.livingplus.com/login` |
+| Assistant for guests, residents and owners (about 30 tools) | **Google ADK** (`@google/adk`) | An `LlmAgent` with one `FunctionTool` per backend action, run by ADK's `Runner`. Tools are scoped to the caller's role and PG. Owners can ask it to draft and post notices or assign a ticket to a warden. Anything that writes (bookings, expenses, bills, notices, assignments) pauses for explicit confirmation, bound to the same person and PG and stored in PostgreSQL, so it survives restarts. |
+| KYC document check | **Gemini API** (`@google/genai`), one structured call | Reads an uploaded ID and returns the document type, name, last 4 digits only, legibility and problems, as JSON checked with Zod. The owner still verifies. |
+| VibeCheck profile | Gemini, one structured call | Turns "I study till 1 am, keep my desk neat…" (in English, Tamil or Hindi) into 8 lifestyle habits plus a short summary, and asks one follow-up question if something important is missing. |
+| VibeCheck matching | Gemini, one structured call | Judges each room against a deterministic baseline score. The AI may move a score by at most 15 points, and the reasons it gives are about habits only, never names. |
+| VibeCheck Live & Owner Briefings | **Gemini Live API** | Low-latency 16 kHz AudioWorklet voice conversation in Tamil, Hindi or English for VibeCheck habit interviews and hands-free owner operational briefings. |
+| Deposit Shield & Kitchen Forecast | Gemini Vision & structured output | Compares paired move-in and move-out room photos (normal wear is always ₹0) and forecasts daily meal plates from food plans, opt-outs and resident routines. |
+| Voice notes, photo issues | Gemini multimodal | Transcribes voice notes and describes photo complaints, which become maintenance tickets. |
+| Search ("quiet PG near Tidel Park") | Gemini embeddings | Semantic matches alongside keyword search. |
 
-Signup redirects to the generated PG host. Existing slugs are stored in
-`PGProperty.slug` (inspect with `npx.cmd prisma studio`); do not guess them from
-display names. One PG host selects one property, but database authorization
-still decides access. Public discovery has no portal links.
+**Model:** `gemini-3.8-flash` on Vertex AI: stable, with function calling and structured output, at thinking level `MEDIUM`. The code also runs on `gemini-4-hydrogen`; switch with `AI_MODEL` once the project's per-minute quota for it is raised, since new projects start very low and multi-step tool calls hit 429s.
 
-Chromium/Edge normally resolve `*.localhost` to loopback; Windows PowerShell
-HTTP clients may not. If your browser cannot resolve a PG host, configure that
-exact host in your OS hosts file/local DNS yourself. Public DNS changes are not
-needed. `admin.localhost` is not a platform-admin alias; use localhost path mode
-for local admin testing.
+**Guardrails:**
+- VibeCheck never sends names or phone numbers, only habits.
+- The KYC check keeps only the last 4 digits of an ID number.
+- Each assistant tool returns only what the caller may see: residents never see each other's money or KYC records.
+- A model's tool call is checked against the caller's role and PG before anything runs.
 
-### Optional Demo Seed
+## On Google Cloud
 
-```powershell
-cd D:\livingplus\Project\backend
-npm.cmd run seed
+| Need | Service |
+|---|---|
+| Web app and API | **Cloud Run** (one container, scales to zero) |
+| Data | **Cloud SQL for PostgreSQL**, with **row-level security** so each owner's PGs are isolated in the database itself |
+| Uploads (photos, KYC, condition records) | **Cloud Storage**, private, served through short-lived signed URLs |
+| AI | **Vertex AI** (Gemini, embeddings) through the service account, with no API keys |
+| Secrets | **Secret Manager** |
+| Monthly rent, reminders, search index | **Cloud Scheduler** |
+| Health and alerts | **Cloud Monitoring** and **Cloud Logging** |
+| Phone OTP and Google sign-in | **Firebase Authentication** (falls back to on-screen demo codes when not set up) |
+| Location picker | **Google Maps Platform** |
+| Messages | **WhatsApp Business Platform**: alerts out, plus YES/NO replies in, with signed webhooks |
+
+## Deploy
+
+From the repository root, signed in with `gcloud`:
+
+```bash
+# Vertex AI on the project (default)
+PROJECT_ID=<project> SEED_DEMO_DATA=1 bash deploy/gcp-deploy.sh
+
+# Fresh project without Firebase: on-screen OTP codes
+PROJECT_ID=<project> SEED_DEMO_DATA=1 SKIP_FIREBASE=1 bash deploy/gcp-deploy.sh
+
+# AI through a Google AI Studio key instead of Vertex AI
+PROJECT_ID=<project> SEED_DEMO_DATA=1 AI_BACKEND=studio GOOGLE_API_KEY=<key> bash deploy/gcp-deploy.sh
+
+# See every step without changing anything
+DRY_RUN=1 PROJECT_ID=<project> SKIP_FIREBASE=1 bash deploy/gcp-deploy.sh
 ```
 
-Only seed a disposable development DB: it upserts fictional properties,
-bookings, tenants, bills and rooms and can overwrite demo-field values and bed
-states. It is not normal startup. Demo property access is assigned to an
-existing database `SUPER_ADMIN` user if one exists; the environment admin login
-alone does not create that DB user. The active demo resident uses phone
-`9000000001`; inspect their property's actual slug before opening it.
+The script enables the APIs and creates the service account, bucket, secrets, Cloud SQL, image, Cloud Run service, scheduler jobs and monitoring. Migrations run when the container starts. It prints the URLs and the demo owner login at the end.
 
-## Optional Services
+## Run locally
 
-- **SMS:** `SMS_API_URL`, optional `SMS_API_KEY`. Without a provider in
-  development, OTP responses include `devCode`, shown as a UI toast. Production
-  requires working SMS and does not return demo codes.
-- **Resident UPI:** the owner configures the property's UPI ID. Residents open
-  their UPI app and submit a transaction reference. Claims remain pending until
-  the owner verifies receipt; only approval credits the ledger. This is not
-  automatic gateway settlement. Placeholder gateway keys do not enable a
-  Razorpay/Cashfree integration.
-- **WhatsApp:** enable `ENABLE_WHATSAPP_CLOUD_API` and configure
-  `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, approved templates and optionally
-  `WHATSAPP_VERSION`. Otherwise use manual/click-to-chat workflows.
-- **AI:** configure `ENABLE_AI_ORCHESTRATOR=true`, `META_MODEL_API_KEY`,
-  `META_MODEL_BASE_URL`, `META_MODEL_NAME` for your compatible provider. Voice
-  additionally requires `/asr/transcribe` support, `META_VOICE_MODEL_NAME`, and
-  browser microphone permission. Chat API compatibility alone does not imply
-  voice support.
-- **Maps:** optional frontend `VITE_GOOGLE_MAPS_API_KEY`.
-- **Uploads:** private local files default to `backend/private-uploads`.
-  Set a persistent `UPLOAD_DIR` for deployment, or explicitly configure S3.
-  Configure `PUBLIC_API_URL` when signed media needs a public API origin. Back
-  up the database and private files together.
+```bash
+cd Project/backend && cp .env.example .env    # set GOOGLE_API_KEY and ENABLE_AI_ORCHESTRATOR=true for AI
+npm install && npm run dev                     # starts a local PostgreSQL, applies migrations, runs the API
+npm run seed                                   # demo PGs, rooms and residents
 
-Restart the API after changing backend environment values. Vite embeds
-`VITE_*` values during production builds.
-
-## Verification and Production Builds
-
-From the repository root:
-
-```powershell
-npm.cmd --prefix Project/backend test
-npm.cmd --prefix Project/backend run build
-npm.cmd --prefix Project/frontend run build
-npm.cmd --prefix Project/frontend run lint
+cd ../frontend && npm install && npm run dev   # http://localhost:5173
 ```
 
-Backend tests use a throwaway SQLite database, not the application DB. Build
-before `npm.cmd --prefix Project/backend start`; it runs emitted `src/index.js`.
-Serve `Project/frontend/dist` through a production web server. `vite preview`
-is a bundle preview, not production hosting, and has no `/api` proxy configured.
+## Tests
 
-Production requires apex plus wildcard DNS/TLS, SPA fallback for deep links,
-and `/api` proxying on each app host (or a public API origin with appropriate
-CORS). Hosting-provider configuration is not included. Do not expose local dev
-servers, `.env`, database files or private uploads publicly. The schema uses
-SQLite; PostgreSQL needs an explicit provider/schema migration, not merely a
-different `DATABASE_URL`.
+```bash
+cd Project/backend  && npm test                # 259 API, isolation, invoice-code and AI-agent tests
+cd Project/frontend && npm test && npm run e2e # 56 unit tests and 7 browser journeys
+```
 
-## Latest Local UI Verification
+The AI tests script the model, so they check behaviour without network calls: role limits, confirmations bound to the caller, isolation between PGs, and the 15-point VibeCheck limit.
 
-Browser verification on 2026-11-02 used isolated test accounts/properties on
-ports 4000/5173, with desktop and 390px mobile checks. This covers the primary
-implemented journeys, not every possible input combination or real production
-integration.
+## Design
 
-| Area | Verified flow |
-|---|---|
-| Visitor | Listings, location/policy/budget filters, empty results, gallery, legal pages, no portal links. |
-| Owner onboarding | Signup, PG-host handoff, invalid/correct login, password change and re-login. |
-| Property operations | Room/beds, photo upload, UPI setting, repair/release, unpublish and republish. |
-| Bookings | OTP verification, request, status tracking, guest cancellation, owner decline/approval, check-in. |
-| Wardens | Create/login/remove; owner financial/staff tabs hidden. |
-| Resident | Own stay, profile edit, private KYC upload, complaint creation/status, notice submit/cancel. |
-| Payments | Pending claim, owner approval and partial ledger credit, rejection with reason, resident notifications. |
-| Billing | Deposit receipt, electricity draft/approval, expense create/remove, monthly report and activity records. |
-| Notifications | Complaint/payment updates visible to the resident; mark-as-read updates the unread count. |
-| Checkout | Bed release, deposit deduction calculation, refund and reference recording. |
-| Platform admin | Login, operator search, owner/PG creation and empty-PG deletion. |
-| Access and AI | Wrong-PG owner login rejected; resident AI returns own dues with formatted lists and refuses owner/other-resident data. |
-| Files | Gallery loads; signed KYC media returns 200; receipt CSV contents generated correctly. |
-
-Fixed during this run: property updates with blank/string coordinates, payment
-rejection using an unsupported native prompt, owner lockout after unpublishing,
-and stale operations requests after deleting the current PG. Unpublishing now
-removes discovery/new-booking availability but keeps authorized operations and
-resident access available; deleting a PG returns its owner to public discovery.
-
-Final gates: **82 backend tests pass; backend and frontend production builds
-pass.** Repository-wide frontend ESLint is **not clean**: 66 errors and 2
-warnings across 12 files at verification time (mostly explicit `any` types and
-React hook rules). A separate lint cleanup is still required.
-
-Limits: no real UPI money transfer, gateway settlement, production SMS/WhatsApp,
-production DNS/TLS or voice transcription was verified. The integrated browser
-did not emit a receipt-download event, so the CSV payload was checked directly
-instead; browser/OS save-dialog behavior is unverified. Report export/print and
-all browser/viewport combinations were not exhaustively tested. Synthetic PGs,
-accounts, and their referenced gallery/KYC files were removed after testing.
-
-## Troubleshooting
-
-| Symptom | Check |
-|---|---|
-| Blank listings / missing `VITE_ENCRYPTION_KEY` | Set the frontend key, match the backend key, restart Vite. |
-| `Invalid encrypted payload` | Compare effective keys, including `.env.local` overrides. |
-| API proxy connection refused | Start the API on port 4000 first. |
-| `PG site not found` | Use the exact active `PGProperty.slug`. |
-| Sessions rejected after API restart | Set a stable JWT secret, then log in again. |
-| `npm.ps1 cannot be loaded` | Use `npm.cmd` / `npx.cmd`. |
-| Prisma `EPERM` on Windows | Stop backend watchers holding the DLL, regenerate, restart. |
-| Port already in use | Stop only the server you own, or choose another frontend port. |
-
-## Layout
-
-- `Project/backend`: API, Prisma schema/seed, billing, AI tools, tests.
-- `Project/frontend`: React SPA, public/operations/resident screens.
-- `Docs`: product documents.
-- `Assets`: shared brand assets.
+[`DESIGN.md`](DESIGN.md) is the design system: who each site is for, tokens, type (Plus Jakarta Sans and Inter), layouts, writing rules and the psychology behind them.

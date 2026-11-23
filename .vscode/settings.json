@@ -1,0 +1,21 @@
+{
+  "typescript.tsdk": "Project/frontend/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "eslint.workingDirectories": ["Project/frontend"],
+  "css.lint.unknownAtRules": "ignore",
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/test-results/**": true,
+    "**/playwright-report/**": true,
+    "Project/backend/.local-postgres/**": true,
+    "Project/backend/tests/.tmp-postgres-e2e/**": true
+  },
+  "search.exclude": {
+    "**/dist/**": true,
+    "**/test-results/**": true,
+    "**/playwright-report/**": true,
+    "Project/backend/.local-postgres/**": true,
+    "Project/backend/tests/.tmp-postgres-e2e/**": true
+  }
+}

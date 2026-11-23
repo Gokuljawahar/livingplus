@@ -1,32 +1,27 @@
-import { LogOut, Building2, X, BedDouble, Search } from 'lucide-react';
+import { LogOut, X, BedDouble } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/auth';
 import { useSidebar } from '../../context/sidebar';
-import logo from '../../assets/logo_bg_black.png';
-import { resolveAppHost } from '../../utils/pg-host';
+import BrandLogo from '../ui/BrandLogo';
+import { areaOf, ROUTES } from '../../utils/app-areas';
+import { RESIDENT_SITE_KEY } from '../../utils/session';
 
 type NavLink = { label: string; path: string; icon?: LucideIcon; children?: NavLink[] };
 type NavItem = NavLink & { icon: LucideIcon };
 
 export default function Sidebar() {
   const location = useLocation();
-  const { logout, user } = useAuth();
+  const { logout } = useAuth();
   const { isOpen, close, sectionNav } = useSidebar();
   
-  const residentBase = location.pathname.startsWith('/pg/') ? '/pg/resident' : '/resident';
-  const navItems: NavItem[] = user?.role === 'PG_TENANT'
-    ? [
-      { icon: Building2, label: 'My stays', path: residentBase },
-      { icon: Search, label: 'Find a PG', path: '/pg' }
-    ]
-    : [
-      { icon: BedDouble, label: 'PG Operations', path: resolveAppHost().kind === 'property' ? '/owner/manage' : '/pg/manage' }
-    ];
+  // Each area shows only its own links: a resident site never links to the owner workspace and vice versa.
+  const area = areaOf(location.pathname);
+  // A page that lists its own sections (resident site, owner workspace) needs no extra link.
+  const navItems: NavItem[] = area === 'resident' || sectionNav
+    ? []
+    : [{ icon: BedDouble, label: 'PG Operations', path: ROUTES.ownerHome }];
 
-  const adminItems = [
-    { icon: Building2, label: 'PG Operators', path: '/pg/operators' }
-  ];
 
   return (
     <>
@@ -39,27 +34,28 @@ export default function Sidebar() {
       )}
 
       <aside className={`
-        fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 flex flex-col h-screen transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-auto
+        fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-hairline flex flex-col h-screen transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-auto
         ${isOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
-        <div className="shrink-0 relative">
-          <img src={logo} alt="Living Plus" className="w-full h-28 object-contain p-2 block" />
+        <div className="relative flex h-16 shrink-0 items-center px-6">
+          <Link to={area === 'resident' ? location.pathname : ROUTES.ownerHome} aria-label="Living Plus home"><BrandLogo /></Link>
           <button
             onClick={close}
-            className="lg:hidden absolute top-1 right-1 p-1 text-white bg-black/20 rounded-md transition-colors hover:bg-black/40"
+            aria-label="Close menu"
+            className="lg:hidden absolute right-3 top-3 flex h-10 w-10 items-center justify-center rounded-[10px] text-muted hover:bg-surface"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-6 space-y-6 pb-6 scrollbar-hide">
-          <div className="space-y-1">
-            <p className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Main Menu</p>
+        <nav className="flex-1 overflow-y-auto px-4 pt-4 space-y-6 pb-6 scrollbar-hide">
+          {navItems.length > 0 && <div className="space-y-1">
+            <p className="px-3 text-[13px] font-medium text-muted mb-2">Main menu</p>
             {navItems.map((item) => {
               if (item.children) {
                 return (
                   <div key={item.label} className="mb-2">
-                    <div className="flex items-center gap-3 px-3 py-2 text-slate-500 font-medium">
+                    <div className="flex items-center gap-3 px-3 py-2 text-muted font-medium">
                       <item.icon className="w-5 h-5" />
                       <span>{item.label}</span>
                     </div>
@@ -68,7 +64,7 @@ export default function Sidebar() {
                         if (child.children) {
                           return (
                             <div key={child.label} className="mb-2">
-                              <div className="flex items-center gap-3 px-3 py-2 text-slate-500 text-sm font-medium">
+                              <div className="flex items-center gap-3 px-3 py-2 text-muted text-sm font-medium">
                                 <span>{child.label}</span>
                               </div>
                               <div className="pl-4 space-y-1 mt-1">
@@ -81,10 +77,10 @@ export default function Sidebar() {
                                       onClick={() => {
                                         if (window.innerWidth < 1024) close();
                                       }}
-                                      className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                                      className={`flex items-center gap-3 px-3 py-2 rounded-[var(--radius-button)] transition-all text-sm ${
                                         isActive 
-                                          ? 'bg-amber-50/50 text-[#02224B] font-semibold border-r-4 border-[#FEB109] rounded-r-none' 
-                                          : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                                          ? 'bg-amber-50 text-navy-900 font-bold border-r-4 border-amber-500 rounded-r-none' 
+                                          : 'text-muted hover:bg-surface hover:text-ink font-medium'
                                       }`}
                                     >
                                       {subChild.icon && <subChild.icon className="w-4 h-4" />}
@@ -105,10 +101,10 @@ export default function Sidebar() {
                             onClick={() => {
                               if (window.innerWidth < 1024) close();
                             }}
-                            className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                            className={`flex items-center gap-3 px-3 py-2 rounded-[var(--radius-button)] transition-all text-sm ${
                               isActive 
-                                ? 'bg-amber-50/50 text-[#02224B] font-semibold border-r-4 border-[#FEB109] rounded-r-none' 
-                                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                                ? 'bg-amber-50 text-navy-900 font-bold border-r-4 border-amber-500 rounded-r-none' 
+                                : 'text-muted hover:bg-surface hover:text-ink font-medium'
                             }`}
                           >
                             {child.icon && <child.icon className="w-4 h-4" />}
@@ -129,10 +125,10 @@ export default function Sidebar() {
                   onClick={() => {
                     if (window.innerWidth < 1024) close();
                   }}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                  className={`flex items-center gap-3 px-3 py-2 rounded-[var(--radius-button)] transition-all text-sm ${
                     isActive 
-                      ? 'bg-amber-50/50 text-[#02224B] font-semibold border-r-4 border-[#FEB109] rounded-r-none' 
-                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                      ? 'bg-amber-50 text-navy-900 font-bold border-r-4 border-amber-500 rounded-r-none' 
+                      : 'text-muted hover:bg-surface hover:text-ink font-medium'
                   }`}
                 >
                   <item.icon className="w-5 h-5" />
@@ -140,69 +136,51 @@ export default function Sidebar() {
                 </Link>
               );
             })}
-          </div>
+          </div>}
 
           {sectionNav && (
             <div className="space-y-1">
-              <p className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Workspace</p>
-              {sectionNav.map((item) => (
+              {!sectionNav.some((item) => item.group) && <p className="px-3 text-[13px] font-medium text-muted mb-2">{area === 'resident' ? 'Your stay' : 'Workspace'}</p>}
+              {sectionNav.map((item, index) => (
+                <div key={item.id}>
+                {item.group && item.group !== sectionNav[index - 1]?.group && (
+                  <p className="px-3 pb-1 pt-4 text-[13px] font-medium text-muted">{item.group}</p>
+                )}
                 <button
-                  key={item.id}
                   onClick={() => {
                     item.onSelect();
                     if (window.innerWidth < 1024) close();
                   }}
                   aria-current={item.active ? 'page' : undefined}
-                  className={`flex w-full items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                  className={`flex min-h-11 w-full items-center gap-3 rounded-[10px] px-3 text-[15px] ${
                     item.active
-                      ? 'bg-amber-50/50 text-[#02224B] font-semibold border-r-4 border-[#FEB109] rounded-r-none'
-                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                      ? 'bg-amber-50 text-navy-900 font-semibold shadow-[inset_3px_0_0_var(--color-amber-500)]'
+                      : 'text-ink hover:bg-surface hover:text-navy-900 font-medium'
                   }`}
                 >
                   <item.icon className="w-5 h-5" />
                   <span className="whitespace-nowrap">{item.label}</span>
                 </button>
+                </div>
               ))}
             </div>
           )}
 
-          {user?.role === 'SUPER_ADMIN' && (
-            <div className="space-y-1">
-              <p className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Admin Control</p>
-              {adminItems.map((item) => {
-                const isItemActive = item.path && item.path.includes('?') 
-                  ? location.pathname + location.search === item.path
-                  : location.pathname === item.path;
-
-                return (
-                  <Link
-                    key={item.label}
-                    to={item.path || '#'}
-                    onClick={() => {
-                      if (window.innerWidth < 1024) close();
-                    }}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
-                      isItemActive 
-                        ? 'bg-amber-50/50 text-[#02224B] font-semibold border-r-4 border-[#FEB109] rounded-r-none' 
-                        : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
-                    }`}
-                  >
-                    <item.icon className="w-5 h-5" />
-                    <span className="font-medium text-slate-900 whitespace-nowrap">{item.label}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
         </nav>
 
-        <div className="p-6 shrink-0 bg-white border-t border-slate-100">
+        <div className="p-6 shrink-0 bg-white border-t border-hairline">
           <button 
-                onClick={() => logout()}
-            className="flex items-center gap-3 px-3 py-2 text-slate-500 hover:text-slate-900 w-full transition-colors rounded-lg hover:bg-slate-50"
+                onClick={() => {
+                  logout();
+                  if (area === 'resident') {
+                    localStorage.removeItem(RESIDENT_SITE_KEY);
+                    window.location.reload();
+                  }
+                }}
+            className="flex items-center gap-3 px-3 py-2 text-muted hover:text-ink w-full transition-colors rounded-[var(--radius-field)] hover:bg-surface"
           >
             <LogOut className="w-5 h-5" />
-            <span>Sign Out</span>
+            <span>Sign out</span>
           </button>
         </div>
       </aside>

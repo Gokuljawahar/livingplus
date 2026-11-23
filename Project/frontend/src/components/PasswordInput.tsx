@@ -31,7 +31,7 @@ export default function PasswordInput({
 
   return (
     <div className="relative">
-      <Lock className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+      <Lock className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted" />
       <input
         type={visible ? 'text' : 'password'}
         required={required}
@@ -40,7 +40,7 @@ export default function PasswordInput({
         autoComplete={autoComplete}
         aria-label={ariaLabel}
         onChange={(event) => onChange(event.target.value)}
-        className={`w-full rounded-xl border-slate-100 bg-slate-50 py-3 pl-11 pr-12 text-sm transition-all focus:bg-white focus:ring-2 focus:ring-[#02224B] ${inputClassName}`}
+        className={`w-full rounded-[var(--radius-button)] border-hairline bg-surface py-3 pl-11 pr-12 text-sm transition-all focus:bg-white focus:ring-2 focus:ring-navy-900 ${inputClassName}`}
         placeholder={placeholder}
       />
       <button
@@ -48,7 +48,7 @@ export default function PasswordInput({
         onClick={() => setVisible((current) => !current)}
         aria-label={visible ? `Hide ${ariaLabel.toLowerCase()}` : `Show ${ariaLabel.toLowerCase()}`}
         aria-pressed={visible}
-        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 transition-colors hover:text-slate-600"
+        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted transition-colors hover:text-muted"
       >
         {visible ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
       </button>

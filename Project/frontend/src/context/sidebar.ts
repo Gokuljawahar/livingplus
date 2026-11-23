@@ -6,6 +6,8 @@ export interface SectionNavItem {
   icon: ComponentType<{ className?: string }>;
   active: boolean;
   onSelect: () => void;
+  /** Optional section heading; consecutive items with the same group sit under it. */
+  group?: string;
 }
 
 export interface SidebarContextType {

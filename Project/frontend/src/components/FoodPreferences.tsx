@@ -34,40 +34,79 @@ export default function FoodPreferences({ stays, onChanged }: { stays: FoodStay[
     }
   };
 
-  if (!stays.length) return <p className="border border-slate-200 bg-white py-10 text-center text-sm text-slate-500">No stays found for this number.</p>;
+  if (!stays.length) return (
+    <div className="rounded-[var(--radius-card)] border border-hairline bg-white py-12 text-center text-sm text-muted">
+      No stays found for this number.
+    </div>
+  );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {stays.map((stay) => {
         const foodEntries = stay.rentEntries.filter((entry) => entry.entryType === 'FOOD');
         const charge = stay.bed?.room.foodCharge || 0;
         const active = ['ACTIVE', 'NOTICE_PERIOD'].includes(stay.status);
         return (
-          <article key={stay.id} className="border border-slate-200 bg-white p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="flex items-center gap-2 font-semibold text-[#02224B]"><UtensilsCrossed className="h-4 w-4 text-[#FEB109]" />{stay.property.name}</h2>
-              <span className={`border px-2 py-0.5 text-xs font-semibold uppercase ${stay.foodOptOut ? 'border-slate-300 text-slate-500' : 'border-emerald-300 text-emerald-800'}`}>
+          <article key={stay.id} className="rounded-[var(--radius-card)] border border-hairline/90 bg-white p-6 transition-shadow">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="h-9 w-9 rounded-[var(--radius-button)] bg-amber-50 text-amber-700 flex items-center justify-center border border-amber-200/70">
+                  <UtensilsCrossed className="h-4.5 w-4.5" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-ink text-base">{stay.property.name}</h2>
+                  <p className="text-xs text-muted">
+                    {stay.bed ? `Room ${stay.bed.room.roomNumber} · ` : ''}
+                    {charge > 0 ? `Mess ${stay.bed?.room.foodIncluded ? 'included' : 'available'} · ₹${charge.toLocaleString('en-IN')}/month` : 'No mess charge on this room'}
+                  </p>
+                </div>
+              </div>
+              <span className={`px-3 py-1 text-xs font-bold rounded-full border ${
+                stay.foodOptOut
+                  ? 'border-hairline bg-surface text-muted'
+                  : 'border-positive/30 bg-positive-bg text-positive'
+              }`}>
                 {stay.foodOptOut ? 'Mess opted out' : 'Mess opted in'}
               </span>
             </div>
-            <p className="mt-1 text-sm text-slate-600">
-              {stay.bed ? `Room ${stay.bed.room.roomNumber} · ` : ''}
-              {charge > 0 ? `Mess ${stay.bed?.room.foodIncluded ? 'included' : 'available'} · ₹${charge.toLocaleString('en-IN')}/month` : 'No mess charge on this room'}
-            </p>
+
+            {/* Reassurance Note */}
+            <div className="mt-4 rounded-[var(--radius-button)] bg-surface border border-hairline p-3.5 text-xs text-muted leading-relaxed">
+              💡 <strong>Flexible Dining Policy:</strong> You can opt in or out of the monthly meal plan at any time. Preference updates take effect from your upcoming billing cycle with zero cancellation fees.
+            </div>
+
             {active && charge > 0 && (
-              <button disabled={toggling !== ''} onClick={() => void toggle(stay)} className="mt-3 inline-flex items-center gap-2 border border-[#02224B] px-3 py-2 text-sm font-semibold text-[#02224B] disabled:opacity-60">
-                {toggling === stay.id && <Loader2 className="h-4 w-4 animate-spin" />}
-                {stay.foodOptOut ? 'Opt into the mess' : 'Opt out of the mess'}
-              </button>
+              <div className="mt-4 pt-3 border-t border-hairline flex items-center justify-between">
+                <p className="text-xs text-muted">Switch your meal status for the next billing cycle</p>
+                <button
+                  disabled={toggling !== ''}
+                  onClick={() => void toggle(stay)}
+                  className="rounded-[var(--radius-button)] border border-navy-900 bg-white hover:bg-surface px-4 py-2 text-xs font-bold text-navy-900 disabled:opacity-60 transition-all inline-flex items-center gap-2 "
+                >
+                  {toggling === stay.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {stay.foodOptOut ? 'Opt into the mess' : 'Opt out of the mess'}
+                </button>
+              </div>
             )}
+
             {foodEntries.length > 0 && (
-              <div className="mt-4 border-t border-slate-100 pt-3">
-                <h3 className="text-sm font-semibold text-slate-900">Mess invoices</h3>
-                <div className="mt-1 divide-y divide-slate-100">
+              <div className="mt-5 border-t border-hairline pt-4">
+                <h3 className="text-xs font-bold text-muted mb-2">Past Mess Invoices</h3>
+                <div className="divide-y divide-hairline rounded-[var(--radius-button)] border border-hairline overflow-hidden">
                   {foodEntries.map((entry) => (
-                    <div key={entry.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                      <span className="text-slate-600">{entry.period} · ₹{entry.paidAmount.toLocaleString('en-IN')} / ₹{entry.amount.toLocaleString('en-IN')}</span>
-                      <span className={`text-xs font-semibold uppercase ${entry.status === 'PAID' ? 'text-emerald-700' : entry.status === 'OVERDUE' ? 'text-red-700' : 'text-amber-700'}`}>{entry.status}</span>
+                    <div key={entry.id} className="flex items-center justify-between gap-3 p-3 bg-white text-xs">
+                      <span className="font-semibold text-ink">
+                        {entry.period} · ₹{entry.paidAmount.toLocaleString('en-IN')} / ₹{entry.amount.toLocaleString('en-IN')}
+                      </span>
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
+                        entry.status === 'PAID'
+                          ? 'border-positive/30 bg-positive-bg text-positive'
+                          : entry.status === 'OVERDUE'
+                          ? 'border-negative/30 bg-negative-bg text-negative'
+                          : 'border-amber-200 bg-amber-50 text-amber-800'
+                      }`}>
+                        {entry.status}
+                      </span>
                     </div>
                   ))}
                 </div>

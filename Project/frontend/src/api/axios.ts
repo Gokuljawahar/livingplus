@@ -1,6 +1,6 @@
 import axios from 'axios';
-import { encrypt, decrypt } from '../utils/crypto';
 import { resolveAppHost } from '../utils/pg-host';
+import { areaOf, loginFor, residentSlugFromPath } from '../utils/app-areas';
 import { OWNER_TOKEN_KEY, OWNER_USER_KEY, RESIDENT_TOKEN_KEY, RESIDENT_USER_KEY } from '../utils/session';
 
 const configuredApiBase = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -17,7 +17,8 @@ const api = axios.create({
 });
 
 api.interceptors.request.use(async (config) => {
-  const isResidentRoute = window.location.pathname === '/resident' || window.location.pathname.startsWith('/pg/resident');
+  const area = areaOf(window.location.pathname);
+  const isResidentRoute = area === 'resident';
   const isResidentRequest = isResidentRoute || config.url?.includes('/pg/tenant/') || (config.data && !(config.data instanceof FormData) && config.data.purpose === 'TENANT_LOGIN');
   // Public PG search and the assistant chat also hide a signed-in resident's
   // own PG, so they need the resident identity even though the discovery page
@@ -28,59 +29,44 @@ api.interceptors.request.use(async (config) => {
   // Owner workspace pages must always act as the owner, even when a resident
   // session from another tab lingers in storage. Otherwise the assistant
   // answers with the resident persona on the owner page.
-  const isOwnerRoute =
-    pathname.startsWith('/owner/') ||
-    pathname.startsWith('/pg/manage') ||
-    pathname.startsWith('/pg/operators') ||
-    pathname.startsWith('/dashboard') ||
-    pathname === '/change-password';
+  const isOwnerRoute = area === 'owner';
   const isPublicDiscovery =
     (method === 'get' && url.includes('/pg/properties')) ||
     (method === 'post' && url.includes('/pg/ai/chat'));
   const residentToken = localStorage.getItem(RESIDENT_TOKEN_KEY);
   const token = localStorage.getItem(
-    isResidentRequest || (!isOwnerRoute && isPublicDiscovery && Boolean(residentToken)) ? RESIDENT_TOKEN_KEY : OWNER_TOKEN_KEY
+    !isOwnerRoute && (isResidentRequest || (isPublicDiscovery && Boolean(residentToken))) ? RESIDENT_TOKEN_KEY : OWNER_TOKEN_KEY
   );
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   const hostContext = resolveAppHost();
-  if (hostContext.kind === 'property') config.headers['X-PG-Slug'] = hostContext.slug;
-
-  // Encrypt request body (skip FormData)
-  if (config.data !== undefined && config.data !== null && !(config.data instanceof FormData)) {
-    const encrypted = await encrypt(config.data);
-    config.data = { data: encrypted };
-  }
-
-  // Encrypt query params (GET and any request with params)
-  if (config.params && Object.keys(config.params).length > 0) {
-    const encrypted = await encrypt(config.params);
-    config.params = { data: encrypted };
-  }
+  // Resident sites belong to one PG: /stay/<slug> (or a <slug> subdomain) scopes every request to it.
+  const pgSlug = residentSlugFromPath(pathname) || (hostContext.kind === 'property' ? hostContext.slug : null);
+  if (pgSlug) config.headers['X-PG-Slug'] = pgSlug;
 
   return config;
 });
 
 api.interceptors.response.use(
-  async (response) => {
-    if (response.data && typeof response.data.data === 'string') {
-      response.data = await decrypt(response.data.data);
-    }
-    return response;
-  },
+  (response) => response,
   async (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem(OWNER_TOKEN_KEY);
-      localStorage.removeItem(OWNER_USER_KEY);
-      localStorage.removeItem(RESIDENT_TOKEN_KEY);
-      localStorage.removeItem(RESIDENT_USER_KEY);
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+    // A guest-session 401 is not about the stored owner/resident session.
+    if (error.response?.status === 401 && error.response?.data?.code !== 'GUEST_VERIFICATION_REQUIRED') {
+      // Sign out of this area only, then show its sign-in page.
+      const { pathname } = window.location;
+      const area = areaOf(pathname);
+      const sentToken = String(error.config?.headers?.Authorization || '').replace(/^Bearer /, '');
+      if (sentToken && sentToken === localStorage.getItem(RESIDENT_TOKEN_KEY)) {
+        localStorage.removeItem(RESIDENT_TOKEN_KEY);
+        localStorage.removeItem(RESIDENT_USER_KEY);
+      } else if (sentToken) {
+        localStorage.removeItem(OWNER_TOKEN_KEY);
+        localStorage.removeItem(OWNER_USER_KEY);
       }
-    }
-    if (error.response?.data && typeof error.response.data.data === 'string') {
-      error.response.data = await decrypt(error.response.data.data);
+      const login = loginFor(area, pathname);
+      if (sentToken && area !== 'guest' && pathname !== login) window.location.href = login;
+      else if (sentToken && area === 'resident') window.location.reload();
     }
     return Promise.reject(error);
   }

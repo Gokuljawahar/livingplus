@@ -3,6 +3,7 @@
 // the run is a no-op summary so offline mode keeps working unchanged.
 import { logAudit } from './pg-audit.js';
 import { notifyWhatsAppTemplate } from './pg-notifications.js';
+import { logger } from '../utils/logger.js';
 
 export const REMINDER_THROTTLE_MS = 3 * 24 * 60 * 60 * 1000;
 const BATCH_LIMIT = 100;
@@ -89,8 +90,8 @@ export async function sendDueRentReminders(
 export function startRentReminderScheduler(db: any): void {
   const tick = () => {
     void sendDueRentReminders(db, {})
-      .then((summary) => console.log(`[PG billing] Rent reminders: ${summary.sent} sent, ${summary.skipped} skipped`))
-      .catch((error) => console.error('[PG billing] Rent reminders failed:', error));
+      .then((summary) => logger.info(`[PG billing] Rent reminders: ${summary.sent} sent, ${summary.skipped} skipped`))
+      .catch((error) => logger.error({ err: error }, '[PG billing] Rent reminders failed'));
   };
   tick();
   const timer = setInterval(tick, 24 * 60 * 60 * 1000);

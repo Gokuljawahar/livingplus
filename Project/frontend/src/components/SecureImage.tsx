@@ -102,13 +102,13 @@ export const SecureImage: React.FC<SecureImageProps> = ({ srcKey, fallbackSrc, c
   }, [srcKey, fallbackSrc]);
 
   if (loading) {
-    return <div className={`animate-pulse bg-slate-200 ${className}`} {...(props as React.HTMLAttributes<HTMLDivElement>)}></div>;
+    return <div className={`animate-pulse bg-surface ${className}`} {...(props as React.HTMLAttributes<HTMLDivElement>)}></div>;
   }
 
   return (
     <>
       {!imageLoaded && (
-        <div className={`animate-pulse bg-slate-200 ${className}`} style={props.style}></div>
+        <div className={`animate-pulse bg-surface ${className}`} style={props.style}></div>
       )}
       <img
         src={imgSrc || fallbackSrc}

@@ -1,10 +1,12 @@
 import type { Request, Response } from 'express';
-import { prisma } from '../app.js';
-import { actorFromRequest, toolCatalogue } from '../services/ai-tools.js';
+import { prisma } from '../db/index.js';
+import { actorFromRequest, parseToolArgs, toolCatalogue } from '../services/ai-tools.js';
+import { INVALID_REQUEST } from '../utils/validate.js';
 import { currentUser } from './pg.controller.js';
+import { logger } from '../utils/logger.js';
 
 const RESIDENT_ROLES = ['PG_TENANT'];
-const STAFF_ROLES = ['PG_OWNER', 'PG_WARDEN', 'SUPER_ADMIN'];
+const STAFF_ROLES = ['PG_OWNER', 'PG_WARDEN'];
 
 const FRIENDLY_MESSAGES: Record<string, string> = {
   FORBIDDEN: 'You do not have access to this.',
@@ -43,12 +45,15 @@ async function runRoomChangeTool(
 ): Promise<any> {
   const user = currentUser(req);
   if (!user || !roles.includes(user.role)) return res.status(403).json({ message: roleMessage });
+  // Same Zod schema the assistant's tool uses, so both paths validate alike.
+  const parsed = parseToolArgs(toolName, args);
+  if (!parsed.ok) return res.status(400).json({ message: INVALID_REQUEST, issues: parsed.error });
   try {
     const actor = await actorFromRequest(req);
-    const result = await (toolCatalogue as Record<string, any>)[toolName].execute(actor, args);
+    const result = await (toolCatalogue as Record<string, any>)[toolName].execute(actor, parsed.args);
     res.json(result);
   } catch (error) {
-    console.error(`Room change ${toolName} error:`, error);
+    logger.error({ err: error }, `Room change ${toolName} error`);
     res.status(errorStatus(error)).json({ message: errorMessage(error) });
   }
 }
@@ -104,7 +109,7 @@ export const listVacantBeds = async (req: Request, res: Response): Promise<any> 
       monthly_rent: bed.room?.monthlyRent ?? null
     })));
   } catch (error) {
-    console.error('Room change vacant beds error:', error);
+    logger.error({ err: error }, 'Room change vacant beds error');
     res.status(500).json({ message: 'Could not load vacant beds.' });
   }
 };

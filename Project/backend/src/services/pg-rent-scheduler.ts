@@ -1,5 +1,8 @@
 import type { PrismaClient } from '@prisma/client';
 import { calculateMonthlyRent, ensureFoodEntries } from './pg-billing.js';
+import { nextMonthStart, periodOf } from '../utils/app-time.js';
+import { logger } from '../utils/logger.js';
+import { invoiceCode } from './invoice-code.js';
 
 export async function generateMonthlyRentEntries(prisma: PrismaClient, at = new Date()): Promise<number> {
   const tenants = await prisma.pGTenant.findMany({
@@ -24,7 +27,7 @@ export async function generateMonthlyRentEntries(prisma: PrismaClient, at = new 
         entryType: 'RENT',
         amount: rent.amount,
         dueDate: rent.dueDate,
-        invoiceCode: `RENT-${rent.period}-${tenant.id.slice(0, 8).toUpperCase()}`,
+        invoiceCode: invoiceCode('RENT', tenant.id, rent.period),
         status: 'DUE'
       }
     });
@@ -38,12 +41,13 @@ export function startMonthlyRentScheduler(prisma: PrismaClient): void {
   const maxTimerDelay = 2_147_000_000;
   const now = new Date();
   void generateMonthlyRentEntries(prisma, now)
-    .then((count) => console.log(`[PG billing] Ensured ${count} rent entries for ${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`))
-    .catch((error) => console.error('[PG billing] Monthly rent generation failed:', error));
+    .then((count) => logger.info(`[PG billing] Ensured ${count} rent entries for ${periodOf(now)}`))
+    .catch((error) => logger.error({ err: error }, '[PG billing] Monthly rent generation failed'));
 
   const scheduleNextRun = () => {
     const current = new Date();
-    const nextRun = new Date(current.getFullYear(), current.getMonth() + 1, 1, 0, 5, 0, 0);
+    // 00:05 on the 1st, in the business timezone (APP_TIMEZONE).
+    const nextRun = nextMonthStart(current, 0, 5);
     const timer = setTimeout(() => {
       if (Date.now() < nextRun.getTime()) {
         scheduleNextRun();
@@ -51,8 +55,8 @@ export function startMonthlyRentScheduler(prisma: PrismaClient): void {
       }
 
       void generateMonthlyRentEntries(prisma, nextRun)
-        .then((count) => console.log(`[PG billing] Ensured ${count} rent entries for ${nextRun.getFullYear()}-${String(nextRun.getMonth() + 1).padStart(2, '0')}`))
-        .catch((error) => console.error('[PG billing] Monthly rent generation failed:', error))
+        .then((count) => logger.info(`[PG billing] Ensured ${count} rent entries for ${periodOf(nextRun)}`))
+        .catch((error) => logger.error({ err: error }, '[PG billing] Monthly rent generation failed'))
         .finally(scheduleNextRun);
     }, Math.min(maxTimerDelay, Math.max(0, nextRun.getTime() - current.getTime())));
     timer.unref();

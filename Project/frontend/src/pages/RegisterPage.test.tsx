@@ -1,0 +1,62 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+
+const api = vi.hoisted(() => ({ post: vi.fn() }));
+vi.mock('../api/axios', () => ({ default: api }));
+vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }));
+vi.mock('../components/LogoLoader', () => ({ default: () => null }));
+const otp = vi.hoisted(() => ({ verify: vi.fn() }));
+vi.mock('../utils/phone-otp', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../utils/phone-otp')>()),
+  startPhoneVerification: vi.fn(async () => ({ devCode: '123456', verify: otp.verify }))
+}));
+
+import RegisterPage from './RegisterPage';
+import { renderWithProviders } from '../test/render';
+
+beforeEach(() => {
+  api.post.mockReset();
+  otp.verify.mockReset().mockResolvedValue({ phoneToken: 'vrf_owner', guestToken: 'gst' });
+});
+
+async function toStepTwo() {
+  const user = userEvent.setup();
+  renderWithProviders(<RegisterPage />);
+  await user.type(screen.getByPlaceholderText('Phone number'), '9876543210');
+  // The owner proves the phone number first, so listings can show "Verified owner".
+  await user.click(screen.getByRole('button', { name: 'Send code' }));
+  await user.type(await screen.findByLabelText('6-digit verification code'), '123456');
+  await user.click(screen.getByRole('button', { name: 'Verify and continue' }));
+  await screen.findByLabelText('Owner name');
+  return user;
+}
+
+describe('RegisterPage', () => {
+  it('shows every missing field and a weak password without calling the API', async () => {
+    const user = await toStepTwo();
+    await user.type(screen.getByLabelText('Set password'), 'weak');
+    await user.click(screen.getByRole('button', { name: /create pg owner account/i }));
+    for (const message of ['Owner name is required', 'PG name is required', 'Property address is required', 'Locality is required']) {
+      expect(await screen.findByText(message)).toBeInTheDocument();
+    }
+    expect(screen.getByText(/Must contain 8\+ chars/)).toBeInTheDocument();
+    expect(screen.getByText('Passwords do not match')).toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it('registers with the formatted phone', async () => {
+    api.post.mockResolvedValue({ data: { pgSlug: 'cedar-house' } });
+    const user = await toStepTwo();
+    await user.type(screen.getByLabelText('Owner name'), 'Asha Rao');
+    await user.type(screen.getByLabelText('PG / Hostel name'), 'Cedar House');
+    await user.type(screen.getByPlaceholderText('Building and street'), '12 OMR Road');
+    await user.type(screen.getByPlaceholderText('Neighbourhood'), 'Sholinganallur');
+    await user.type(screen.getByLabelText('Set password'), 'Strong@123');
+    await user.type(screen.getByLabelText('Confirm password'), 'Strong@123');
+    await user.click(screen.getByRole('button', { name: /create pg owner account/i }));
+    expect(api.post).toHaveBeenCalledWith('/auth/register', expect.objectContaining({
+      name: 'Asha Rao', propertyName: 'Cedar House', phone: '919876543210', locality: 'Sholinganallur', city: 'Chennai', genderPolicy: 'ANY', password: 'Strong@123', phoneToken: 'vrf_owner'
+    }));
+  });
+});

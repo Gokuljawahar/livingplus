@@ -1,15 +1,16 @@
 import type { Request, Response } from 'express';
+import { issueGuestToken } from '../utils/guest-token.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { createHash, randomInt, randomUUID, timingSafeEqual } from 'crypto';
-import { prisma } from '../app.js';
+import { prisma } from '../db/index.js';
 import { getJwtSecret } from '../utils/auth-config.js';
 import { createUniquePgSlug } from '../utils/pg-slug.js';
-
-function normalizePhone(phone: string): string {
-  const digits = phone.replace(/\D/g, '');
-  return digits.length === 10 ? `91${digits}` : digits;
-}
+import { logger } from '../utils/logger.js';
+import { isGenderPolicy, isStrongPassword, MESSAGES, normalizeIndianPhone as normalizePhone } from '@livingplus/shared';
+import { INVALID_REQUEST, parseBody } from '../utils/validate.js';
+import { changePasswordBody, googleLoginBody, verifyPhoneBody, loginBody, otpRequestBody, otpVerifyBody, registerBody, updateProfileBody } from '../validation/request.schemas.js';
+import { googleSignInEnabled, otpProvider, verifyFirebaseGoogleToken, verifyFirebasePhoneToken, type FirebaseVerificationDeps } from '../services/phone-verification.js';
 
 function toUserResponse(user: any) {
   return {
@@ -18,7 +19,9 @@ function toUserResponse(user: any) {
     phone: user.phone,
     name: user.name,
     role: user.role,
-    profileImage: user.profileImage
+    profileImage: user.profileImage,
+    googleLinked: Boolean(user.googleUid),
+    phoneVerified: Boolean(user.phoneVerifiedAt)
   };
 }
 
@@ -51,23 +54,30 @@ async function residentSessionForPhone(phone: string, propertyId?: string): Prom
   return { token: createToken(user, propertyId || tenant.propertyId), user: toUserResponse(user) };
 }
 
+/** On a PG host, staff may sign in only to the PGs they own or are warden of. */
+async function hasPropertyAccess(user: { id: string; role: string }, propertyId?: string): Promise<boolean> {
+  if (!propertyId) return true;
+  const propertyAccess = await prisma.pGPropertyAccess.findFirst({
+    where: { propertyId, userId: user.id, role: user.role === 'PG_WARDEN' ? { in: ['WARDEN', 'COOK', 'HOUSEKEEPING', 'ACCOUNTANT'] } : 'OWNER' },
+    select: { id: true }
+  });
+  return Boolean(propertyAccess);
+}
+
 export const login = async (req: Request, res: Response): Promise<any> => {
-  const { email, phone, password } = req.body;
+  // Shape check only; the rules below still validate values.
+  const input: any = parseBody(loginBody, req, res, INVALID_REQUEST);
+  if (!input) return;
+  const { email, phone, password } = input;
   const loginId = String(phone || email || '').trim();
   const propertyId = (req as any).pgPropertyId as string | undefined;
   if (!loginId || !password) return res.status(400).json({ message: 'Phone or email and password are required' });
 
   try {
-    if (email === process.env.ADMIN_USERNAME && password === process.env.ADMIN_PASSWORD) {
-      const user = { id: 'env-admin', role: 'SUPER_ADMIN' };
-      return res.json({
-        token: createToken(user, propertyId),
-        user: { id: user.id, email: process.env.ADMIN_USERNAME, name: 'Super Admin', role: user.role, profileImage: null }
-      });
-    }
-
     const digits = normalizePhone(loginId);
-    const phoneOptions = [...new Set([loginId, digits, digits.startsWith('91') ? digits.slice(2) : digits])];
+    // "+91 95555 00001", "919555500001" and "09555500001" all mean the same number.
+    const local = digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits.startsWith('0') && digits.length === 11 ? digits.slice(1) : digits;
+    const phoneOptions = [...new Set([loginId, digits, local, `91${local}`])];
     const user = await prisma.user.findFirst({
       where: {
         OR: [
@@ -76,35 +86,36 @@ export const login = async (req: Request, res: Response): Promise<any> => {
         ]
       }
     });
-    if (!user || !await bcrypt.compare(String(password), user.password)) {
+    // A space copied along with the password shouldn't lock anyone out: try it exactly, then trimmed.
+    const typed = String(password);
+    const matches = user && (await bcrypt.compare(typed, user.password) || (typed.trim() !== typed && await bcrypt.compare(typed.trim(), user.password)));
+    if (!user || !matches) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    if (propertyId && user.role !== 'SUPER_ADMIN') {
-      const propertyAccess = await prisma.pGPropertyAccess.findFirst({
-        where: {
-          propertyId,
-          userId: user.id,
-          role: user.role === 'PG_WARDEN' ? 'WARDEN' : 'OWNER'
-        },
-        select: { id: true }
-      });
-      if (!propertyAccess) return res.status(403).json({ message: 'This account does not have access to this PG' });
-    }
+    if (!await hasPropertyAccess(user, propertyId)) return res.status(403).json({ message: 'This account does not have access to this PG' });
 
     res.json({ token: createToken(user, propertyId), user: toUserResponse(user) });
   } catch (error) {
-    console.error('PG login error:', error);
+    logger.error({ err: error }, 'PG login error');
     res.status(500).json({ message: 'Internal server error' });
   }
 };
 
 export const register = async (req: Request, res: Response): Promise<any> => {
-  const { name, email, phone, password, propertyName, propertyAddress, locality, contactPhone, city, genderPolicy, amenities, houseRules } = req.body;
+  // Shape check only; the rules below still validate values.
+  const input: any = parseBody(registerBody, req, res, INVALID_REQUEST);
+  if (!input) return;
+  const { name, email, phone, password, propertyName, propertyAddress, locality, contactPhone, city, genderPolicy, amenities, houseRules } = input;
   const normalizedPhone = normalizePhone(String(phone || ''));
   const pgSlug = (req as any).pgSlug as string | undefined;
   if (!name?.trim() || !propertyName?.trim() || !propertyAddress?.trim() || !locality?.trim() || normalizedPhone.length < 10 || !password) {
     return res.status(400).json({ message: 'Owner, PG name, phone, address, locality and password are required' });
+  }
+  if (!isStrongPassword(String(password))) return res.status(400).json({ message: MESSAGES.strongPassword });
+  // Owners prove the phone number they register with, so guests can trust "Verified owner".
+  if (!await consumePhoneToken(normalizedPhone, input.phoneToken ? String(input.phoneToken) : undefined)) {
+    return res.status(400).json({ code: 'PHONE_NOT_VERIFIED', message: 'Verify your phone number with the code we sent' });
   }
 
   try {
@@ -127,7 +138,8 @@ export const register = async (req: Request, res: Response): Promise<any> => {
           email: email?.trim() || null,
           phone: normalizedPhone,
           password: passwordHash,
-          role: 'PG_OWNER'
+          role: 'PG_OWNER',
+          phoneVerifiedAt: new Date()
         }
       });
       const slug = pgSlug || await createUniquePgSlug(tx, propertyName);
@@ -139,7 +151,7 @@ export const register = async (req: Request, res: Response): Promise<any> => {
           locality: locality.trim(),
           contactPhone: contactPhone ? normalizePhone(String(contactPhone)) : null,
           city: city?.trim() || 'Chennai',
-          genderPolicy: ['MEN', 'WOMEN', 'ANY'].includes(genderPolicy) ? genderPolicy : 'ANY',
+          genderPolicy: isGenderPolicy(String(genderPolicy)) ? genderPolicy : 'ANY',
           amenities: Array.isArray(amenities) ? amenities : [],
           houseRules: Array.isArray(houseRules) ? houseRules : [],
           access: { create: { userId: user.id, role: 'OWNER' } }
@@ -155,8 +167,111 @@ export const register = async (req: Request, res: Response): Promise<any> => {
     });
   } catch (error: any) {
     if (error?.code === 'P2002') return res.status(400).json({ message: 'An account with this phone or email already exists' });
-    console.error('PG registration error:', error);
+    logger.error({ err: error }, 'PG registration error');
     res.status(500).json({ message: 'Failed to create PG account' });
+  }
+};
+
+/**
+ * "Sign in with Google": the browser signs in with Firebase (Google provider)
+ * and sends the Firebase ID token. Staff accounts sign in only with a Google
+ * account they linked themselves after a password sign-in (matched by the
+ * Google uid, never by the unverified email typed at registration).
+ * Residents keep using phone OTP.
+ */
+export function createGoogleLoginHandler(deps: FirebaseVerificationDeps = {}) {
+  return async (req: Request, res: Response): Promise<any> => {
+    const input: any = parseBody(googleLoginBody, req, res, INVALID_REQUEST);
+    if (!input) return;
+    const idToken = typeof input.firebaseIdToken === 'string' ? input.firebaseIdToken.trim() : '';
+    const propertyId = (req as any).pgPropertyId as string | undefined;
+    if (!googleSignInEnabled()) return res.status(404).json({ message: 'Google sign-in is not enabled' });
+    if (!idToken) return res.status(400).json({ message: 'Google sign-in is required' });
+
+    let account;
+    try {
+      account = await verifyFirebaseGoogleToken(idToken, Date.now(), deps);
+    } catch (error: any) {
+      if (error?.message === 'FIREBASE_NOT_CONFIGURED') {
+        logger.error('ENABLE_GOOGLE_SIGN_IN=true but FIREBASE_PROJECT_ID is not set');
+        return res.status(503).json({ message: 'Google sign-in is not available right now' });
+      }
+      return res.status(401).json({ message: 'Google sign-in failed. Please try again.' });
+    }
+
+    try {
+      const user = await prisma.user.findUnique({ where: { googleUid: account.uid } });
+      if (!user) {
+        return res.status(403).json({
+          code: 'GOOGLE_NOT_LINKED',
+          message: 'This Google account is not linked yet. Sign in with your mobile number and password, then link Google under Account security.'
+        });
+      }
+      if (user.role === 'PG_TENANT') return res.status(403).json({ message: 'Residents sign in with their phone number on the resident portal.' });
+      if (!await hasPropertyAccess(user, propertyId)) return res.status(403).json({ message: 'This account does not have access to this PG' });
+
+      res.json({ token: createToken(user, propertyId), user: toUserResponse(user) });
+    } catch (error) {
+      logger.error({ err: error }, 'Google sign-in error');
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  };
+}
+
+export const googleLogin = createGoogleLoginHandler();
+
+const STAFF_ROLES = ['PG_OWNER', 'PG_WARDEN'];
+
+/**
+ * Links the Google account in the Firebase ID token to the signed-in staff
+ * account. Doing this while signed in with the password proves the person
+ * controls both, so later Google sign-ins can trust the link.
+ */
+export function createLinkGoogleHandler(deps: FirebaseVerificationDeps = {}) {
+  return async (req: Request, res: Response): Promise<any> => {
+    const input: any = parseBody(googleLoginBody, req, res, INVALID_REQUEST);
+    if (!input) return;
+    const { userId } = (req as any).user || {};
+    if (!googleSignInEnabled()) return res.status(404).json({ message: 'Google sign-in is not enabled' });
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+    const idToken = typeof input.firebaseIdToken === 'string' ? input.firebaseIdToken.trim() : '';
+    if (!idToken) return res.status(400).json({ message: 'Google sign-in is required' });
+
+    let account;
+    try {
+      account = await verifyFirebaseGoogleToken(idToken, Date.now(), deps);
+    } catch (error: any) {
+      if (error?.message === 'FIREBASE_NOT_CONFIGURED') return res.status(503).json({ message: 'Google sign-in is not available right now' });
+      return res.status(401).json({ message: 'Google sign-in failed. Please try again.' });
+    }
+
+    try {
+      const user = await prisma.user.findUnique({ where: { id: String(userId) } });
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      if (!STAFF_ROLES.includes(user.role)) return res.status(403).json({ message: 'Only owners, wardens and admins can link Google.' });
+      const holder = await prisma.user.findUnique({ where: { googleUid: account.uid }, select: { id: true } });
+      if (holder && holder.id !== user.id) return res.status(409).json({ message: 'This Google account is already linked to another LivingPlus account.' });
+      const updated = await prisma.user.update({ where: { id: user.id }, data: { googleUid: account.uid, googleLinkedAt: new Date() } });
+      res.json(toUserResponse(updated));
+    } catch (error) {
+      logger.error({ err: error }, 'Google link error');
+      res.status(500).json({ message: 'Could not link Google account' });
+    }
+  };
+}
+
+export const linkGoogle = createLinkGoogleHandler();
+
+/** Removes the Google link; the account signs in with its password again. */
+export const unlinkGoogle = async (req: Request, res: Response): Promise<any> => {
+  const { userId } = (req as any).user || {};
+  if (!userId) return res.status(400).json({ message: 'No linked Google account' });
+  try {
+    const updated = await prisma.user.update({ where: { id: String(userId) }, data: { googleUid: null, googleLinkedAt: null } });
+    res.json(toUserResponse(updated));
+  } catch (error) {
+    logger.error({ err: error }, 'Google unlink error');
+    res.status(500).json({ message: 'Could not unlink Google account' });
   }
 };
 
@@ -164,10 +279,13 @@ function hashOtp(code: string): string {
   return createHash('sha256').update(code).digest('hex');
 }
 
+/** Demo deployments without SMS: codes are shown on screen (never use with real users). */
+const otpDemoMode = () => process.env.OTP_DEMO_MODE === 'true';
+
 async function sendSms(phone: string, message: string): Promise<string | null> {
   const apiUrl = process.env.SMS_API_URL;
   if (!apiUrl) {
-    if (process.env.NODE_ENV === 'production') throw new Error('SMS delivery is not configured');
+    if (process.env.NODE_ENV === 'production' && !otpDemoMode()) throw new Error('SMS delivery is not configured');
     return null;
   }
   const response = await fetch(apiUrl, {
@@ -180,12 +298,18 @@ async function sendSms(phone: string, message: string): Promise<string | null> {
 }
 
 export const requestOtp = async (req: Request, res: Response): Promise<any> => {
-  const phone = normalizePhone(String(req.body.phone || ''));
-  const purpose = ['BOOKING', 'TENANT_LOGIN'].includes(String(req.body.purpose)) ? String(req.body.purpose) : 'BOOKING';
+  // Shape check only; the rules below still validate values.
+  const input: any = parseBody(otpRequestBody, req, res, INVALID_REQUEST);
+  if (!input) return;
+  const phone = normalizePhone(String(input.phone || ''));
+  const purpose = ['BOOKING', 'TENANT_LOGIN'].includes(String(input.purpose)) ? String(input.purpose) : 'BOOKING';
   const propertyId = (req as any).pgPropertyId as string | undefined;
   if (phone.length < 10) return res.status(400).json({ message: 'A valid phone number is required' });
-  if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production') {
+  if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production' && process.env.SINGLE_HOST_MODE !== 'true') {
     return res.status(400).json({ message: 'Open your PG-specific resident portal to sign in' });
+  }
+  if (otpProvider() === 'firebase') {
+    return res.status(409).json({ message: 'This server verifies phones with Firebase; send the code from the app.', provider: 'firebase' });
   }
 
   try {
@@ -204,60 +328,97 @@ export const requestOtp = async (req: Request, res: Response): Promise<any> => {
     await prisma.otpCode.create({
       data: { phone, propertyId: propertyId || null, purpose, codeHash: hashOtp(code), expiresAt: new Date(Date.now() + 5 * 60 * 1000) }
     });
-    res.json({ message: 'Verification code sent', ...(process.env.SMS_API_URL || process.env.NODE_ENV === 'production' ? {} : { devCode: code }) });
+    const showCode = !process.env.SMS_API_URL && (process.env.NODE_ENV !== 'production' || otpDemoMode());
+    res.json({ message: 'Verification code sent', ...(showCode ? { devCode: code } : {}) });
   } catch (error) {
-    console.error('PG OTP request error:', error);
+    logger.error({ err: error }, 'PG OTP request error');
     res.status(500).json({ message: 'Failed to send verification code' });
   }
 };
 
-export const verifyOtp = async (req: Request, res: Response): Promise<any> => {
-  const phone = normalizePhone(String(req.body.phone || ''));
-  const purpose = ['BOOKING', 'TENANT_LOGIN'].includes(String(req.body.purpose)) ? String(req.body.purpose) : 'BOOKING';
-  const code = String(req.body.code || '').trim();
-  const propertyId = (req as any).pgPropertyId as string | undefined;
-  if (!code) return res.status(400).json({ message: 'Verification code is required' });
-  if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production') {
-    return res.status(400).json({ message: 'Open your PG-specific resident portal to sign in' });
-  }
-
-  try {
-    const record = await prisma.otpCode.findFirst({
-      where: { phone, purpose, propertyId: propertyId || null, consumedAt: null },
-      orderBy: { createdAt: 'desc' }
-    });
-    if (!record || record.expiresAt < new Date()) return res.status(400).json({ message: 'Code expired. Request a new one.' });
-    if (record.attempts >= 5) return res.status(429).json({ message: 'Too many attempts. Request a new code.' });
-
-    const expected = Buffer.from(record.codeHash, 'hex');
-    const actual = Buffer.from(hashOtp(code), 'hex');
-    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
-      await prisma.otpCode.update({ where: { id: record.id }, data: { attempts: { increment: 1 } } });
-      return res.status(400).json({ message: 'Invalid verification code' });
+export function createVerifyOtpHandler(deps: FirebaseVerificationDeps = {}) {
+  return async (req: Request, res: Response): Promise<any> => {
+    // Shape check only; the rules below still validate values.
+    const input: any = parseBody(otpVerifyBody, req, res, INVALID_REQUEST);
+    if (!input) return;
+    const phone = normalizePhone(String(input.phone || ''));
+    const purpose = ['BOOKING', 'TENANT_LOGIN'].includes(String(input.purpose)) ? String(input.purpose) : 'BOOKING';
+    const propertyId = (req as any).pgPropertyId as string | undefined;
+    if (purpose === 'TENANT_LOGIN' && !propertyId && process.env.NODE_ENV === 'production' && process.env.SINGLE_HOST_MODE !== 'true') {
+      return res.status(400).json({ message: 'Open your PG-specific resident portal to sign in' });
     }
 
-    const verifiedToken = `vrf_${randomUUID().replace(/-/g, '')}`;
-    await prisma.otpCode.update({
-      where: { id: record.id },
-      data: { verifiedToken, tokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000) }
-    });
+    try {
+      let recordId: string;
+      if (otpProvider() === 'firebase') {
+        const idToken = typeof input.firebaseIdToken === 'string' ? input.firebaseIdToken.trim() : '';
+        if (!idToken) return res.status(400).json({ message: 'Phone verification is required' });
+        let verified;
+        try {
+          verified = await verifyFirebasePhoneToken(idToken, Date.now(), deps);
+        } catch (error: any) {
+          if (error?.message === 'FIREBASE_NOT_CONFIGURED') {
+            logger.error('OTP_PROVIDER=firebase but FIREBASE_PROJECT_ID is not set');
+            return res.status(503).json({ message: 'Phone verification is not available right now' });
+          }
+          return res.status(400).json({ message: 'Phone verification failed. Request a new code.' });
+        }
+        if (verified.phone !== phone) return res.status(400).json({ message: 'The verified number does not match the phone you entered' });
+        // One phone token per Firebase sign-in: a replayed ID token is refused.
+        const proofHash = hashOtp(`firebase:${verified.uid}:${verified.authTime}`);
+        if (await prisma.otpCode.findFirst({ where: { codeHash: proofHash }, select: { id: true } })) {
+          return res.status(400).json({ message: 'This verification was already used. Request a new code.' });
+        }
+        const record = await prisma.otpCode.create({
+          data: { phone, propertyId: propertyId || null, purpose, codeHash: proofHash, expiresAt: new Date(Date.now() + 5 * 60 * 1000) }
+        });
+        recordId = record.id;
+      } else {
+        const code = String(input.code || '').trim();
+        if (!code) return res.status(400).json({ message: 'Verification code is required' });
+        const record = await prisma.otpCode.findFirst({
+          where: { phone, purpose, propertyId: propertyId || null, consumedAt: null },
+          orderBy: { createdAt: 'desc' }
+        });
+        if (!record || record.expiresAt < new Date()) return res.status(400).json({ message: 'Code expired. Request a new one.' });
+        if (record.attempts >= 5) return res.status(429).json({ message: 'Too many attempts. Request a new code.' });
 
-    if (purpose === 'TENANT_LOGIN') {
+        const expected = Buffer.from(record.codeHash, 'hex');
+        const actual = Buffer.from(hashOtp(code), 'hex');
+        if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+          await prisma.otpCode.update({ where: { id: record.id }, data: { attempts: { increment: 1 } } });
+          return res.status(400).json({ message: 'Invalid verification code' });
+        }
+        recordId = record.id;
+      }
+
+      const verifiedToken = `vrf_${randomUUID().replace(/-/g, '')}`;
+      await prisma.otpCode.update({
+        where: { id: recordId },
+        data: { verifiedToken, tokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000) }
+      });
+
+      if (purpose === 'TENANT_LOGIN') {
+        const resident = await residentSessionForPhone(phone, propertyId);
+        if (!resident) return res.status(404).json({ message: 'No active stay found for this phone number' });
+        if ('forbidden' in resident) return res.status(403).json({ message: 'This account cannot sign in as a resident' });
+        return res.json({ token: resident.token, user: resident.user });
+      }
       const resident = await residentSessionForPhone(phone, propertyId);
-      if (!resident) return res.status(404).json({ message: 'No active stay found for this phone number' });
-      if ('forbidden' in resident) return res.status(403).json({ message: 'This account cannot sign in as a resident' });
-      return res.json({ token: resident.token, user: resident.user });
+      res.json({
+        phoneToken: verifiedToken,
+        // Lets this visitor see and cancel their own booking requests (and only theirs).
+        guestToken: issueGuestToken(phone),
+        ...(!resident || 'forbidden' in resident ? {} : { resident })
+      });
+    } catch (error) {
+      logger.error({ err: error }, 'PG OTP verify error');
+      res.status(500).json({ message: 'Failed to verify code' });
     }
-    const resident = await residentSessionForPhone(phone, propertyId);
-    res.json({
-      phoneToken: verifiedToken,
-      ...(!resident || 'forbidden' in resident ? {} : { resident })
-    });
-  } catch (error) {
-    console.error('PG OTP verify error:', error);
-    res.status(500).json({ message: 'Failed to verify code' });
-  }
-};
+  };
+}
+
+export const verifyOtp = createVerifyOtpHandler();
 
 export async function consumePhoneToken(phone: string, token: string | undefined, purpose = 'BOOKING', propertyId?: string): Promise<boolean> {
   if (!token) return false;
@@ -280,8 +441,11 @@ export const forgotPassword = async (_req: Request, res: Response): Promise<any>
 };
 
 export const changePassword = async (req: Request, res: Response): Promise<any> => {
+  // Shape check only; the rules below still validate values.
+  const input: any = parseBody(changePasswordBody, req, res, INVALID_REQUEST);
+  if (!input) return;
   const { userId } = (req as any).user || {};
-  const { currentPassword, newPassword } = req.body;
+  const { currentPassword, newPassword } = input;
   if (!userId) return res.status(401).json({ message: 'Unauthorized' });
   if (!currentPassword || !newPassword) return res.status(400).json({ message: 'Current and new password are required' });
 
@@ -293,32 +457,38 @@ export const changePassword = async (req: Request, res: Response): Promise<any> 
     await prisma.user.update({ where: { id: user.id }, data: { password } });
     res.json({ message: 'Password updated successfully' });
   } catch (error) {
-    console.error('PG password change error:', error);
+    logger.error({ err: error }, 'PG password change error');
     res.status(500).json({ message: 'Failed to change password' });
   }
 };
 
-export const adminResetPassword = async (req: Request, res: Response): Promise<any> => {
-  const { role } = (req as any).user || {};
-  const { userId, newPassword } = req.body;
-  if (role !== 'SUPER_ADMIN') return res.status(403).json({ message: 'Only Super Admins can reset passwords' });
-  if (!userId || !newPassword) return res.status(400).json({ message: 'User ID and new password are required' });
-
+/** Owners and wardens who registered before phone checks prove their number here. */
+export const verifyMyPhone = async (req: Request, res: Response): Promise<any> => {
+  const input: any = parseBody(verifyPhoneBody, req, res, INVALID_REQUEST);
+  if (!input) return;
+  const { userId } = (req as any).user || {};
+  if (!userId) return res.status(401).json({ message: 'Unauthorized' });
   try {
-    const password = await bcrypt.hash(String(newPassword), 10);
-    await prisma.user.update({ where: { id: String(userId) }, data: { password } });
-    res.json({ message: 'Password reset successfully' });
+    const user = await prisma.user.findUnique({ where: { id: String(userId) } });
+    if (!user || user.role === 'PG_TENANT') return res.status(403).json({ message: 'Only staff accounts verify here' });
+    if (!await consumePhoneToken(normalizePhone(user.phone || ''), String(input.phoneToken || ''))) {
+      return res.status(400).json({ message: 'That code is for a different number or has expired. Send a new code.' });
+    }
+    const updated = await prisma.user.update({ where: { id: user.id }, data: { phoneVerifiedAt: new Date() } });
+    res.json({ user: toUserResponse(updated) });
   } catch (error) {
-    console.error('PG admin password reset error:', error);
-    res.status(500).json({ message: 'Failed to reset password' });
+    logger.error({ err: error }, 'Phone verification error');
+    res.status(500).json({ message: 'Could not verify your phone' });
   }
 };
 
 export const updateProfile = async (req: Request, res: Response): Promise<any> => {
+  // Shape check only; the rules below still validate values.
+  const input: any = parseBody(updateProfileBody, req, res, INVALID_REQUEST);
+  if (!input) return;
   const { userId } = (req as any).user || {};
-  const { name, profileImage } = req.body;
+  const { name, profileImage } = input;
   if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-  if (userId === 'env-admin') return res.status(400).json({ message: 'The environment admin profile cannot be changed.' });
 
   try {
     const user = await prisma.user.update({
@@ -327,7 +497,7 @@ export const updateProfile = async (req: Request, res: Response): Promise<any> =
     });
     res.json(toUserResponse(user));
   } catch (error) {
-    console.error('PG profile update error:', error);
+    logger.error({ err: error }, 'PG profile update error');
     res.status(500).json({ message: 'Failed to update profile' });
   }
 };

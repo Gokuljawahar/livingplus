@@ -18,7 +18,7 @@ export type ServiceStay = {
 function formatDate(value?: string | null): string | null {
   if (!value) return null;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString();
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function stayMonths(moveIn: string, moveOut?: string | null): string {
@@ -50,50 +50,102 @@ export default function StayServices({ stays }: { stays: ServiceStay[] }) {
     }
   };
 
-  if (!stays.length) return <p className="border border-slate-200 bg-white py-10 text-center text-sm text-slate-500">No stays found for this number.</p>;
+  if (!stays.length) return (
+    <div className="rounded-[var(--radius-card)] border border-hairline bg-white py-12 text-center text-sm text-muted">
+      No stays found for this number.
+    </div>
+  );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {stays.map((stay) => {
         const movedIn = formatDate(stay.moveInDate);
         const checkedOut = stay.checkedOutAt || stay.moveOutDate;
         const showCheckout = checkedOut || (stay.depositRefundStatus && stay.depositRefundStatus !== 'NOT_APPLICABLE');
         return (
-          <article key={stay.id} className="border border-slate-200 bg-white p-5">
-            <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-100 pb-3">
-              <h2 className="text-lg font-semibold text-[#02224B]">{stay.property.name}</h2>
-              <p className="text-xs font-semibold uppercase text-slate-500">{stay.status.replace('_', ' ')}{stay.bed ? ` · Room ${stay.bed.room.roomNumber}, ${stay.bed.label}` : ''}</p>
+          <article key={stay.id} className="rounded-[var(--radius-card)] border border-hairline/90 bg-white p-6 transition-shadow">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-hairline pb-4">
+              <div>
+                <h2 className="text-lg font-bold text-navy-900">{stay.property.name}</h2>
+                <p className="text-xs text-muted mt-0.5">{stay.property.locality}, {stay.property.city}</p>
+              </div>
+              <span className="text-xs font-bold text-muted bg-surface px-3 py-1 rounded-full border border-hairline">
+                {stay.status.replace('_', ' ')}{stay.bed ? ` · Room ${stay.bed.room.roomNumber}, ${stay.bed.label}` : ''}
+              </span>
             </div>
 
-            <section className="pt-4">
-              <h3 className="flex items-center gap-2 font-semibold text-slate-900"><History className="h-4 w-4 text-slate-500" />Stay timeline</h3>
-              <div className="mt-2 divide-y divide-slate-100 text-sm">
-                {movedIn && <div className="flex items-center justify-between gap-3 py-2"><span className="text-slate-600">Moved in{stayMonths(stay.moveInDate, stay.moveOutDate) ? ` · ${stayMonths(stay.moveInDate, stay.moveOutDate)}` : ''}</span><span className="font-medium">{movedIn}</span></div>}
-                {formatDate(stay.checkedInAt) && <div className="flex items-center justify-between gap-3 py-2"><span className="text-slate-600">Checked in by the PG</span><span className="font-medium">{formatDate(stay.checkedInAt)}</span></div>}
-                {formatDate(stay.noticeDate) && <div className="flex items-center justify-between gap-3 py-2"><span className="text-slate-600">Vacating notice given</span><span className="font-medium text-amber-700">{formatDate(stay.noticeDate)}</span></div>}
-                {formatDate(checkedOut) && <div className="flex items-center justify-between gap-3 py-2"><span className="text-slate-600">Moved out{stay.checkoutNote ? ` · ${stay.checkoutNote}` : ''}</span><span className="font-medium">{formatDate(checkedOut)}</span></div>}
+            <section className="pt-5">
+              <h3 className="flex items-center gap-2 font-bold text-ink text-sm">
+                <History className="h-4 w-4 text-navy-900" /> Stay Timeline & Verification
+              </h3>
+              <div className="mt-3 divide-y divide-hairline rounded-[var(--radius-button)] border border-hairline bg-surface/50 p-1 text-xs">
+                {movedIn && (
+                  <div className="flex items-center justify-between gap-3 p-3">
+                    <span className="text-muted font-medium">Moved in {stayMonths(stay.moveInDate, stay.moveOutDate) ? `(${stayMonths(stay.moveInDate, stay.moveOutDate)})` : ''}</span>
+                    <span className="font-bold text-ink">{movedIn}</span>
+                  </div>
+                )}
+                {formatDate(stay.checkedInAt) && (
+                  <div className="flex items-center justify-between gap-3 p-3">
+                    <span className="text-muted font-medium">Official Check-In Confirmed by PG</span>
+                    <span className="font-bold text-positive">{formatDate(stay.checkedInAt)}</span>
+                  </div>
+                )}
+                {formatDate(stay.noticeDate) && (
+                  <div className="flex items-center justify-between gap-3 p-3">
+                    <span className="text-muted font-medium">Vacating Notice Submitted</span>
+                    <span className="font-bold text-amber-700">{formatDate(stay.noticeDate)}</span>
+                  </div>
+                )}
+                {formatDate(checkedOut) && (
+                  <div className="flex items-center justify-between gap-3 p-3">
+                    <span className="text-muted font-medium">Moved out {stay.checkoutNote ? ` · Note: ${stay.checkoutNote}` : ''}</span>
+                    <span className="font-bold text-ink">{formatDate(checkedOut)}</span>
+                  </div>
+                )}
               </div>
             </section>
 
-            <section className="mt-4 border-t border-slate-100 pt-4">
-              <h3 className="flex items-center gap-2 font-semibold text-slate-900"><FileText className="h-4 w-4 text-slate-500" />Stay documents</h3>
-              <div className="mt-2 flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
-                <div><p className="font-medium text-slate-800">{stay.kycType ? stay.kycType.replace(/_/g, ' ') : 'KYC document'}</p><p className="text-xs text-slate-500">KYC {stay.kycVerified ? 'verified' : stay.kycDocumentUrl ? 'submitted, awaiting review' : 'not submitted'}</p></div>
+            <section className="mt-5 border-t border-hairline pt-5">
+              <h3 className="flex items-center gap-2 font-bold text-ink text-sm">
+                <FileText className="h-4 w-4 text-navy-900" /> Identity & Stay Documents
+              </h3>
+              <div className="mt-3 flex flex-col gap-3 rounded-[var(--radius-button)] border border-hairline bg-surface/50 p-4 sm:flex-row sm:items-center sm:justify-between text-xs">
+                <div>
+                  <p className="font-bold text-ink">
+                    {stay.kycType ? stay.kycType.replace(/_/g, ' ') : 'KYC Document'}
+                  </p>
+                  <p className="text-muted mt-0.5">
+                    Status: <span className={`font-semibold ${stay.kycVerified ? 'text-positive' : 'text-muted'}`}>{stay.kycVerified ? 'Verified by PG Owner' : stay.kycDocumentUrl ? 'Awaiting Owner Verification' : 'Not uploaded'}</span>
+                  </p>
+                </div>
                 {stay.kycDocumentUrl && (
-                  <button disabled={opening !== ''} onClick={() => void viewDocument(stay)} className="inline-flex items-center gap-1.5 border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60">
-                    {opening === stay.id && <Loader2 className="h-4 w-4 animate-spin" />}View my document
+                  <button
+                    disabled={opening !== ''}
+                    onClick={() => void viewDocument(stay)}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-[var(--radius-button)] border border-hairline bg-white px-3.5 py-2 text-xs font-bold text-ink hover:bg-surface transition-colors disabled:opacity-60"
+                  >
+                    {opening === stay.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    View my document
                   </button>
                 )}
               </div>
-              <p className="mt-2 text-xs text-slate-500">Rent receipts can be downloaded from the My stays tab.</p>
+              <p className="mt-2 text-xs text-muted font-medium">Official payment receipts can be downloaded directly from the My stays tab.</p>
             </section>
 
             {showCheckout && (
-              <section className="mt-4 border-t border-slate-100 pt-4">
-                <h3 className="flex items-center gap-2 font-semibold text-slate-900"><LogOut className="h-4 w-4 text-slate-500" />Checkout summary</h3>
-                <div className="mt-2 text-sm text-slate-600">
-                  {typeof stay.depositDeductions === 'number' && stay.depositDeductions > 0 && <p>Deductions: ₹{stay.depositDeductions.toLocaleString('en-IN')}</p>}
-                  <p className="mt-1">Refund: {stay.depositRefundAmount ? `₹${stay.depositRefundAmount.toLocaleString('en-IN')}` : '—'} · {(stay.depositRefundStatus || 'NOT_APPLICABLE').replace('_', ' ')}{stay.depositRefundReference ? ` · Ref ${stay.depositRefundReference}` : ''}</p>
+              <section className="mt-5 border-t border-hairline pt-5">
+                <h3 className="flex items-center gap-2 font-bold text-ink text-sm">
+                  <LogOut className="h-4 w-4 text-navy-900" /> Documented Move-Out Record
+                </h3>
+                <div className="mt-3 rounded-[var(--radius-button)] border border-hairline bg-surface/50 p-4 text-xs text-ink space-y-1">
+                  {typeof stay.depositDeductions === 'number' && stay.depositDeductions > 0 && (
+                    <p>Agreed room deductions: <span className="font-bold">₹{stay.depositDeductions.toLocaleString('en-IN')}</span></p>
+                  )}
+                  <p>
+                    Refund status: <span className="font-bold text-positive">{stay.depositRefundAmount ? `₹${stay.depositRefundAmount.toLocaleString('en-IN')}` : '—'}</span> · {(stay.depositRefundStatus || 'NOT_APPLICABLE').replace('_', ' ')}
+                    {stay.depositRefundReference ? ` · Ref ${stay.depositRefundReference}` : ''}
+                  </p>
                 </div>
               </section>
             )}

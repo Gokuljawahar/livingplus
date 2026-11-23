@@ -1,0 +1,26 @@
+# Builds the single LivingPlus image (API + frontend) with Cloud Build.
+# Used by deploy/gcp-deploy.sh:
+#   gcloud builds submit --config deploy/cloudbuild.yaml \
+#     --substitutions _IMAGE=...,_VITE_GOOGLE_MAPS_API_KEY=... .
+substitutions:
+  _IMAGE: ''
+  _VITE_GOOGLE_MAPS_API_KEY: ''
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_IMAGE}
+      - --build-arg
+      - VITE_GOOGLE_MAPS_API_KEY=${_VITE_GOOGLE_MAPS_API_KEY}
+      - --build-arg
+      - VITE_SINGLE_HOST_MODE=true
+      - .
+
+images:
+  - ${_IMAGE}
+
+options:
+  logging: CLOUD_LOGGING_ONLY

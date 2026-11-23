@@ -5,7 +5,9 @@ node_modules
 .env.*.local
 # Keep environment variables out of version control
 
-# Local SQLite databases (runtime data, incl. KYC-adjacent records)
+# Local databases (runtime data, incl. KYC-adjacent records)
+.local-postgres/
+tests/.tmp-postgres*/
 /generated/prisma
 *.db
 *.db-journal

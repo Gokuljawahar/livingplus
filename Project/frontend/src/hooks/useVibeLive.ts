@@ -1,0 +1,237 @@
+// Live voice VibeCheck: streams the microphone to our server's Gemini Live
+// relay and plays Gemini's spoken replies. The mic is paused while Gemini is
+// speaking (half duplex), so it never hears and answers itself.
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { z } from 'zod';
+import { createLiveProtocol, type LiveClientMessage, type VibeAnswers } from '@livingplus/shared';
+
+const { parseLiveServerMessage } = createLiveProtocol(z);
+
+export type LiveStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'ended' | 'failed';
+export interface LiveTurn { role: 'assistant' | 'user'; text: string }
+export interface LiveHabits { answers: VibeAnswers; summary: string | null; done: boolean }
+
+const IN_RATE = 16000;
+const OUT_RATE = 24000;
+
+export function toBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+/** Float samples at `rate` -> 16 kHz little-endian PCM16. */
+export function downsample(input: Float32Array, rate: number): Uint8Array {
+  const ratio = rate / IN_RATE;
+  const length = Math.floor(input.length / ratio);
+  const pcm = new Int16Array(length);
+  for (let i = 0; i < length; i += 1) {
+    const sample = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)] ?? 0));
+    pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+  }
+  return new Uint8Array(pcm.buffer);
+}
+
+export function liveUrl(propertyId?: string): string {
+  const query = propertyId ? `?propertyId=${encodeURIComponent(propertyId)}` : '';
+  return `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/pg/vibecheck/live${query}`;
+}
+
+export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
+  const [status, setStatus] = useState<LiveStatus>('idle');
+  const [turns, setTurns] = useState<LiveTurn[]>([]);
+  const [error, setError] = useState('');
+  const socketRef = useRef<WebSocket | null>(null);
+  const micRef = useRef<{ stream: MediaStream; ctx: AudioContext; node: AudioWorkletNode } | null>(null);
+  const playRef = useRef<{ ctx: AudioContext; next: number; sources: AudioBufferSourceNode[] } | null>(null);
+  const habitsRef = useRef(onHabits);
+  useEffect(() => { habitsRef.current = onHabits; }, [onHabits]);
+  const doneRef = useRef(false);
+
+  const appendText = (role: LiveTurn['role'], text: string) => {
+    setTurns((current) => {
+      const last = current[current.length - 1];
+      if (last && last.role === role) return [...current.slice(0, -1), { role, text: `${last.text}${text}` }];
+      return [...current, { role, text: text.trimStart() }];
+    });
+  };
+
+  const stopPlayback = () => {
+    const play = playRef.current;
+    if (!play) return;
+    play.sources.forEach((source) => { try { source.stop(); } catch { /* already stopped */ } });
+    play.sources = [];
+    play.next = play.ctx.currentTime;
+  };
+
+  const speakingNow = () => {
+    const play = playRef.current;
+    return Boolean(play && play.next > play.ctx.currentTime + 0.05);
+  };
+
+  const playChunk = (base64: string) => {
+    const play = playRef.current;
+    if (!play) return;
+    if (play.ctx.state === 'suspended') void play.ctx.resume();
+    const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    const samples = new Int16Array(bytes.buffer, 0, Math.floor(bytes.length / 2));
+    const buffer = play.ctx.createBuffer(1, samples.length, OUT_RATE);
+    const channel = buffer.getChannelData(0);
+    for (let i = 0; i < samples.length; i += 1) channel[i] = (samples[i] ?? 0) / 0x8000;
+    const source = play.ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(play.ctx.destination);
+    const start = Math.max(play.ctx.currentTime + 0.02, play.next);
+    source.start(start);
+    play.next = start + buffer.duration;
+    play.sources.push(source);
+    source.onended = () => { if (playRef.current) playRef.current.sources = playRef.current.sources.filter((item) => item !== source); };
+  };
+
+  const stop = useCallback(() => {
+    socketRef.current?.close();
+    socketRef.current = null;
+    const mic = micRef.current;
+    if (mic) {
+      mic.node.port.onmessage = null;
+      mic.node.port.close();
+      mic.node.disconnect();
+      mic.stream.getTracks().forEach((track) => track.stop());
+      void mic.ctx.close();
+      micRef.current = null;
+    }
+    const play = playRef.current;
+    if (play) {
+      // Let a closing line finish before releasing the speaker.
+      const wait = Math.max(0, (play.next - play.ctx.currentTime) * 1000);
+      window.setTimeout(() => { void play.ctx.close(); }, wait + 200);
+      playRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => stop, [stop]);
+
+  /** Opens the live session. Resolves false if it could not start (caller falls back). */
+  const start = useCallback(async (propertyId?: string, url?: string): Promise<boolean> => {
+    setError('');
+    setTurns([]);
+    doneRef.current = false;
+    if (typeof WebSocket === 'undefined' || !navigator.mediaDevices?.getUserMedia) return false;
+    setStatus('connecting');
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+    } catch {
+      setStatus('failed');
+      setError('Microphone access was blocked. Allow microphone access in your browser and try again.');
+      return false;
+    }
+    const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const playCtx = new Ctor();
+    void playCtx.resume();
+    playRef.current = { ctx: playCtx, next: 0, sources: [] };
+    const micCtx = new Ctor();
+    if (!micCtx.audioWorklet) {
+      stream.getTracks().forEach((track) => track.stop());
+      void micCtx.close();
+      void playCtx.close();
+      playRef.current = null;
+      setStatus('failed');
+      return false;
+    }
+    let node: AudioWorkletNode;
+    try {
+      await micCtx.audioWorklet.addModule('/pcm-capture-worklet.js');
+      const source = micCtx.createMediaStreamSource(stream);
+      node = new AudioWorkletNode(micCtx, 'pcm-capture-processor');
+      source.connect(node);
+      micRef.current = { stream, ctx: micCtx, node };
+    } catch {
+      stream.getTracks().forEach((track) => track.stop());
+      void micCtx.close();
+      void playCtx.close();
+      playRef.current = null;
+      setStatus('failed');
+      return false;
+    }
+
+    const opened = await new Promise<boolean>((resolve) => {
+      const socket = new WebSocket(url ?? liveUrl(propertyId));
+      socketRef.current = socket;
+      const timeout = window.setTimeout(() => resolve(false), 12000);
+      socket.onmessage = (event) => {
+        const message = parseLiveServerMessage(String(event.data));
+        if (!message) return;
+        switch (message.type) {
+          case 'ready':
+            window.clearTimeout(timeout);
+            setStatus('listening');
+            resolve(true);
+            break;
+          case 'audio':
+            playChunk(message.data);
+            setStatus('speaking');
+            break;
+          case 'said':
+            appendText('assistant', message.text);
+            break;
+          case 'heard':
+            appendText('user', message.text);
+            break;
+          case 'interrupted':
+            stopPlayback();
+            break;
+          case 'turn': {
+            const wait = playRef.current ? Math.max(0, (playRef.current.next - playRef.current.ctx.currentTime) * 1000) : 0;
+            window.setTimeout(() => {
+              if (doneRef.current) { setStatus('ended'); stop(); } else if (socketRef.current) setStatus('listening');
+            }, wait + 150);
+            break;
+          }
+          case 'habits':
+            if (message.done) doneRef.current = true;
+            habitsRef.current({ answers: message.answers as VibeAnswers, summary: message.summary, done: message.done });
+            break;
+          case 'error':
+            setError(message.message || 'The live voice connection dropped.');
+            break;
+          case 'end':
+            setStatus('ended');
+            break;
+        }
+      };
+      socket.onerror = () => { window.clearTimeout(timeout); resolve(false); };
+      socket.onclose = () => {
+        window.clearTimeout(timeout);
+        resolve(false);
+        setStatus((current) => (current === 'connecting' ? 'failed' : current === 'failed' ? current : 'ended'));
+      };
+    });
+    if (!opened) {
+      stop();
+      setStatus('failed');
+      return false;
+    }
+    node.port.onmessage = (event: MessageEvent<Float32Array>) => {
+      const socket = socketRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN || speakingNow()) return;
+      const frame: LiveClientMessage = { type: 'audio', data: toBase64(downsample(event.data, micCtx.sampleRate)) };
+      socket.send(JSON.stringify(frame));
+    };
+    return true;
+  }, [stop]);
+
+  const sendText = useCallback((text: string) => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !text.trim()) return false;
+    stopPlayback();
+    appendText('user', text.trim());
+    const frame: LiveClientMessage = { type: 'text', text: text.trim() };
+    socket.send(JSON.stringify(frame));
+    return true;
+  }, []);
+
+  const end = useCallback(() => { stop(); setStatus('ended'); }, [stop]);
+
+  return { status, turns, error, start, sendText, end };
+}

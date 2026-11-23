@@ -37,7 +37,7 @@ export default function LogoLoader({ onComplete }: { onComplete?: () => void }) 
             `}
             style={{ transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
           >
-            <div className="bg-[#02224B] text-white p-3 rounded-xl shadow-lg transform -skew-x-6">
+            <div className="bg-navy-900 text-white p-3 rounded-[var(--radius-button)] shadow-lg transform -skew-x-6">
               <Home className="w-8 h-8" strokeWidth={2.5} />
             </div>
           </div>
@@ -49,7 +49,7 @@ export default function LogoLoader({ onComplete }: { onComplete?: () => void }) 
             `}
             style={{ transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
           >
-            <div className="bg-[#02224B] text-white p-3 rounded-xl shadow-lg transform skew-x-6">
+            <div className="bg-navy-900 text-white p-3 rounded-[var(--radius-button)] shadow-lg transform skew-x-6">
               <Home className="w-8 h-8" strokeWidth={2.5} />
             </div>
           </div>
@@ -61,20 +61,20 @@ export default function LogoLoader({ onComplete }: { onComplete?: () => void }) 
             `}
             style={{ transitionDelay: phase === 0 ? '0ms' : '500ms', transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
           >
-            <div className="relative w-16 h-16 rounded-full bg-[#FEB109] flex items-center justify-center shadow-xl border-[4px] border-white overflow-hidden">
+            <div className="relative w-16 h-16 rounded-full bg-amber-500 flex items-center justify-center shadow-xl border-[4px] border-white overflow-hidden">
               <div 
                 className={`absolute inset-0 flex items-center justify-center transition-transform duration-500
                   ${phase === 1 ? 'scale-x-0' : 'scale-x-100'}
                 `}
               >
-                <IndianRupee className="w-8 h-8 text-[#02224B]" strokeWidth={3} />
+                <IndianRupee className="w-8 h-8 text-navy-900" strokeWidth={3} />
               </div>
               <div 
                 className={`absolute inset-0 flex items-center justify-center transition-transform duration-500
                   ${phase === 1 ? 'scale-x-100' : 'scale-x-0'}
                 `}
               >
-                <Check className="w-8 h-8 text-[#02224B]" strokeWidth={4} />
+                <Check className="w-8 h-8 text-navy-900" strokeWidth={4} />
               </div>
             </div>
           </div>
@@ -87,7 +87,7 @@ export default function LogoLoader({ onComplete }: { onComplete?: () => void }) 
             ${phase >= 2 ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'}
           `}
         >
-          <h1 className="text-4xl font-bold tracking-tight text-slate-900">Living Plus</h1>
+          <h1 className="text-4xl font-bold tracking-tight text-ink">Living Plus</h1>
         </div>
 
       </div>
