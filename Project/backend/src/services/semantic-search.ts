@@ -29,8 +29,10 @@ export const minSemanticScore = (): number => {
 const GENDER_TEXT: Record<string, string> = { MEN: 'men only', WOMEN: 'women only', ANY: 'all genders (co-living)' };
 
 const INDEX_SELECT = {
-  id: true, name: true, description: true, address: true, locality: true, city: true,
-  genderPolicy: true, amenities: true, houseRules: true, searchTextHash: true, searchEmbeddingModel: true,
+  id: true, name: true, description: true, tagline: true, propertyType: true, foodDetails: true,
+  address: true, locality: true, city: true, genderPolicy: true,
+  amenities: true, highlights: true, nearbyPlaces: true, houseRules: true,
+  searchTextHash: true, searchEmbeddingModel: true,
   rooms: { where: { status: 'ACTIVE' }, select: { roomType: true, hasAc: true, foodIncluded: true, monthlyRent: true } }
 } as const;
 
@@ -42,10 +44,15 @@ export function propertySearchText(property: any): string {
   const roomTypes = [...new Set(rooms.map((r) => String(r.roomType || '').toLowerCase()).filter(Boolean))];
   const parts = [
     `${property.name}: a paying-guest (PG) accommodation in ${property.locality}, ${property.city}.`,
+    property.propertyType && property.propertyType !== 'PG' ? `Type: ${String(property.propertyType).toLowerCase()}.` : '',
+    property.tagline ? String(property.tagline) : '',
     property.description ? String(property.description) : '',
     `Address: ${property.address}.`,
     `For ${GENDER_TEXT[property.genderPolicy] || 'all genders'}.`,
+    list(property.highlights) ? `Highlights: ${list(property.highlights)}.` : '',
     list(property.amenities) ? `Amenities: ${list(property.amenities)}.` : '',
+    property.foodDetails ? `Food: ${String(property.foodDetails)}.` : '',
+    list(property.nearbyPlaces) ? `Nearby: ${list(property.nearbyPlaces)}.` : '',
     list(property.houseRules) ? `House rules: ${list(property.houseRules)}.` : '',
     roomTypes.length ? `Room types: ${roomTypes.join(', ')}.` : '',
     rooms.some((r) => r.hasAc) ? 'AC rooms available.' : '',

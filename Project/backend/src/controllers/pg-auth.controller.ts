@@ -57,6 +57,7 @@ async function residentSessionForPhone(phone: string, propertyId?: string): Prom
 /** On a PG host, staff may sign in only to the PGs they own or are warden of. */
 async function hasPropertyAccess(user: { id: string; role: string }, propertyId?: string): Promise<boolean> {
   if (!propertyId) return true;
+  if (user.role === 'PLATFORM_ADMIN') return false;
   const propertyAccess = await prisma.pGPropertyAccess.findFirst({
     where: { propertyId, userId: user.id, role: user.role === 'PG_WARDEN' ? { in: ['WARDEN', 'COOK', 'HOUSEKEEPING', 'ACCOUNTANT'] } : 'OWNER' },
     select: { id: true }
@@ -220,7 +221,7 @@ export function createGoogleLoginHandler(deps: FirebaseVerificationDeps = {}) {
 
 export const googleLogin = createGoogleLoginHandler();
 
-const STAFF_ROLES = ['PG_OWNER', 'PG_WARDEN'];
+const STAFF_ROLES = ['PG_OWNER', 'PG_WARDEN', 'PLATFORM_ADMIN'];
 
 /**
  * Links the Google account in the Firebase ID token to the signed-in staff

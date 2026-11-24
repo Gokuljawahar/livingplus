@@ -1,6 +1,6 @@
-// Live voice VibeCheck: streams the microphone to our server's Gemini Live
-// relay and plays Gemini's spoken replies. The mic is paused while Gemini is
-// speaking (half duplex), so it never hears and answers itself.
+// Live voice relay hook: streams 16 kHz mic PCM with echo/noise suppression to
+// our Gemini Live WebSocket relay and plays 24 kHz spoken replies. Allows
+// loud spoken barge-in above an RMS threshold while dropping quiet speaker bleed.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { createLiveProtocol, type LiveClientMessage, type VibeAnswers } from '@livingplus/shared';
@@ -10,9 +10,23 @@ const { parseLiveServerMessage } = createLiveProtocol(z);
 export type LiveStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'ended' | 'failed';
 export interface LiveTurn { role: 'assistant' | 'user'; text: string }
 export interface LiveHabits { answers: VibeAnswers; summary: string | null; done: boolean }
+export interface LiveAction { phase: 'proposed' | 'done' | 'cancelled' | 'failed'; summary: string }
+export interface LiveHandoff { target: 'rent' | 'bookings' | 'maintenance'; reason: string }
+export interface UseVibeLiveOptions { onActionDone?: (action: LiveAction) => void }
 
 const IN_RATE = 16000;
 const OUT_RATE = 24000;
+const BARGE_IN_RMS = 0.035;
+
+export function frameRms(samples: Float32Array): number {
+  if (!samples.length) return 0;
+  let sumSq = 0;
+  for (let i = 0; i < samples.length; i += 1) {
+    const s = samples[i] ?? 0;
+    sumSq += s * s;
+  }
+  return Math.sqrt(sumSq / samples.length);
+}
 
 export function toBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -37,15 +51,21 @@ export function liveUrl(propertyId?: string): string {
   return `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/pg/vibecheck/live${query}`;
 }
 
-export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
+export function useVibeLive(onHabits: (habits: LiveHabits) => void, options?: UseVibeLiveOptions) {
   const [status, setStatus] = useState<LiveStatus>('idle');
   const [turns, setTurns] = useState<LiveTurn[]>([]);
   const [error, setError] = useState('');
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
+  const [actions, setActions] = useState<LiveAction[]>([]);
+  const [handoff, setHandoff] = useState<LiveHandoff | null>(null);
+
   const socketRef = useRef<WebSocket | null>(null);
   const micRef = useRef<{ stream: MediaStream; ctx: AudioContext; node: AudioWorkletNode } | null>(null);
   const playRef = useRef<{ ctx: AudioContext; next: number; sources: AudioBufferSourceNode[] } | null>(null);
   const habitsRef = useRef(onHabits);
+  const optionsRef = useRef(options);
   useEffect(() => { habitsRef.current = onHabits; }, [onHabits]);
+  useEffect(() => { optionsRef.current = options; }, [options]);
   const doneRef = useRef(false);
 
   const appendText = (role: LiveTurn['role'], text: string) => {
@@ -56,13 +76,13 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     });
   };
 
-  const stopPlayback = () => {
+  const stopPlayback = useCallback(() => {
     const play = playRef.current;
     if (!play) return;
     play.sources.forEach((source) => { try { source.stop(); } catch { /* already stopped */ } });
     play.sources = [];
     play.next = play.ctx.currentTime;
-  };
+  }, []);
 
   const speakingNow = () => {
     const play = playRef.current;
@@ -115,12 +135,17 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
   const start = useCallback(async (propertyId?: string, url?: string): Promise<boolean> => {
     setError('');
     setTurns([]);
+    setLatencyMs(null);
+    setActions([]);
+    setHandoff(null);
     doneRef.current = false;
     if (typeof WebSocket === 'undefined' || !navigator.mediaDevices?.getUserMedia) return false;
     setStatus('connecting');
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
+      });
     } catch {
       setStatus('failed');
       setError('Microphone access was blocked. Allow microphone access in your browser and try again.');
@@ -180,6 +205,19 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
             break;
           case 'interrupted':
             stopPlayback();
+            setStatus('listening');
+            break;
+          case 'latency':
+            setLatencyMs(Math.round(message.ms));
+            break;
+          case 'action': {
+            const nextAction: LiveAction = { phase: message.phase, summary: message.summary };
+            setActions((current) => [...current, nextAction]);
+            if (message.phase === 'done') optionsRef.current?.onActionDone?.(nextAction);
+            break;
+          }
+          case 'handoff':
+            setHandoff({ target: message.target, reason: message.reason });
             break;
           case 'turn': {
             const wait = playRef.current ? Math.max(0, (playRef.current.next - playRef.current.ctx.currentTime) * 1000) : 0;
@@ -214,12 +252,13 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     }
     node.port.onmessage = (event: MessageEvent<Float32Array>) => {
       const socket = socketRef.current;
-      if (!socket || socket.readyState !== WebSocket.OPEN || speakingNow()) return;
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      if (speakingNow() && frameRms(event.data) < BARGE_IN_RMS) return;
       const frame: LiveClientMessage = { type: 'audio', data: toBase64(downsample(event.data, micCtx.sampleRate)) };
       socket.send(JSON.stringify(frame));
     };
     return true;
-  }, [stop]);
+  }, [stop, stopPlayback]);
 
   const sendText = useCallback((text: string) => {
     const socket = socketRef.current;
@@ -229,9 +268,14 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     const frame: LiveClientMessage = { type: 'text', text: text.trim() };
     socket.send(JSON.stringify(frame));
     return true;
-  }, []);
+  }, [stopPlayback]);
+
+  const interrupt = useCallback(() => {
+    stopPlayback();
+    if (socketRef.current?.readyState === WebSocket.OPEN) setStatus('listening');
+  }, [stopPlayback]);
 
   const end = useCallback(() => { stop(); setStatus('ended'); }, [stop]);
 
-  return { status, turns, error, start, sendText, end };
+  return { status, turns, error, latencyMs, actions, handoff, start, sendText, interrupt, end };
 }

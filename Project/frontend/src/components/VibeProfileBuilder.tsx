@@ -4,7 +4,7 @@
 // tap-to-talk turns (Gemini hears each recording, the browser reads replies
 // aloud). Typing works in both, and the quick questions remain for review.
 import { useEffect, useRef, useState } from 'react';
-import { Keyboard, Loader2, Mic, PhoneOff, Send, Square, Volume2, VolumeX } from 'lucide-react';
+import { Clock, Keyboard, Loader2, Mic, PhoneOff, Send, Square, Volume2, VolumeX } from 'lucide-react';
 import { VIBE_QUESTIONS, type VibeAnswers } from '@livingplus/shared';
 import api from '../api/axios';
 import VibeQuiz from './VibeQuiz';
@@ -195,11 +195,18 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
               <span className={`h-2.5 w-2.5 rounded-full ${live.status === 'speaking' ? 'animate-pulse bg-amber-500' : live.status === 'listening' ? 'animate-pulse bg-positive' : 'bg-hairline'}`} aria-hidden="true" />
               {live.status === 'connecting' ? 'Connecting…' : live.status === 'speaking' ? 'Your PG buddy is talking' : live.status === 'listening' ? 'Listening, just talk' : 'Chat ended'}
             </p>
-            {live.status !== 'ended' && live.status !== 'failed' && (
-              <button type="button" onClick={live.end} className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-negative hover:bg-negative-bg">
-                <PhoneOff className="h-4 w-4" aria-hidden="true" /> End
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {live.latencyMs !== null && (
+                <span data-testid="vibe-latency" aria-label="Voice response latency" className="tabular inline-flex items-center gap-1 rounded-full bg-surface px-2.5 py-0.5 text-xs font-medium text-navy-900">
+                  <Clock className="h-3 w-3 text-muted" aria-hidden="true" /> {live.latencyMs < 1000 ? `${live.latencyMs} ms` : `${(live.latencyMs / 1000).toFixed(1)} s`}
+                </span>
+              )}
+              {live.status !== 'ended' && live.status !== 'failed' && (
+                <button type="button" onClick={live.end} className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-negative hover:bg-negative-bg">
+                  <PhoneOff className="h-4 w-4" aria-hidden="true" /> End
+                </button>
+              )}
+            </div>
           </div>
           <div className="max-h-64 space-y-2 overflow-y-auto px-4 py-3" aria-live="polite">
             {live.status === 'connecting' && (
@@ -231,7 +238,7 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
             <Mic className="h-7 w-7 text-amber-500" aria-hidden="true" />
           </button>
           <p className="font-medium text-navy-900">Chat with your PG buddy</p>
-          <p className="text-sm text-muted">Just talk, in Tamil, Hindi or English. We’ll find roommates like you.</p>
+          <p className="text-sm text-muted">Just talk in Tamil, Hindi, Tanglish or English. Share your routine so the owner can allot the right room.</p>
           <button type="button" onClick={() => { setMode('tap'); begin(false); setTyping(true); }} className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-navy-700 hover:underline">
             <Keyboard className="h-4 w-4" aria-hidden="true" /> Type instead
           </button>

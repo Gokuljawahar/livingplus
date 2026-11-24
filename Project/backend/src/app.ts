@@ -3,7 +3,7 @@ import multer from 'multer';
 import { access } from 'fs/promises';
 import jwt from 'jsonwebtoken';
 import routes from './routes/index.js';
-import { authenticate } from './middleware/auth.middleware.js';
+import { authenticate, optionalAuthenticate } from './middleware/auth.middleware.js';
 import { getJwtSecret } from './utils/auth-config.js';
 import { resolvePgHost } from './middleware/pg-host.middleware.js';
 import { cronRoutes } from './routes/cron.routes.js';
@@ -94,6 +94,14 @@ const authorizePropertyStaffUpload = async (req: express.Request, res: express.R
     });
     if (!tenant) {
       res.status(403).json({ message: 'An active resident stay is required for uploads' });
+      return;
+    }
+    return next();
+  }
+  if (user.role === 'PLATFORM_ADMIN') {
+    const propertyId = (req as any).pgPropertyId as string | undefined;
+    if (propertyId || user.propertyId) {
+      res.status(403).json({ message: 'Admin uploads must run on the main host' });
       return;
     }
     return next();
@@ -224,18 +232,38 @@ app.get(/^\/api\/view-image\/(.+)$/, authenticate, async (req, res) => {
   }
 });
 
-app.post('/api/view-image/bulk', async (req, res) => {
+app.post('/api/view-image/bulk', optionalAuthenticate, async (req, res) => {
   try {
     const { keys } = req.body;
     if (!Array.isArray(keys) || keys.length > 100 || keys.some((key) => typeof key !== 'string')) {
       return res.status(400).json({ error: "keys must be an array of at most 100 strings" });
     }
 
-    const properties = await prisma.pGProperty.findMany({
-      where: { status: 'ACTIVE' },
-      select: { photoUrls: true }
-    });
-    const publicKeys = new Set(properties.flatMap((property) => Array.isArray(property.photoUrls) ? property.photoUrls : []));
+    const user = (req as any).user as { userId?: string; role?: string; propertyId?: string } | undefined;
+    const isAdmin = user?.role === 'PLATFORM_ADMIN' && !((req as any).pgPropertyId) && !user.propertyId;
+    const staffPropertyIds = user?.userId && ['PG_OWNER', 'PG_WARDEN'].includes(user.role || '')
+      ? (await prisma.pGPropertyAccess.findMany({ where: { userId: user.userId }, select: { propertyId: true } })).map((a) => a.propertyId)
+      : [];
+
+    const properties = isAdmin
+      ? await asSystem('admin previews draft and active PG images', () =>
+          prisma.pGProperty.findMany({
+            select: { photoUrls: true, rooms: { select: { photoUrls: true } } }
+          })
+        )
+      : await prisma.pGProperty.findMany({
+          where: staffPropertyIds.length
+            ? { OR: [{ status: 'ACTIVE' }, { id: { in: staffPropertyIds } }] }
+            : { status: 'ACTIVE' },
+          select: { photoUrls: true, rooms: { select: { photoUrls: true } } }
+        });
+
+    const publicKeys = new Set(
+      properties.flatMap((property: any) => [
+        ...(Array.isArray(property.photoUrls) ? property.photoUrls : []),
+        ...(Array.isArray(property.rooms) ? property.rooms.flatMap((room: any) => (Array.isArray(room.photoUrls) ? room.photoUrls : [])) : [])
+      ])
+    );
     const allowedKeys = [...new Set(keys)].filter((key): key is string => publicKeys.has(key));
     const urls: Record<string, string> = {};
     await Promise.all(allowedKeys.map(async (fileKey) => {

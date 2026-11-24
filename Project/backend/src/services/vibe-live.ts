@@ -17,10 +17,11 @@ import { cleanVibeAnswers, cleanVibeSummary, createLiveProtocol, VIBE_QUESTIONS,
 
 const { parseLiveClientMessage } = createLiveProtocol(z);
 import { prisma } from '../db/index.js';
-import { asSystem } from '../db/context.js';
+import { asSystem, runAsDbUser } from '../db/context.js';
 import { aiEnabled, resolveGoogleAuth } from './ai-provider.js';
 import { logger } from '../utils/logger.js';
-import { briefingFacts, briefingInstruction, OWNER_BRIEFING_PATH, readBriefingPass } from './owner-briefing.js';
+import { briefingActor, briefingFacts, briefingInstruction, OWNER_BRIEFING_PATH, readBriefingPass } from './owner-briefing.js';
+import { createVoiceActions, voiceActionDeclarations } from './voice-actions.js';
 
 export const VIBE_LIVE_PATH = '/api/pg/vibecheck/live';
 const MAX_SESSION_MS = 6 * 60 * 1000;
@@ -64,7 +65,7 @@ function liveInstruction(topics: { skip: string[]; facts: string[] }): string {
     "Keep each turn short and spoken: one or two sentences. Use the language and style they use (Tamil, Hindi, English, Tanglish or Hinglish) and switch when they switch.",
     "Never ask about or note religion, caste, diet, gender, health, politics or family background, even if they bring it up; just move on kindly.",
     "After each thing they share that tells you something new, call record_habits with everything you can infer so far (leave out what you don't know) and a short English summary. Never call it before they have said anything.",
-    "After roughly six to eight exchanges, or once you have a good feel for sleep, tidiness and noise and the conversation reaches a natural pause, set done to true and wrap up warmly in one line, saying you'll now show them rooms where they'd fit in.",
+    "After roughly six to eight exchanges, or once you have a good feel for sleep, tidiness and noise and the conversation reaches a natural pause, set done to true and wrap up warmly in one line, saying their routine is noted and will be shared with the PG owner so they can allot the best-fitting room.",
     ...(topics.facts.length ? [`About the PG they are looking at: ${topics.facts.join(' ')}`] : []),
     ...(skipped.length ? [`These don't apply at this PG, so never bring them up: ${skipped.join('; ')}.`] : [])
   ].join(' ');
@@ -154,8 +155,8 @@ interface LiveSessionSpec {
   instruction: string;
   kickoff: string;
   tools?: FunctionDeclaration[];
-  /** Answers one tool call; `heard` says whether the person has spoken or typed yet. */
-  onToolCall?: (name: string, args: unknown, heard: boolean) => Record<string, unknown>;
+  /** Answers one tool call; `heard` counts the person's utterances (speech or typed) so far. */
+  onToolCall?: (name: string, args: unknown, heard: number) => Record<string, unknown> | Promise<Record<string, unknown>>;
 }
 
 /**
@@ -166,27 +167,50 @@ interface LiveSessionSpec {
 async function relayLive(client: WebSocket, spec: LiveSessionSpec): Promise<void> {
   const send = (message: RelayServerMessage) => { if (client.readyState === client.OPEN) client.send(JSON.stringify(message)); };
   let live: Session | null = null;
-  let heardFromUser = false;
+  // Utterances from the person: a new speech transcript run or a typed message.
+  let heardCount = 0;
+  let lastHeardAt = 0;
+  let inSpeechRun = false;
+  let replyStarted = false;
   const timer = setTimeout(() => { send({ type: 'end', reason: 'time' }); client.close(); }, MAX_SESSION_MS);
   client.once('close', () => { clearTimeout(timer); try { live?.close(); } catch { /* already closed */ } });
 
   const onMessage = (message: LiveServerMessage) => {
     const content = message.serverContent;
     for (const part of content?.modelTurn?.parts ?? []) {
-      if (part.inlineData?.data) send({ type: 'audio', data: part.inlineData.data, mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000' });
+      if (part.inlineData?.data) {
+        // Response latency: from the last thing the person said to the first spoken audio back.
+        if (!replyStarted && lastHeardAt) {
+          send({ type: 'latency', ms: Math.max(0, Date.now() - lastHeardAt) });
+          lastHeardAt = 0;
+        }
+        inSpeechRun = false;
+        replyStarted = true;
+        send({ type: 'audio', data: part.inlineData.data, mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000' });
+      }
     }
-    if (content?.inputTranscription?.text) send({ type: 'heard', text: content.inputTranscription.text });
-    if (content?.outputTranscription?.text) send({ type: 'said', text: content.outputTranscription.text });
-    if (content?.interrupted) send({ type: 'interrupted' });
-    if (content?.turnComplete) send({ type: 'turn' });
+    if (content?.inputTranscription?.text) {
+      if (!inSpeechRun) { heardCount += 1; inSpeechRun = true; }
+      lastHeardAt = Date.now();
+      replyStarted = false;
+      send({ type: 'heard', text: content.inputTranscription.text });
+    }
+    if (content?.outputTranscription?.text) { inSpeechRun = false; send({ type: 'said', text: content.outputTranscription.text }); }
+    if (content?.interrupted) { replyStarted = false; inSpeechRun = false; send({ type: 'interrupted' }); }
+    if (content?.turnComplete) { replyStarted = false; inSpeechRun = false; send({ type: 'turn' }); }
     const calls = message.toolCall?.functionCalls ?? [];
     if (calls.length && live) {
-      const responses: FunctionResponse[] = calls.map((call) => {
+      const session = live;
+      void Promise.all(calls.map(async (call): Promise<FunctionResponse> => {
         const base = { ...(call.id ? { id: call.id } : {}), name: call.name || 'unknown' };
-        const response = spec.onToolCall ? spec.onToolCall(call.name || '', call.args, heardFromUser) : { error: 'no tools here' };
-        return { ...base, response };
-      });
-      live.sendToolResponse({ functionResponses: responses });
+        try {
+          const response = spec.onToolCall ? await spec.onToolCall(call.name || '', call.args, heardCount) : { error: 'no tools here' };
+          return { ...base, response };
+        } catch (error: any) {
+          logger.warn({ err: error?.message || String(error) }, `${spec.label} tool call failed`);
+          return { ...base, response: { error: 'That did not work.' } };
+        }
+      })).then((functionResponses) => { try { session.sendToolResponse({ functionResponses }); } catch { /* session closed */ } });
     }
   };
 
@@ -221,10 +245,11 @@ async function relayLive(client: WebSocket, spec: LiveSessionSpec): Promise<void
     const message = parseLiveClientMessage(String(raw));
     if (!message || !live) return;
     if (message.type === 'audio') {
-      heardFromUser = true;
       live.sendRealtimeInput({ audio: { data: message.data, mimeType: 'audio/pcm;rate=16000' } });
     } else if (message.type === 'text') {
-      heardFromUser = true;
+      heardCount += 1;
+      lastHeardAt = Date.now();
+      replyStarted = false;
       live.sendClientContent({ turns: [{ role: 'user', parts: [{ text: message.text }] }], turnComplete: true });
     } else if (message.type === 'pause') {
       live.sendRealtimeInput({ audioStreamEnd: true });
@@ -244,7 +269,7 @@ async function runSession(client: WebSocket, propertyId: string | null): Promise
     tools: [recordHabitsFor(topics.skip)],
     onToolCall: (name, args, heard) => {
       if (name !== 'record_habits') return { error: 'unknown tool' };
-      if (!heard) return { saved: false, note: 'Wait for their answer before recording habits.' };
+      if (heard < 1) return { saved: false, note: 'Wait for their answer before recording habits.' };
       const result = applyHabitCall(known, args, topics.skip);
       known = result.answers;
       send({ type: 'habits', ...result });
@@ -253,7 +278,7 @@ async function runSession(client: WebSocket, propertyId: string | null): Promise
   });
 }
 
-/** Owner voice briefing: read-only, from the owner's own numbers and lists. */
+/** Owner voice session: a spoken briefing, then voice-to-action with a spoken read-back before any change. */
 async function runBriefing(client: WebSocket, userId: string): Promise<void> {
   const context = await briefingFacts(userId).catch(() => null);
   if (!context) {
@@ -261,9 +286,20 @@ async function runBriefing(client: WebSocket, userId: string): Promise<void> {
     client.close();
     return;
   }
+  const send = (message: RelayServerMessage) => { if (client.readyState === client.OPEN) client.send(JSON.stringify(message)); };
+  const identity = await briefingActor(userId).catch(() => null);
+  const actions = identity
+    ? createVoiceActions({
+      actor: identity.actor,
+      runAs: (fn) => runAsDbUser({ userId, role: identity.actor.role, tokenPropertyId: identity.actor.propertyIds.length === 1 ? identity.actor.propertyIds[0]! : null }, fn),
+      notify: (event) => send({ type: 'action', ...event }),
+      onHandoff: (event) => send({ type: 'handoff', ...event })
+    })
+    : null;
   await relayLive(client, {
     label: 'Owner briefing',
-    instruction: briefingInstruction(context.facts),
-    kickoff: `(The owner, ${context.firstName}, just tapped "Brief me". Greet them by first name in a few words and give the briefing.)`
+    instruction: briefingInstruction(context.facts, Boolean(actions)),
+    kickoff: `(The owner, ${context.firstName}, just tapped "Brief me". Greet them by first name in a few words and give the briefing.)`,
+    ...(actions && identity ? { tools: voiceActionDeclarations(identity.actor.role), onToolCall: (name: string, args: unknown, heard: number) => actions.callTool(name, args, heard) } : {})
   });
 }

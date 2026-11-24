@@ -1,7 +1,8 @@
 // Centralized TanStack Query keys so cache reads and invalidations stay in sync
-// across owner, resident, and guest discovery features.
+// across owner, resident, guest discovery, and admin onboarding features.
 export const queryKeys = {
   properties: () => ['properties'] as const,
+  propertyDetail: (slug: string) => ['property', slug] as const,
   search: (q: string) => ['search', q] as const,
   pgSites: (term: string) => ['pg-sites', term] as const,
   pgSite: (slug: string) => ['pg-site', slug] as const,
@@ -27,5 +28,13 @@ export const queryKeys = {
     serviceOrders: (tenantId: string) => ['resident', 'service-orders', tenantId] as const,
     vibeMatch: (tenantId: string) => ['resident', 'vibe-match', tenantId] as const,
     conditionReports: (tenantId: string) => ['condition-reports', tenantId] as const
+  },
+
+  admin: {
+    all: () => ['admin'] as const,
+    overview: () => ['admin', 'overview'] as const,
+    leads: (status = '', search = '') => ['admin', 'leads', status, search] as const,
+    properties: (status = '', search = '') => ['admin', 'properties', status, search] as const,
+    owners: () => ['admin', 'owners'] as const
   }
 };

@@ -7,15 +7,19 @@ import AppLayout from './components/layout/AppLayout';
 import { resolveAppHost } from './utils/pg-host';
 import { areaOf, loginFor, ROUTES } from './utils/app-areas';
 
-// Lazy load PG and account pages.
+// Lazy load PG, marketplace, admin, and account pages.
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const RegisterPage = lazy(() => import('./pages/RegisterPage'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ChangePassword = lazy(() => import('./pages/ChangePassword'));
 const PGDiscovery = lazy(() => import('./pages/PGDiscovery'));
+const PGDetailPage = lazy(() => import('./pages/PGDetailPage'));
+const ListYourPgPage = lazy(() => import('./pages/ListYourPgPage'));
 const PGManagement = lazy(() => import('./pages/PGManagement'));
 const ResidentFinder = lazy(() => import('./pages/ResidentFinder'));
 const ResidentPortal = lazy(() => import('./pages/ResidentPortal'));
+const AdminLoginPage = lazy(() => import('./pages/AdminLoginPage'));
+const AdminConsole = lazy(() => import('./pages/AdminConsole'));
 
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const TermsAndConditions = lazy(() => import('./pages/TermsAndConditions'));
@@ -37,7 +41,13 @@ const ProtectedRoute = ({ children, roles }: { children: React.ReactNode; roles?
     return <Navigate to={`${loginFor(areaOf(location.pathname), location.pathname)}?redirect=${redirect}`} replace />;
   }
   if (roles && !roles.includes(user.role)) {
-    return <Navigate to={user.role === 'PG_TENANT' ? ROUTES.residentFinder : ROUTES.ownerHome} replace />;
+    const fallback =
+      user.role === 'PG_TENANT'
+        ? ROUTES.residentFinder
+        : user.role === 'PLATFORM_ADMIN'
+        ? ROUTES.adminHome
+        : ROUTES.ownerHome;
+    return <Navigate to={fallback} replace />;
   }
 
   return <>{children}</>;
@@ -52,8 +62,15 @@ const Spinner = () => (
 /** Signed-in staff skip their area's login page. */
 function StaffLogin() {
   const { user } = useAuth();
-  if (user && user.role !== 'PG_TENANT') return <Navigate to={ROUTES.ownerHome} replace />;
+  if (user && ['PG_OWNER', 'PG_WARDEN'].includes(user.role)) return <Navigate to={ROUTES.ownerHome} replace />;
   return <LoginPage />;
+}
+
+/** Signed-in onboarding admins skip /admin/login. */
+function AdminLoginGuard() {
+  const { user } = useAuth();
+  if (user && user.role === 'PLATFORM_ADMIN') return <Navigate to={ROUTES.adminHome} replace />;
+  return <AdminLoginPage />;
 }
 
 function AppRoutes() {
@@ -72,9 +89,13 @@ function AppRoutes() {
   return (
     <Suspense fallback={<Spinner />}>
       <Routes>
-        {/* Guest site: browse freely, verify a phone only to request a bed. */}
+        {/* Guest marketplace: browse freely, view rich PG detail pages, verify once to request a bed or reveal contact. */}
         <Route path="/" element={home} />
         <Route path="/requests" element={<PGDiscovery />} />
+        <Route path="/list-your-pg" element={<ListYourPgPage />} />
+        <Route path="/pg/manage" element={<Navigate to={ROUTES.ownerHome} replace />} />
+        <Route path="/pg/resident" element={<Navigate to={ROUTES.residentFinder} replace />} />
+        <Route path="/pg/:slug" element={<PGDetailPage />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/terms" element={<TermsAndConditions />} />
 
@@ -93,6 +114,17 @@ function AppRoutes() {
           <Route path="/owner/:section" element={<PGManagement />} />
         </Route>
 
+        {/* Internal Living Plus Concierge Onboarding Console */}
+        <Route path="/admin/login" element={<AdminLoginGuard />} />
+        <Route
+          path="/admin/*"
+          element={
+            <ProtectedRoute roles={['PLATFORM_ADMIN']}>
+              <AdminConsole />
+            </ProtectedRoute>
+          }
+        />
+
         {/* Old addresses keep working. */}
         <Route path="/pg" element={<Navigate to={ROUTES.guestHome} replace />} />
         <Route path="/login" element={<Navigate to={ROUTES.ownerLogin} replace />} />
@@ -100,10 +132,8 @@ function AppRoutes() {
         <Route path="/forgot-password" element={<Navigate to={ROUTES.ownerForgotPassword} replace />} />
         <Route path="/change-password" element={<Navigate to={ROUTES.ownerAccount} replace />} />
         <Route path="/dashboard" element={<Navigate to={ROUTES.ownerHome} replace />} />
-        <Route path="/pg/manage" element={<Navigate to={ROUTES.ownerHome} replace />} />
         <Route path="/owner/manage" element={<Navigate to={ROUTES.ownerHome} replace />} />
         <Route path="/resident" element={<Navigate to={ROUTES.residentFinder} replace />} />
-        <Route path="/pg/resident" element={<Navigate to={ROUTES.residentFinder} replace />} />
 
         <Route path="*" element={<Navigate to={ROUTES.guestHome} replace />} />
       </Routes>
@@ -121,38 +151,38 @@ function App() {
   }, []);
 
   return (
-    <AuthProvider>
-      <Toaster
-        position="top-center"
-        toastOptions={{
-          className: 'text-sm font-medium',
-          duration: 4000,
-          style: {
-            background: 'var(--color-canvas)',
-            color: 'var(--color-ink)',
-            borderRadius: 'var(--radius-card)',
-            border: '1px solid var(--color-hairline)',
-            boxShadow: 'var(--shadow-float)',
-          },
-          success: {
-            iconTheme: {
-              primary: 'var(--color-navy-900)',
-              secondary: 'var(--color-canvas)',
+    <BrowserRouter>
+      <AuthProvider>
+        <Toaster
+          position="top-center"
+          toastOptions={{
+            className: 'text-sm font-medium',
+            duration: 4000,
+            style: {
+              background: 'var(--color-canvas)',
+              color: 'var(--color-ink)',
+              borderRadius: 'var(--radius-card)',
+              border: '1px solid var(--color-hairline)',
+              boxShadow: 'var(--shadow-float)',
             },
-          },
-        }}
-        containerStyle={{
-          top: isMobile ? 12 : 20,
-          left: 20,
-          right: 20,
-          bottom: 20,
-          zIndex: 999999,
-        }}
-      />
-      <BrowserRouter>
+            success: {
+              iconTheme: {
+                primary: 'var(--color-navy-900)',
+                secondary: 'var(--color-canvas)',
+              },
+            },
+          }}
+          containerStyle={{
+            top: isMobile ? 12 : 20,
+            left: 20,
+            right: 20,
+            bottom: 20,
+            zIndex: 999999,
+          }}
+        />
         <AppRoutes />
-      </BrowserRouter>
-    </AuthProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
 

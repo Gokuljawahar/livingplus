@@ -9,7 +9,7 @@
     "build": "tsc && tsc -p tsconfig.seed.json",
     "start": "node dist/index.js",
     "seed": "tsx prisma/seed-pg.ts",
-    "test": "tsx --test tests/invoice-code.test.ts tests/adk-adapter.test.ts tests/live-protocol.test.ts tests/validate-middleware.test.ts tests/app-time.test.ts tests/static-frontend.test.ts tests/ai-scenarios.test.ts tests/pg-host.test.ts tests/guest-bookings.test.ts tests/auth-middleware.test.ts tests/tool-gating.test.ts tests/room-change.test.ts tests/resident-search.test.ts",
+    "test": "tsx --test tests/invoice-code.test.ts tests/adk-adapter.test.ts tests/live-protocol.test.ts tests/voice-actions.test.ts tests/validate-middleware.test.ts tests/app-time.test.ts tests/static-frontend.test.ts tests/ai-scenarios.test.ts tests/pg-host.test.ts tests/guest-bookings.test.ts tests/auth-middleware.test.ts tests/tool-gating.test.ts tests/room-change.test.ts tests/resident-search.test.ts tests/marketplace-onboarding.test.ts",
     "db": "tsx scripts/dev.ts --db-only",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",

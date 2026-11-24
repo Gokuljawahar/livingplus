@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 560" width="800" height="560">
+  <rect width="800" height="560" fill="#F5F7FA"/>
+  <rect width="800" height="390" fill="#EAF1FA"/>
+  <rect y="390" width="800" height="170" fill="#E2E7EE"/>
+  <!-- 3 Study desks / shared pods -->
+  <rect x="85" y="120" width="180" height="125" rx="8" fill="#FFFFFF" stroke="#02224B" stroke-opacity="0.18" stroke-width="3"/>
+  <rect x="310" y="120" width="180" height="125" rx="8" fill="#FFFFFF" stroke="#02224B" stroke-opacity="0.18" stroke-width="3"/>
+  <rect x="535" y="120" width="180" height="125" rx="8" fill="#FFFFFF" stroke="#02224B" stroke-opacity="0.18" stroke-width="3"/>
+  <!-- Beds -->
+  <rect x="85" y="285" width="180" height="115" rx="8" fill="#02224B"/>
+  <rect x="95" y="310" width="160" height="55" rx="6" fill="#FEB109"/>
+  <rect x="310" y="285" width="180" height="115" rx="8" fill="#02224B"/>
+  <rect x="320" y="310" width="160" height="55" rx="6" fill="#FFFFFF"/>
+  <rect x="535" y="285" width="180" height="115" rx="8" fill="#02224B"/>
+  <rect x="545" y="310" width="160" height="55" rx="6" fill="#0A3B75"/>
+</svg>

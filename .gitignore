@@ -15,3 +15,7 @@ Project/backend/uploads/*
 
 # Local-only helper repo (has its own .git); not part of this project
 meta-model-cookbook/
+
+# Local presentation source assets
+deck_source/
+gemini_deck_source/

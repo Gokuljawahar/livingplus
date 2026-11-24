@@ -23,6 +23,19 @@ describe('live voice WebSocket protocol (Zod)', () => {
     assert.deepEqual(parseLiveServerMessage(JSON.stringify({ type: 'habits', answers: { sleep: 1 }, summary: 'Early', done: false })), {
       type: 'habits', answers: { sleep: 1 }, summary: 'Early', done: false
     });
+    assert.deepEqual(parseLiveServerMessage(JSON.stringify({ type: 'latency', ms: 420 })), { type: 'latency', ms: 420 });
+    for (const phase of ['proposed', 'done', 'cancelled', 'failed'] as const) {
+      assert.deepEqual(parseLiveServerMessage(JSON.stringify({ type: 'action', phase, summary: 'Assign ticket' })), {
+        type: 'action', phase, summary: 'Assign ticket'
+      });
+    }
+    for (const target of ['rent', 'bookings', 'maintenance'] as const) {
+      assert.deepEqual(parseLiveServerMessage(JSON.stringify({ type: 'handoff', target, reason: 'Mark rent paid' })), {
+        type: 'handoff', target, reason: 'Mark rent paid'
+      });
+    }
+    assert.equal(parseLiveServerMessage(JSON.stringify({ type: 'action', phase: 'unknown', summary: 'x' })), null);
+    assert.equal(parseLiveServerMessage(JSON.stringify({ type: 'handoff', target: 'settings', reason: 'x' })), null);
     assert.equal(parseLiveServerMessage(JSON.stringify({ type: 'habits', answers: { sleep: 9 }, summary: null, done: false })), null);
     assert.equal(parseLiveServerMessage(JSON.stringify({ type: 'audio', data: '' })), null);
   });

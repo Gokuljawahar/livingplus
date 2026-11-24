@@ -1,35 +1,60 @@
 import { rupees } from '../../utils/money';
 
+export interface PGPropertyRoom {
+  id: string;
+  roomNumber: string;
+  block?: string | null;
+  floor?: number | null;
+  roomType?: string;
+  hasAc?: boolean;
+  foodIncluded?: boolean;
+  foodCharge?: number | null;
+  depositAmount?: number | null;
+  maintenanceFee?: number | null;
+  utilitiesSurcharge?: number | null;
+  monthlyRent: number;
+  description?: string | null;
+  amenities?: string[];
+  photoUrls?: string[];
+  availableBeds: number;
+  totalBeds?: number;
+  occupiedBeds?: number;
+  beds: { id: string; label: string }[];
+}
+
 export interface PGProperty {
   id: string;
+  slug?: string | null;
   name: string;
+  propertyType?: string;
+  tagline?: string | null;
   description?: string | null;
   address: string;
   locality: string;
+  landmark?: string | null;
   city: string;
+  pincode?: string | null;
   genderPolicy: string;
   managerPhone?: string | null;
+  hasContactPhone?: boolean;
+  ownerName?: string | null;
   amenities: string[];
+  highlights?: string[];
+  foodDetails?: string | null;
+  nearbyPlaces?: string[];
   houseRules: string[];
   photoUrls: string[];
   availableBeds: number;
+  totalBeds?: number;
+  featured?: boolean;
+  onboardedByAdmin?: boolean;
+  isOwnStay?: boolean;
   serviceSettings?: { vibeCheck?: boolean } | null;
   /** An owner proved their phone with a code. */
   ownerVerified?: boolean;
   latitude?: number | null;
   longitude?: number | null;
-  rooms: {
-    id: string;
-    roomNumber: string;
-    roomType?: string;
-    hasAc?: boolean;
-    foodIncluded?: boolean;
-    foodCharge?: number | null;
-    depositAmount?: number | null;
-    monthlyRent: number;
-    availableBeds: number;
-    beds: { id: string; label: string }[];
-  }[];
+  rooms: PGPropertyRoom[];
 }
 
 export interface ResidentStay {
@@ -48,6 +73,13 @@ export const ROOM_TYPES = [
   { value: 'SHARED', label: 'Shared dorm' }
 ];
 
+export const ROOM_TYPE_LABELS: Record<string, string> = {
+  PRIVATE: 'Private room',
+  DOUBLE: '2 sharing',
+  TRIPLE: '3 sharing',
+  SHARED: 'Shared dorm'
+};
+
 export const PRICE_BANDS = [
   { label: 'Under ₹5,000', min: '', max: '5000' },
   { label: '₹5,000 – ₹8,000', min: '5000', max: '8000' },
@@ -65,7 +97,20 @@ export const SORTS = [
 export const GENDER_LABELS: Record<string, string> = { MEN: 'Men', WOMEN: 'Women', ANY: 'Co-living' };
 
 export function keywordMatch(property: PGProperty, text: string): boolean {
-  return `${property.name} ${property.locality} ${property.city} ${property.address}`.toLowerCase().includes(text);
+  const haystack = [
+    property.name,
+    property.tagline || '',
+    property.locality,
+    property.city,
+    property.address,
+    property.landmark || '',
+    property.propertyType || '',
+    ...(property.amenities || []),
+    ...(property.highlights || [])
+  ]
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(text);
 }
 
 export function availabilityText(beds: number): string {

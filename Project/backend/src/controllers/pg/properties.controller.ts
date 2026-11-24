@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import { isGenderPolicy, isStaffRole, isValidUpiId, MESSAGES } from '@livingplus/shared';
+import { isGenderPolicy, isPropertyType, isStaffRole, isValidUpiId, MESSAGES } from '@livingplus/shared';
 import { db } from '../../db/index.js';
 import { asSystem } from '../../db/context.js';
 import { logAudit } from '../../services/pg-audit.js';
@@ -36,7 +36,11 @@ export const createProperty = async (req: Request, res: Response): Promise<any> 
   const input: any = parseBody(createPropertyBody, req, res, INVALID_REQUEST);
   if (!input) return;
   const user = currentUser(req);
-  const { name, description, address, locality, contactPhone, upiId, landmark, city, pincode, latitude, longitude, genderPolicy, amenities, houseRules, photoUrls } = input;
+  const {
+    name, description, address, locality, contactPhone, upiId, landmark, city, pincode,
+    latitude, longitude, genderPolicy, propertyType, tagline, foodDetails,
+    amenities, highlights, nearbyPlaces, houseRules, photoUrls
+  } = input;
   if (!user) return res.status(401).json({ message: 'Unauthorized' });
   if (user.role !== 'PG_OWNER') {
     return res.status(403).json({ message: 'Only property owners can add properties' });
@@ -54,6 +58,8 @@ export const createProperty = async (req: Request, res: Response): Promise<any> 
         slug: await createUniquePgSlug(db, name),
         name: name.trim(),
         description: description?.trim() || null,
+        tagline: tagline?.trim() || null,
+        foodDetails: foodDetails?.trim() || null,
         address: address.trim(),
         locality: locality.trim(),
         contactPhone: contactPhone ? String(contactPhone).replace(/\D/g, '') : null,
@@ -64,7 +70,10 @@ export const createProperty = async (req: Request, res: Response): Promise<any> 
         latitude: latitude !== undefined && latitude !== '' && Number.isFinite(Number(latitude)) ? Number(latitude) : null,
         longitude: longitude !== undefined && longitude !== '' && Number.isFinite(Number(longitude)) ? Number(longitude) : null,
         genderPolicy: isGenderPolicy(String(genderPolicy)) ? genderPolicy : 'ANY',
+        propertyType: isPropertyType(String(propertyType)) ? propertyType : 'PG',
         amenities: Array.isArray(amenities) ? amenities : [],
+        highlights: Array.isArray(highlights) ? highlights : [],
+        nearbyPlaces: Array.isArray(nearbyPlaces) ? nearbyPlaces : [],
         houseRules: Array.isArray(houseRules) ? houseRules : [],
         photoUrls: Array.isArray(photoUrls) ? photoUrls : [],
         access: { create: { userId: user.id, role: 'OWNER' } }
@@ -87,7 +96,12 @@ export const updateProperty = async (req: Request, res: Response): Promise<any> 
   if (!await canManageProperty(req, propertyId, ['OWNER'])) {
     return res.status(403).json({ message: 'You do not have access to this property' });
   }
-  const fields = ['name', 'description', 'address', 'locality', 'contactPhone', 'upiId', 'landmark', 'city', 'pincode', 'latitude', 'longitude', 'genderPolicy', 'amenities', 'houseRules', 'photoUrls', 'status', 'bookingLockMinutes', 'rentDay', 'rentDueDay'];
+  const fields = [
+    'name', 'description', 'tagline', 'foodDetails', 'address', 'locality', 'contactPhone',
+    'upiId', 'landmark', 'city', 'pincode', 'latitude', 'longitude', 'genderPolicy',
+    'propertyType', 'amenities', 'highlights', 'nearbyPlaces', 'houseRules', 'photoUrls',
+    'status', 'bookingLockMinutes', 'rentDay', 'rentDueDay'
+  ];
   for (const numeric of ['bookingLockMinutes', 'rentDay', 'rentDueDay']) {
     if (inputFields[numeric] !== undefined) {
       const value = Number(inputFields[numeric]);
@@ -102,9 +116,14 @@ export const updateProperty = async (req: Request, res: Response): Promise<any> 
     if (inputFields[field] !== undefined) data[field] = inputFields[field];
   }
   if (typeof data.name === 'string') data.name = data.name.trim();
+  if (typeof data.tagline === 'string') data.tagline = data.tagline.trim() || null;
+  if (typeof data.foodDetails === 'string') data.foodDetails = data.foodDetails.trim() || null;
   if (typeof data.address === 'string') data.address = data.address.trim();
   if (typeof data.locality === 'string') data.locality = data.locality.trim();
   if (typeof data.contactPhone === 'string') data.contactPhone = data.contactPhone.replace(/\D/g, '') || null;
+  if (data.propertyType !== undefined) {
+    data.propertyType = isPropertyType(String(data.propertyType)) ? String(data.propertyType) : 'PG';
+  }
   for (const [field, limit] of [['latitude', 90], ['longitude', 180]] as const) {
     if (data[field] === undefined) continue;
     const raw = data[field];
@@ -162,7 +181,7 @@ export const createRoom = async (req: Request, res: Response): Promise<any> => {
   const input: any = parseBody(createRoomBody, req, res, INVALID_REQUEST);
   if (!input) return;
   const { propertyId } = req.params;
-  const { roomNumber, floor, block, roomType, monthlyRent, depositAmount, maintenanceFee, utilitiesSurcharge, hasAc, foodIncluded, foodCharge, numberOfBeds, bedLabels } = input;
+  const { roomNumber, floor, block, roomType, monthlyRent, depositAmount, maintenanceFee, utilitiesSurcharge, hasAc, foodIncluded, foodCharge, numberOfBeds, bedLabels, description, amenities, photoUrls } = input;
   if (!await canManageProperty(req, String(propertyId), ['OWNER'])) {
     return res.status(403).json({ message: 'You do not have access to this property' });
   }
@@ -187,6 +206,9 @@ export const createRoom = async (req: Request, res: Response): Promise<any> => {
         hasAc: Boolean(hasAc),
         foodIncluded: Boolean(foodIncluded),
         foodCharge: Number(foodCharge) > 0 ? Number(foodCharge) : 0,
+        description: description?.trim() || null,
+        amenities: Array.isArray(amenities) ? amenities : [],
+        photoUrls: Array.isArray(photoUrls) ? photoUrls : [],
         beds: { create: Array.from({ length: bedCount }, (_, index) => ({ label: Array.isArray(bedLabels) && bedLabels[index]?.trim() ? bedLabels[index].trim() : `Bed ${index + 1}` })) }
       },
       include: { beds: true }

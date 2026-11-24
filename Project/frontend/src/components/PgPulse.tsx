@@ -2,9 +2,9 @@
 // numbers, and a readable timeline that marks everything the assistant did and
 // who confirmed it.
 import { useState, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Bot, Loader2, Mic, PhoneOff, RefreshCw, Send } from 'lucide-react';
-import { useVibeLive } from '../hooks/useVibeLive';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowRight, Bot, CheckCircle2, Clock, Hand, Loader2, Mic, PhoneOff, RefreshCw, Send, XCircle } from 'lucide-react';
+import { useVibeLive, type LiveAction } from '../hooks/useVibeLive';
 import { apiErrorMessage } from '../utils/api-error';
 import api from '../api/axios';
 import { queryKeys } from '../api/query-keys';
@@ -23,6 +23,28 @@ export type PulseTarget = 'rent' | 'bookings' | 'maintenance';
 const TARGET: Record<Brief['suggestion']['action'], PulseTarget | null> = {
   SEND_RENT_REMINDERS: 'rent', REVIEW_BED_REQUESTS: 'bookings', OPEN_MAINTENANCE: 'maintenance', NONE: null
 };
+const HANDOFF_LABEL: Record<PulseTarget, string> = {
+  rent: 'Rent ledger',
+  bookings: 'Bed requests',
+  maintenance: 'Maintenance'
+};
+
+function formatLatency(ms: number): string {
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+}
+
+function actionStyle(phase: LiveAction['phase']) {
+  switch (phase) {
+    case 'proposed':
+      return { wrap: 'border-amber-200 bg-amber-50 text-navy-900', label: 'Read-back · waiting for your yes' };
+    case 'done':
+      return { wrap: 'border-emerald-200 bg-emerald-50 text-emerald-950', label: 'Done' };
+    case 'cancelled':
+      return { wrap: 'border-hairline bg-surface text-muted', label: 'Cancelled' };
+    case 'failed':
+      return { wrap: 'border-rose-200 bg-negative-bg text-negative', label: 'Could not run' };
+  }
+}
 
 function when(value: string): string {
   const date = new Date(value);
@@ -34,12 +56,15 @@ function when(value: string): string {
 }
 
 export default function PgPulse({ onGo }: { onGo: (target: PulseTarget) => void }) {
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<'all' | 'ai'>('all');
   const rewriteRef = useRef(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [voiceError, setVoiceError] = useState('');
   const [followUp, setFollowUp] = useState('');
-  const voice = useVibeLive(() => {});
+  const voice = useVibeLive(() => {}, {
+    onActionDone: () => { void queryClient.invalidateQueries({ queryKey: queryKeys.owner.pulse() }); }
+  });
   const startBriefing = async () => {
     setVoiceError('');
     setVoiceOpen(true);
@@ -114,7 +139,7 @@ export default function PgPulse({ onGo }: { onGo: (target: PulseTarget) => void 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 id="voice-heading" className="text-base font-semibold">Brief me by voice</h2>
-            <p className="text-sm text-muted">Hear today's priorities and ask questions hands-free, in Tamil, Hindi or English.</p>
+            <p className="text-sm text-muted">Hands-free briefing &amp; actions in Tamil, Hindi, Tanglish or English — assign repairs, post notices, log expenses or send reminders.</p>
           </div>
           {!voiceOpen || voice.status === 'ended' || voice.status === 'failed' ? (
             <button type="button" onClick={() => void startBriefing()} className="btn-secondary inline-flex items-center gap-1.5"><Mic className="h-4 w-4" aria-hidden="true" /> Brief me</button>
@@ -124,13 +149,51 @@ export default function PgPulse({ onGo }: { onGo: (target: PulseTarget) => void 
         </div>
         {voiceOpen && (
           <div className="mt-3 space-y-2" aria-live="polite">
-            <p className="inline-flex items-center gap-2 text-sm text-muted">
-              {voice.status === 'connecting' && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-              {voice.status === 'connecting' ? 'Getting your briefing ready…' : voice.status === 'speaking' ? 'Speaking' : voice.status === 'listening' ? 'Listening, ask anything about your PGs' : voice.status === 'ended' ? 'Briefing ended' : ''}
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="inline-flex items-center gap-2 text-sm text-muted">
+                {voice.status === 'connecting' && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                {voice.status === 'connecting' ? 'Getting your briefing ready…' : voice.status === 'speaking' ? 'Speaking' : voice.status === 'listening' ? 'Listening, ask or command in your language' : voice.status === 'ended' ? 'Briefing ended' : ''}
+              </p>
+              <div className="flex items-center gap-2">
+                {voice.latencyMs !== null && (
+                  <span data-testid="voice-latency" aria-label="Voice response latency" className="tabular inline-flex items-center gap-1 rounded-full bg-surface px-2.5 py-0.5 text-xs font-medium text-navy-900">
+                    <Clock className="h-3 w-3 text-muted" aria-hidden="true" /> {formatLatency(voice.latencyMs)}
+                  </span>
+                )}
+                {voice.status === 'speaking' && (
+                  <button type="button" onClick={voice.interrupt} className="rounded-full border border-hairline px-2.5 py-0.5 text-xs font-medium text-navy-900 hover:bg-surface">
+                    Interrupt
+                  </button>
+                )}
+              </div>
+            </div>
             {voice.turns.map((turn, index) => (
               <p key={index} className={`w-fit max-w-[90%] rounded-[12px] px-3 py-2 text-[15px] ${turn.role === 'assistant' ? 'bg-surface text-ink' : 'ml-auto bg-navy-900 text-white'}`}>{turn.text}</p>
             ))}
+            {voice.actions.length > 0 && (
+              <ul aria-label="Voice actions" className="space-y-1.5 pt-1">
+                {voice.actions.map((action, index) => {
+                  const style = actionStyle(action.phase);
+                  return (
+                    <li key={index} className={`flex items-start gap-2 rounded-[10px] border px-3 py-2 text-sm ${style.wrap}`}>
+                      {action.phase === 'done' ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> : action.phase === 'failed' || action.phase === 'cancelled' ? <XCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> : <Clock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />}
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-wide opacity-80">{style.label}</p>
+                        <p>{action.summary}</p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {voice.handoff && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-navy-900">
+                <p className="inline-flex items-center gap-2"><Hand className="h-4 w-4 shrink-0" aria-hidden="true" /> <span><strong>Needs your review:</strong> {voice.handoff.reason}</span></p>
+                <button type="button" onClick={() => onGo(voice.handoff!.target)} className="inline-flex min-h-8 items-center gap-1 rounded-full bg-navy-900 px-3 text-xs font-semibold text-white hover:bg-navy-700">
+                  Open {HANDOFF_LABEL[voice.handoff.target]} <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </div>
+            )}
             {(voice.status === 'listening' || voice.status === 'speaking') && (
               <form onSubmit={sendFollowUp} className="flex gap-2 pt-1">
                 <input

@@ -62,3 +62,4 @@ export * from './staff.js';
 export * from './places.js';
 export * from './format.js';
 export * from './live-protocol.js';
+export * from './marketplace.js';

@@ -36,10 +36,12 @@ export {
 export {
   cancelBookingRequest,
   createBookingRequest,
+  createOwnerLead,
   createSearchPropertiesSemanticHandler,
   getPgSite,
   getPublicBookingStatus,
   getPublicConfig,
+  getPublicProperty,
   listGuestBookings,
   listOwnerBookings,
   listPgSites,

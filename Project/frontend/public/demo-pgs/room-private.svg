@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 560" width="800" height="560">
+  <rect width="800" height="560" fill="#F5F7FA"/>
+  <!-- Accent wall -->
+  <rect x="0" y="0" width="800" height="390" fill="#EAF1FA"/>
+  <rect x="0" y="390" width="800" height="170" fill="#E2E7EE"/>
+  <!-- Window with daylight -->
+  <rect x="70" y="65" width="210" height="220" rx="8" fill="#FFFFFF" stroke="#02224B" stroke-width="6"/>
+  <line x1="175" y1="65" x2="175" y2="285" stroke="#02224B" stroke-width="4"/>
+  <line x1="70" y1="175" x2="280" y2="175" stroke="#02224B" stroke-width="4"/>
+  <!-- Wardrobe -->
+  <rect x="575" y="75" width="165" height="325" rx="8" fill="#02224B"/>
+  <line x1="657" y1="75" x2="657" y2="400" stroke="#EAF1FA" stroke-opacity="0.3" stroke-width="2"/>
+  <circle cx="645" cy="235" r="5" fill="#FEB109"/>
+  <circle cx="669" cy="235" r="5" fill="#FEB109"/>
+  <!-- Bed frame & mattress -->
+  <rect x="245" y="255" width="290" height="145" rx="10" fill="#0A3B75"/>
+  <rect x="255" y="285" width="270" height="75" rx="8" fill="#FFFFFF"/>
+  <rect x="255" y="325" width="270" height="45" rx="6" fill="#FEB109"/>
+  <!-- Pillows -->
+  <rect x="278" y="268" width="95" height="34" rx="8" fill="#FFFFFF" stroke="#E2E7EE" stroke-width="2"/>
+  <rect x="405" y="268" width="95" height="34" rx="8" fill="#FFFFFF" stroke="#E2E7EE" stroke-width="2"/>
+  <!-- Study desk & lamp -->
+  <rect x="65" y="320" width="140" height="14" rx="4" fill="#02224B"/>
+  <rect x="78" y="334" width="10" height="70" fill="#02224B"/>
+  <rect x="182" y="334" width="10" height="70" fill="#02224B"/>
+  <rect x="105" y="285" width="60" height="35" rx="4" fill="#0A3B75"/>
+</svg>
