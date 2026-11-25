@@ -23,6 +23,7 @@ const AdminConsole = lazy(() => import('./pages/AdminConsole'));
 
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const TermsAndConditions = lazy(() => import('./pages/TermsAndConditions'));
+const HybridAiDebugPanel = lazy(() => import('./ai/HybridAiDebugPanel'));
 
 const ProtectedRoute = ({ children, roles }: { children: React.ReactNode; roles?: string[] }) => {
   const { user, isLoading } = useAuth();
@@ -147,6 +148,7 @@ function App() {
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', handleResize);
+    void import('./ai/remote-config').then((m) => m.initHybridRemoteConfig());
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
@@ -181,6 +183,9 @@ function App() {
           }}
         />
         <AppRoutes />
+        <Suspense fallback={null}>
+          <HybridAiDebugPanel />
+        </Suspense>
       </AuthProvider>
     </BrowserRouter>
   );
