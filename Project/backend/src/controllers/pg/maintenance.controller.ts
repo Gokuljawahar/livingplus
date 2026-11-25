@@ -78,8 +78,8 @@ export const createTenantTicket = async (req: Request, res: Response): Promise<a
   const ticketPriority = safetyRisk === true || safetyRisk === 'true'
     ? 'URGENT'
     : allowedPriorities.includes(normalizedAiPriority)
-    ? normalizedAiPriority
-    : 'NORMAL';
+      ? normalizedAiPriority
+      : 'NORMAL';
 
   try {
     const account = await db.user.findUnique({ where: { id: user.id }, select: { phone: true } });

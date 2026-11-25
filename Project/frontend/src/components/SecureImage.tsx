@@ -16,7 +16,7 @@ const batchFetchImages = () => {
 
   const keysToFetch = [...new Set(imageQueue)];
   imageQueue = [];
-  
+
   const currentResolvers = resolvers;
   resolvers = {};
 
@@ -51,7 +51,7 @@ const getSecureImageUrl = (srcKey: string): Promise<string> => {
       resolvers[srcKey] = [];
     }
     resolvers[srcKey].push(resolve);
-    
+
     imageQueue.push(srcKey);
 
     if (!batchTimeout) {
