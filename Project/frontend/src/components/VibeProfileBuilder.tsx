@@ -4,9 +4,10 @@
 // tap-to-talk turns (Gemini hears each recording, the browser reads replies
 // aloud). Typing works in both, and the quick questions remain for review.
 import { useEffect, useRef, useState } from 'react';
-import { Clock, Keyboard, Loader2, Mic, PhoneOff, Send, Square, Volume2, VolumeX } from 'lucide-react';
+import { Clock, Cloud, Keyboard, Loader2, Lock, Mic, PhoneOff, Send, Sparkles, Square, Volume2, VolumeX } from 'lucide-react';
 import { VIBE_QUESTIONS, type VibeAnswers } from '@livingplus/shared';
 import api from '../api/axios';
+import { getHybridRemoteConfig } from '../ai/remote-config';
 import VibeQuiz from './VibeQuiz';
 import { blobToWav16k } from '../utils/audio';
 import { apiErrorMessage } from '../utils/api-error';
@@ -67,6 +68,10 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
   const [showQuiz, setShowQuiz] = useState(false);
   const [mode, setMode] = useState<'idle' | 'live' | 'tap'>('idle');
   const [liveDraft, setLiveDraft] = useState('');
+  const [showPrivateText, setShowPrivateText] = useState(false);
+  const [privateText, setPrivateText] = useState('');
+  const [extractingPrivate, setExtractingPrivate] = useState(false);
+  const [privateStatus, setPrivateStatus] = useState<{ source: 'on-device' | 'cloud'; latencyMs?: number; notice?: string } | null>(null);
   const live = useVibeLive(({ answers: learned, summary: learnedSummary, done: finished }) => {
     onChange({ ...answers, ...learned }, learnedSummary ?? summary);
     if (finished) setDone(true);
@@ -183,6 +188,58 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
     void send({ text }, text, history);
   };
 
+  const extractFromOwnWords = async () => {
+    const text = privateText.trim();
+    if (text.length < 10) {
+      setError('Write at least a couple of sentences about your sleep, study/work schedule, and tidiness.');
+      return;
+    }
+    setError('');
+    setExtractingPrivate(true);
+    setPrivateStatus(null);
+
+    const rc = getHybridRemoteConfig();
+    if (rc.vibe_on_device_enabled) {
+      try {
+        const { extractVibeHabitsOnDevice } = await import('../ai/ai');
+        const res = await extractVibeHabitsOnDevice(text);
+        const merged: VibeAnswers = { ...answers };
+        for (const [k, v] of Object.entries(res.data.answers)) {
+          if (v === 0 || v === 1 || v === 2) {
+            merged[k as keyof VibeAnswers] = v;
+          }
+        }
+        onChange(merged, res.data.summary || summary);
+        setDone(true);
+        setPrivateStatus({
+          source: 'on-device',
+          latencyMs: res.latencyMs
+        });
+        setExtractingPrivate(false);
+        return;
+      } catch {
+        // On-device model unavailable: explain plainly and fall back to server/cloud VibeCheck profile builder.
+      }
+    }
+
+    try {
+      const result = (await api.post('/pg/vibecheck/profile', { text, answers })).data as {
+        answers?: VibeAnswers;
+        summary?: string;
+      };
+      onChange({ ...answers, ...(result.answers || {}) }, result.summary ?? summary);
+      setDone(true);
+      setPrivateStatus({
+        source: 'cloud',
+        notice: "On-device Gemini Nano isn't available in this browser — used cloud Gemini fallback."
+      });
+    } catch (failure) {
+      setError(apiErrorMessage(failure, 'Could not analyse your routine right now. Try the quick questions below.'));
+    } finally {
+      setExtractingPrivate(false);
+    }
+  };
+
   const learned = VIBE_QUESTIONS.filter((question) => answers[question.id] !== undefined)
     .map((question) => ({ id: question.id, label: question.phrase[answers[question.id]!] ?? question.id }));
 
@@ -241,6 +298,14 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
           <p className="text-sm text-muted">Just talk in Tamil, Hindi, Tanglish or English. Share your routine so the owner can allot the right room.</p>
           <button type="button" onClick={() => { setMode('tap'); begin(false); setTyping(true); }} className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-navy-700 hover:underline">
             <Keyboard className="h-4 w-4" aria-hidden="true" /> Type instead
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPrivateText((open) => !open)}
+            className="inline-flex min-h-9 items-center gap-1.5 text-xs font-semibold text-emerald-800 hover:underline"
+          >
+            <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+            In your own words (private on-device)
           </button>
         </div>
       ) : (
@@ -315,6 +380,61 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
                 </div>
               )}
             </div>
+          )}
+        </div>
+      )}
+
+      {showPrivateText && (
+        <div className="space-y-2.5 rounded-[14px] border border-emerald-700/20 bg-emerald-50/40 p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="flex items-center gap-1.5 text-xs font-bold text-navy-900">
+                <Lock className="h-3.5 w-3.5 text-emerald-700" aria-hidden="true" />
+                Describe your routine in your own words
+              </p>
+              <p className="mt-0.5 text-xs text-muted">
+                Your words stay on this device. Only your habits are shared for matching.
+              </p>
+            </div>
+          </div>
+          <label htmlFor="vibe-private-text" className="sr-only">Describe your daily routine</label>
+          <textarea
+            id="vibe-private-text"
+            rows={3}
+            maxLength={800}
+            value={privateText}
+            onChange={(e) => setPrivateText(e.target.value)}
+            placeholder="e.g. I study till 1 am, keep my desk neat, headphones on after 10 pm, cook tea occasionally, prefer AC at night..."
+            className="w-full resize-y rounded-[var(--radius-field)] border border-hairline bg-canvas px-3 py-2 text-xs text-ink outline-none focus:border-navy-900"
+          />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <button
+              type="button"
+              disabled={extractingPrivate || privateText.trim().length < 10}
+              onClick={() => void extractFromOwnWords()}
+              className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] bg-navy-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-navy-700 disabled:opacity-50"
+            >
+              {extractingPrivate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 text-amber-400" />}
+              Build habits privately
+            </button>
+            {privateStatus && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-hairline bg-canvas px-2.5 py-0.5 text-[11px] font-bold text-navy-900">
+                {privateStatus.source === 'on-device' ? (
+                  <>
+                    <Lock className="h-3 w-3 text-emerald-700" />
+                    Analysed on your device 🔒{privateStatus.latencyMs ? ` · ${privateStatus.latencyMs} ms` : ''}
+                  </>
+                ) : (
+                  <>
+                    <Cloud className="h-3 w-3 text-sky-700" />
+                    Analysed in the cloud ☁️
+                  </>
+                )}
+              </span>
+            )}
+          </div>
+          {privateStatus?.notice && (
+            <p className="text-[11px] text-muted">{privateStatus.notice}</p>
           )}
         </div>
       )}
