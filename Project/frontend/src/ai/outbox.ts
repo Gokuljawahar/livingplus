@@ -192,11 +192,12 @@ export function useOfflineTicketOutbox(
   const tenantIdsKey = tenantIds.join(',');
 
   const reload = useCallback(async () => {
+    const allowedIds = tenantIdsKey ? tenantIdsKey.split(',') : [];
     const items = await listQueuedTickets();
     setQueuedTickets(
-      tenantIds.length ? items.filter((item) => tenantIds.includes(item.tenantId)) : items
+      allowedIds.length ? items.filter((item) => allowedIds.includes(item.tenantId)) : items
     );
-  }, [tenantIds, tenantIdsKey]);
+  }, [tenantIdsKey]);
 
   const flush = useCallback(async () => {
     if (typeof navigator !== 'undefined' && !navigator.onLine) return { sentCount: 0, remainingCount: queuedTickets.length };
@@ -216,10 +217,11 @@ export function useOfflineTicketOutbox(
 
   useEffect(() => {
     let cancelled = false;
+    const allowedIds = tenantIdsKey ? tenantIdsKey.split(',') : [];
     void listQueuedTickets().then((items) => {
       if (!cancelled) {
         setQueuedTickets(
-          tenantIds.length ? items.filter((item) => tenantIds.includes(item.tenantId)) : items
+          allowedIds.length ? items.filter((item) => allowedIds.includes(item.tenantId)) : items
         );
       }
     });
@@ -245,7 +247,7 @@ export function useOfflineTicketOutbox(
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [reload, flush, tenantIds, tenantIdsKey]);
+  }, [reload, flush, tenantIdsKey]);
 
   return {
     queuedTickets,
