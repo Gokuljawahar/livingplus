@@ -107,7 +107,8 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
     await api.post('/pg/tenant/maintenance', {
       tenantId: queued.tenantId,
       category: queued.category,
-      priority: queued.priority,
+      aiPriority: queued.priority,
+      safetyRisk: Boolean(queued.safetyRisk),
       title: queued.title,
       description: queued.description,
       ...(imageUrl ? { imageUrl } : {})
@@ -222,8 +223,12 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
         imageUrl = (await uploadPhotoBlob(snappedImage.blob)) || snappedImage.dataUrl;
       }
       await api.post('/pg/tenant/maintenance', {
-        ...form,
-        priority: effectivePriority,
+        tenantId: form.tenantId,
+        category: form.category,
+        title: form.title,
+        description: form.description,
+        aiPriority: effectivePriority,
+        safetyRisk: Boolean(triageBanner?.safetyRisk),
         ...(imageUrl ? { imageUrl } : {})
       });
       toast.success('Report sent. The warden will update its status here.');
