@@ -1,52 +1,104 @@
 # Living Plus
 
-**PG (paying-guest) living in Chennai, run end to end: honest discovery for guests, a simple home for residents, and a calm workspace for owners, with Gemini doing the routine work and people approving anything that matters.**
+**PG (paying-guest) living in Chennai, run end to end: honest discovery for guests, a simple home for residents, and a calm workspace for owners, with hybrid on-device + cloud Gemini AI doing the routine work and people approving anything that matters.**
 
-Built for the Google Startup Buildathon 2026. The answers this build delivers on are in [`core MD-livingplus_buildathon_answers.md`](core%20MD-livingplus_buildathon_answers.md).
+---
+
+## Hybrid AI with Firebase AI Logic (#BuildHybridAI 2026)
+
+PG hostel residents in Indian cities routinely lose cellular signal inside interior bedrooms, basements, and concrete stairwells — exactly where leaky pipes and sparking switches happen. **LivingPlus** puts **Gemini Nano on-device** (via Firebase AI Logic `firebase/ai` and Chrome's Prompt API) inside the resident's browser so **Snap & Triage** maintenance reporting and **VibeCheck** habit extraction work privately, instantly, and even completely offline, backed by a **Cloud Firestore offline outbox**. When cross-ticket reasoning or multimodal scale is needed, Firebase AI Logic routes cleanly to **Cloud Gemini**, guarded by **Firebase App Check** and steered live via **Firebase Remote Config**.
+
+### Hybrid Architecture
+
+```mermaid
+flowchart LR
+  Resident["Resident Browser (Chrome 139+)"] -->|"Photo (<=1024px JPEG) or Note"| FAL["Firebase AI Logic (firebase/ai)"]
+  FAL -->|"InferenceMode.PREFER_ON_DEVICE / ONLY_ON_DEVICE"| Nano["Gemini Nano (Chrome Prompt API)"]
+  FAL -->|"Fallback or ONLY_IN_CLOUD"| Cloud["Cloud Gemini (GoogleAIBackend)"]
+  AppCheck["Firebase App Check (reCAPTCHA v3 / Debug Token)"] -.->|"Attests requests"| FAL
+  RC["Firebase Remote Config"] -.->|"triage_inference_mode, prompt_version"| FAL
+  FAL -->|"Online submit"| API["Cloud Run / Express API + PostgreSQL"]
+  FAL -->|"Offline / weak signal"| Outbox["Firestore persistentLocalCache outbox/{uid}/tickets/{id}"]
+  Outbox -->|"window online event"| API
+```
+
+### Hybrid Feature Matrix
+
+| Feature | Firebase AI Logic Mode | Primary Function & File | Privacy / Resilience Behavior |
+|---|---|---|---|
+| **Snap & Triage (Maintenance)** | `InferenceMode.PREFER_ON_DEVICE` (configurable via Remote Config) | [`triageMaintenanceIssue`](Project/frontend/src/ai/ai.ts) called in [`ResidentMaintenanceView.tsx`](Project/frontend/src/features/resident/ResidentMaintenanceView.tsx) | Downscales photos client-side (`<=1024px` JPEG via [`downscaleImageToJpeg`](Project/frontend/src/ai/image.ts)), forces `URGENT` when `safetyRisk: true`, badges `"Analysed on your device 🔒"` vs `"Analysed in the cloud ☁️"` + ms latency. |
+| **Offline Maintenance Outbox** | Works offline with Firestore Local Persistence | [`queueOfflineTicket`](Project/frontend/src/ai/outbox.ts), [`useOfflineTicketOutbox`](Project/frontend/src/ai/outbox.ts), [`firestore.rules`](firestore.rules) | Queues triaged tickets + JPEG under `outbox/{firebaseUid}/tickets/{id}` with Anonymous Auth; auto-flushes and toasts on reconnection. |
+| **Private On-Device VibeCheck** | `InferenceMode.ONLY_ON_DEVICE` | [`extractVibeHabitsOnDevice`](Project/frontend/src/ai/ai.ts) called in [`VibeProfileBuilder.tsx`](Project/frontend/src/components/VibeProfileBuilder.tsx) | Turns free-text lifestyle notes into 8 numeric habit indices on-device so raw words never leave Chrome; falls back to `/pg/vibecheck/profile` with notice if unavailable. |
+| **Owner Open-Ticket Digest** | `InferenceMode.ONLY_IN_CLOUD` | [`summarizeOwnerOpenTickets`](Project/frontend/src/ai/ai.ts) called in [`OperationsViews.tsx`](Project/frontend/src/features/owner/OperationsViews.tsx) | Summarizes all open & in-progress maintenance tickets across rooms into 3 actionable bullets and detects repeated building issues. |
+| **App Check & Remote Config + Debug Drawer** | Live mode switching & attestation | [`ensureAppCheck`](Project/frontend/src/ai/app-check.ts), [`initHybridRemoteConfig`](Project/frontend/src/ai/remote-config.ts), [`HybridAiDebugPanel`](Project/frontend/src/ai/HybridAiDebugPanel.tsx) | Append `?debug=ai` to any URL to inspect Gemini Nano status, trigger user-gesture warmup (`initializeDeviceModel`), flip `InferenceMode`, and read live latency telemetry. |
+
+### Run & Test Hybrid AI Locally
+
+1. **Configure Frontend Environment (`Project/frontend/.env`):**
+   ```bash
+   cp Project/frontend/.env.example Project/frontend/.env
+   ```
+   Fill in your Firebase Web App keys (`VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID`), reCAPTCHA v3 site key (`VITE_RECAPTCHA_SITE_KEY`), and keep `VITE_APPCHECK_DEBUG=true` for local testing.
+   - When running in local development, Firebase prints an **App Check debug token** in the browser DevTools console — register that UUID once in *Firebase Console → App Check → Apps → Manage debug tokens* (or pass your pre-registered UUID directly in `VITE_APPCHECK_DEBUG`).
+
+2. **Enable On-Device Gemini Nano (Chrome Desktop 139+):**
+   - Open `chrome://flags/#optimization-guide-on-device-model` → set to **Enabled BypassPerfRequirement**
+   - Open `chrome://flags/#prompt-api-for-gemini-nano` → set to **Enabled** (and multimodal input if available)
+   - Relaunch Chrome, open `chrome://on-device-internals` → ensure the Optimization Guide on-device model is downloaded, or open LivingPlus (`?debug=ai`) and click **"Initialize on-device AI"** (or **"Enable offline AI"** in Resident Maintenance) — Chrome requires a user gesture to trigger `model.initializeDeviceModel()`.
+
+3. **Test Offline Snap & Triage + Firestore Outbox:**
+   - Sign in as a resident (`/stay/<pg-slug>/maintenance`) and open **Report an issue**.
+   - In Chrome DevTools → **Network** → select **Offline**.
+   - Snap a photo or type `"sparking switch near bathroom geyser"` and click **Triage**. Gemini Nano runs offline on-device, flags `safetyRisk: true`, and sets priority to `URGENT`.
+   - Click **Queue offline report** — it appears immediately with `"Queued, will send when you're back online"`.
+   - Switch DevTools **Network** back to **No throttling** — LivingPlus automatically flushes the Firestore outbox and toasts `"1 offline report sent"`.
+
+### Built During the Submission Period (Nov 11 – Nov 30, 2026)
+
+LivingPlus began as an existing PG marketplace, resident portal, and owner operations platform (including backend PostgreSQL ledger, Google ADK server agent, KYC checks, Deposit Shield, and Live API voice VibeCheck). Specifically built during **#BuildHybridAI 2026 (Nov 11 – Nov 30, 2026)**:
+- `Project/frontend/src/ai/` (`firebase.ts`, `app-check.ts`, `remote-config.ts`, `device-model.ts`, `image.ts`, `prompts.ts`, `ai.ts`, `outbox.ts`, `HybridAiDebugPanel.tsx`) using `firebase/ai` (`InferenceMode`, `InferenceSource`, `GoogleAIBackend`, `initializeDeviceModel`), `firebase/app-check`, `firebase/remote-config`, and `firebase/firestore` (`persistentLocalCache()`).
+- **Snap & Triage** multimodal camera/text triage, client-side JPEG downscaling (`<=1024px`), safety hazard escalation (`URGENT`), and **Firestore Offline Outbox** in `ResidentMaintenanceView.tsx` + backend support for resident `priority` and `imageUrl` in `maintenance.controller.ts`.
+- **On-Device Private VibeCheck** mode (`ONLY_ON_DEVICE`) in `VibeProfileBuilder.tsx`.
+- **Owner Open-Ticket Cloud Digest** (`ONLY_IN_CLOUD`) in `OperationsViews.tsx`.
+- `LICENSE` (Apache-2.0), `firestore.rules`, `Project/frontend/.env.example`, `?debug=ai` inspector, unit tests, `SUBMISSION.md`, and `DEMO_SCRIPT.md`.
+
+---
 
 ## Three sites, one codebase
 
 | Site | Path | Who | What they do |
 |---|---|---|---|
 | Guest | `/` | Students and young professionals looking for a PG | Browse with no sign-up. See the real monthly cost (rent, food, deposit), live bed availability, and how far each PG is from their campus or office (IIT Madras, Tidel Park, SIPCOT…). Take **VibeCheck** to see how they'd fit with each room. Request a bed with one phone code, then follow the reply in *My requests*. |
-| Resident | `/stay/<pg>` | People living in a PG | See what they owe and pay, report issues with photo or voice, order meals and cleaning, keep move-in condition records, update VibeCheck, request a room change, and read notices. |
-| Owner | `/owner` | PG owners and their staff | *Today* (what needs you), beds and bookings, tenants and KYC, the rent ledger and payment claims, expenses, utilities, maintenance, services, staff roles and reports. |
+| Resident | `/stay/<pg>` | People living in a PG | See what they owe and pay, report issues with **Snap & Triage** (on-device + offline queue) or voice, order meals and cleaning, keep move-in condition records, update VibeCheck, request a room change, and read notices. |
+| Owner | `/owner` | PG owners and their staff | *Today* (what needs you), beds and bookings, tenants and KYC, the rent ledger and payment claims, expenses, utilities, maintenance (with Cloud Gemini daily digests), services, staff roles and reports. |
 
 ## AI: the right Google tool for each job
 
 | Job | Built with | How |
 |---|---|---|
-| Assistant for guests, residents and owners (about 30 tools) | **Google ADK** (`@google/adk`) | An `LlmAgent` with one `FunctionTool` per backend action, run by ADK's `Runner`. Tools are scoped to the caller's role and PG. Owners can ask it to draft and post notices or assign a ticket to a warden. Anything that writes (bookings, expenses, bills, notices, assignments) pauses for explicit confirmation, bound to the same person and PG and stored in PostgreSQL, so it survives restarts. |
-| KYC document check | **Gemini API** (`@google/genai`), one structured call | Reads an uploaded ID and returns the document type, name, last 4 digits only, legibility and problems, as JSON checked with Zod. The owner still verifies. |
-| VibeCheck profile | Gemini, one structured call | Turns "I study till 1 am, keep my desk neat…" (in English, Tamil or Hindi) into 8 lifestyle habits plus a short summary, and asks one follow-up question if something important is missing. |
-| VibeCheck matching | Gemini, one structured call | Judges each room against a deterministic baseline score. The AI may move a score by at most 15 points, and the reasons it gives are about habits only, never names. |
-| VibeCheck Live & Owner Briefings | **Gemini Live API** | Low-latency 16 kHz AudioWorklet voice conversation in Tamil, Hindi or English for VibeCheck habit interviews and hands-free owner operational briefings. |
-| Deposit Shield & Kitchen Forecast | Gemini Vision & structured output | Compares paired move-in and move-out room photos (normal wear is always ₹0) and forecasts daily meal plates from food plans, opt-outs and resident routines. |
-| Voice notes, photo issues | Gemini multimodal | Transcribes voice notes and describes photo complaints, which become maintenance tickets. |
-| Search ("quiet PG near Tidel Park") | Gemini embeddings | Semantic matches alongside keyword search. |
-
-**Model:** `gemini-3.8-flash` on Vertex AI: stable, with function calling and structured output, at thinking level `MEDIUM`. The code also runs on `gemini-4-hydrogen`; switch with `AI_MODEL` once the project's per-minute quota for it is raised, since new projects start very low and multi-step tool calls hit 429s.
+| Resident Snap & Triage + Offline Outbox | **Firebase AI Logic** (`firebase/ai`, `PREFER_ON_DEVICE`) + **Firestore** + **App Check** + **Remote Config** | Runs single-turn structured image/text maintenance triage on Chrome's Gemini Nano with automatic Cloud Gemini fallback, safety-hazard `URGENT` escalation, and Firestore persistent offline queueing. |
+| Private Resident VibeCheck Text Extraction | **Firebase AI Logic** (`firebase/ai`, `ONLY_ON_DEVICE`) | Maps personal lifestyle paragraphs into 8 numerical habit indices without sending the resident's raw words off-device. |
+| Owner Cross-Ticket Digest | **Firebase AI Logic** (`firebase/ai`, `ONLY_IN_CLOUD`) | Summarizes today's open tickets and repeated cross-room patterns for owners/wardens. |
+| Assistant for guests, residents and owners (~30 tools) | **Google ADK** (`@google/adk`) | Server-side `LlmAgent` with role- and property-scoped `FunctionTool`s and DB-backed confirmations for writes. |
+| KYC document check, Deposit Shield, Kitchen Forecast | **Gemini API** (`@google/genai`) | Structured server-side vision checks (ID last-4 extraction, paired move-in/out damage comparison, meal forecasting). |
+| VibeCheck Live & Owner Briefings | **Gemini Live API** | Low-latency 16 kHz AudioWorklet voice conversation in Tamil, Hindi or English. |
 
 **Guardrails:**
-- VibeCheck never sends names or phone numbers, only habits.
+- On-device VibeCheck text stays strictly in the browser when Gemini Nano is active; matching shares only habit indices, never names or phones.
 - The KYC check keeps only the last 4 digits of an ID number.
-- Each assistant tool returns only what the caller may see: residents never see each other's money or KYC records.
-- A model's tool call is checked against the caller's role and PG before anything runs.
+- Firestore outbox security rules restrict each resident session strictly to `outbox/{uid}/tickets/{ticketId}`.
+- Each backend assistant tool enforces role and property row-level isolation.
 
 ## On Google Cloud
 
 | Need | Service |
 |---|---|
 | Web app and API | **Cloud Run** (one container, scales to zero) |
-| Data | **Cloud SQL for PostgreSQL**, with **row-level security** so each owner's PGs are isolated in the database itself |
+| Data | **Cloud SQL for PostgreSQL** (row-level security per PG) & **Cloud Firestore** (offline resident maintenance outbox) |
+| Client Hybrid AI, Attestation & Config | **Firebase AI Logic**, **Firebase App Check**, **Firebase Remote Config** |
 | Uploads (photos, KYC, condition records) | **Cloud Storage**, private, served through short-lived signed URLs |
-| AI | **Vertex AI** (Gemini, embeddings) through the service account, with no API keys |
-| Secrets | **Secret Manager** |
-| Monthly rent, reminders, search index | **Cloud Scheduler** |
-| Health and alerts | **Cloud Monitoring** and **Cloud Logging** |
-| Phone OTP and Google sign-in | **Firebase Authentication** (falls back to on-screen demo codes when not set up) |
-| Location picker | **Google Maps Platform** |
-| Messages | **WhatsApp Business Platform**: alerts out, plus YES/NO replies in, with signed webhooks |
+| Server AI & Secrets | **Vertex AI** (Gemini, embeddings) + **Secret Manager** |
+| Phone OTP and Sign-In | **Firebase Authentication** (Phone OTP, Google Sign-In, Anonymous Auth for outbox rules) |
 
 ## Deploy
 
@@ -59,34 +111,28 @@ PROJECT_ID=<project> SEED_DEMO_DATA=1 bash deploy/gcp-deploy.sh
 # Fresh project without Firebase: on-screen OTP codes
 PROJECT_ID=<project> SEED_DEMO_DATA=1 SKIP_FIREBASE=1 bash deploy/gcp-deploy.sh
 
-# AI through a Google AI Studio key instead of Vertex AI
-PROJECT_ID=<project> SEED_DEMO_DATA=1 AI_BACKEND=studio GOOGLE_API_KEY=<key> bash deploy/gcp-deploy.sh
-
 # See every step without changing anything
 DRY_RUN=1 PROJECT_ID=<project> SKIP_FIREBASE=1 bash deploy/gcp-deploy.sh
 ```
 
-The script enables the APIs and creates the service account, bucket, secrets, Cloud SQL, image, Cloud Run service, scheduler jobs and monitoring. Migrations run when the container starts. It prints the URLs and the demo owner login at the end.
-
 ## Run locally
 
 ```bash
-cd Project/backend && cp .env.example .env    # set GOOGLE_API_KEY and ENABLE_AI_ORCHESTRATOR=true for AI
+cd Project/backend && cp .env.example .env    # set GOOGLE_API_KEY and ENABLE_AI_ORCHESTRATOR=true for server AI
 npm install && npm run dev                     # starts a local PostgreSQL, applies migrations, runs the API
 npm run seed                                   # demo PGs, rooms and residents
 
-cd ../frontend && npm install && npm run dev   # http://localhost:5173
+cd ../frontend && cp .env.example .env         # add VITE_FIREBASE_* & VITE_RECAPTCHA_SITE_KEY
+npm install && npm run dev                     # http://localhost:5173
 ```
 
 ## Tests
 
 ```bash
-cd Project/backend  && npm test                # 259 API, isolation, invoice-code and AI-agent tests
-cd Project/frontend && npm test && npm run e2e # 56 unit tests and 7 browser journeys
+cd Project/backend  && npm test                # API, isolation, invoice-code and AI-agent tests
+cd Project/frontend && npm test && npm run e2e # Unit tests (incl. Firebase AI Logic & outbox) + Playwright E2E
 ```
 
-The AI tests script the model, so they check behaviour without network calls: role limits, confirmations bound to the caller, isolation between PGs, and the 15-point VibeCheck limit.
+## License
 
-## Design
-
-[`DESIGN.md`](DESIGN.md) is the design system: who each site is for, tokens, type (Plus Jakarta Sans and Inter), layouts, writing rules and the psychology behind them.
+Apache License 2.0 — see [`LICENSE`](LICENSE).
