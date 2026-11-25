@@ -54,6 +54,7 @@ export type OperatorForm = z.infer<typeof operatorSchema>;
 export const residentTicketSchema = z.object({
   tenantId: z.string(),
   category: z.string(),
+  priority: z.string().optional(),
   title: z.string().trim().min(1, 'Add a short title').max(LIMITS.ticketTitle, MESSAGES.ticketTitle),
   description: z.string().trim().min(1, 'Describe the issue').max(LIMITS.ticketDetails, MESSAGES.ticketDetails)
 });

@@ -1,0 +1,26 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Resident offline maintenance outbox: each authenticated (including anonymous)
+    // browser session can only read, queue, and delete its own pending tickets.
+    match /outbox/{uid}/tickets/{ticketId} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.tenantId is string
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 200
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 5000
+        && request.resource.data.category in [
+          'PLUMBING', 'ELECTRICAL', 'APPLIANCE', 'CLEANING', 'SAFETY', 'PEST', 'OTHER'
+        ]
+        && request.resource.data.priority in ['LOW', 'NORMAL', 'HIGH', 'URGENT'];
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

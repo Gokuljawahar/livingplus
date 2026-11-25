@@ -146,7 +146,10 @@ export const createMaintenanceTicketBody = z.object({
   propertyId: t(100), tenantId: t(100), title: t(200), description: t(5000), category: t(50),
   priority: t(20), imageUrl: t(1_000_000), assignedTo: t(200)
 });
-export const createTenantTicketBody = z.object({ tenantId: t(100), title: t(200), description: t(5000), category: t(50) });
+export const createTenantTicketBody = z.object({
+  tenantId: t(100), title: t(200), description: t(5000), category: t(50),
+  priority: t(20), imageUrl: t(1_000_000)
+});
 export const updateMaintenanceStatusBody = z.object({ status: t(30) });
 
 // Money
