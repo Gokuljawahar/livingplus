@@ -180,18 +180,23 @@ export function useOfflineTicketOutbox(
   submitFn: (ticket: QueuedMaintenanceTicket) => Promise<void>,
   onFlushed?: () => Promise<unknown>
 ) {
-  const [queuedTickets, setQueuedTickets] = useState<QueuedMaintenanceTicket[]>([]);
+  const [queuedTickets, setQueuedTickets] = useState<QueuedMaintenanceTicket[]>(() => {
+    const initial = readLocalOutbox();
+    return tenantIds.length ? initial.filter((item) => tenantIds.includes(item.tenantId)) : initial;
+  });
   const [isOnline, setIsOnline] = useState<boolean>(() =>
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
   const [flushing, setFlushing] = useState(false);
+
+  const tenantIdsKey = tenantIds.join(',');
 
   const reload = useCallback(async () => {
     const items = await listQueuedTickets();
     setQueuedTickets(
       tenantIds.length ? items.filter((item) => tenantIds.includes(item.tenantId)) : items
     );
-  }, [tenantIds.join(',')]);
+  }, [tenantIds, tenantIdsKey]);
 
   const flush = useCallback(async () => {
     if (typeof navigator !== 'undefined' && !navigator.onLine) return { sentCount: 0, remainingCount: queuedTickets.length };
@@ -210,10 +215,15 @@ export function useOfflineTicketOutbox(
   }, [submitFn, onFlushed, reload, queuedTickets.length]);
 
   useEffect(() => {
-    void reload();
-    const unsub = () => {
-      outboxListeners.delete(reloadHandler);
-    };
+    let cancelled = false;
+    void listQueuedTickets().then((items) => {
+      if (!cancelled) {
+        setQueuedTickets(
+          tenantIds.length ? items.filter((item) => tenantIds.includes(item.tenantId)) : items
+        );
+      }
+    });
+
     const reloadHandler = () => {
       void reload();
     };
@@ -230,11 +240,12 @@ export function useOfflineTicketOutbox(
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
-      unsub();
+      cancelled = true;
+      outboxListeners.delete(reloadHandler);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [reload, flush]);
+  }, [reload, flush, tenantIds, tenantIdsKey]);
 
   return {
     queuedTickets,

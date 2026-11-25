@@ -39,14 +39,11 @@ api.interceptors.request.use(async (config) => {
     (method === 'post' && url.includes('/pg/ai/chat'));
   const residentToken = localStorage.getItem(RESIDENT_TOKEN_KEY);
 
-  let token: string | null = null;
-  if (isAdminRequest) {
-    token = localStorage.getItem(ADMIN_TOKEN_KEY);
-  } else if (!isOwnerRoute && (isResidentRequest || (isPublicDiscovery && Boolean(residentToken)))) {
-    token = residentToken;
-  } else {
-    token = localStorage.getItem(OWNER_TOKEN_KEY);
-  }
+  const token = isAdminRequest
+    ? localStorage.getItem(ADMIN_TOKEN_KEY)
+    : !isOwnerRoute && (isResidentRequest || (isPublicDiscovery && Boolean(residentToken)))
+    ? residentToken
+    : localStorage.getItem(OWNER_TOKEN_KEY);
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
