@@ -4,6 +4,7 @@ import { db } from '../../db/index.js';
 import { logAudit } from '../../services/pg-audit.js';
 import { approveElectricityBill as approveBill, listElectricityBills as listBills, proposeElectricityBill as proposeBill } from '../../services/pg-billing.js';
 import { createExpense, deleteExpense, listExpenses } from '../../services/pg-expenses.js';
+import { getPlatformCatalog } from '../../services/platform-catalog.js';
 import { sendDueRentReminders } from '../../services/pg-rent-reminders.js';
 import { periodOf, periodRange } from '../../utils/app-time.js';
 import { INVALID_REQUEST, parseBody } from '../../utils/validate.js';
@@ -212,6 +213,10 @@ export const recordRentPayment = async (req: Request, res: Response): Promise<an
   const { amount, method } = body;
 
   try {
+    const catalog = await getPlatformCatalog();
+    if (!catalog.paymentMethods.some((m) => m.value === method)) {
+      return res.status(400).json({ message: 'A positive payment amount and valid payment method are required' });
+    }
     const entry = await db.pGRentEntry.findUnique({
       where: { id: String(req.params.entryId) },
       include: { tenant: true }

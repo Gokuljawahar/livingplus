@@ -26,11 +26,8 @@ import {
 import toast from 'react-hot-toast';
 import {
   categorizeAmenities,
-  CHENNAI_LANDMARKS,
   distanceKm,
-  formatDistance,
-  PROPERTY_TYPE_LABELS,
-  type PropertyType
+  formatDistance
 } from '@livingplus/shared';
 import api from '../api/axios';
 import { queryKeys } from '../api/query-keys';
@@ -43,11 +40,10 @@ import BookingModal from '../features/discovery/BookingModal';
 import {
   availabilityText,
   computePriceFacts,
-  GENDER_LABELS,
-  ROOM_TYPE_LABELS,
   type PGProperty,
   type PGPropertyRoom
 } from '../features/discovery/types';
+import { labelFromCatalog, usePlatformCatalog } from '../hooks/usePlatformCatalog';
 import { ROUTES } from '../utils/app-areas';
 import { getGuestSession, useGuestSession, type GuestSession } from '../utils/guest-session';
 import { rupees } from '../utils/money';
@@ -90,15 +86,16 @@ export default function PGDetailPage() {
     return [...set];
   }, [property]);
 
+  const { catalog } = usePlatformCatalog();
   const nearbyDistances = useMemo(() => {
     if (!property || property.latitude == null || property.longitude == null) return [];
-    return CHENNAI_LANDMARKS.map((place) => ({
+    return catalog.landmarks.map((place) => ({
       place,
       km: distanceKm({ latitude: property.latitude!, longitude: property.longitude! }, place)
     }))
       .sort((a, b) => a.km - b.km)
       .slice(0, 4);
-  }, [property]);
+  }, [property, catalog.landmarks]);
 
   const matchesAnyOpenRoom = (room: PGPropertyRoom) => room.availableBeds > 0;
 
@@ -139,13 +136,17 @@ export default function PGDetailPage() {
   }
 
   const facts = computePriceFacts(property, matchesAnyOpenRoom);
-  const categorizedFacilities = categorizeAmenities(property.amenities || []);
+  const categorizedFacilities = categorizeAmenities(
+    property.amenities || [],
+    catalog.amenityCategories.length ? catalog.amenityCategories : undefined
+  );
   const roomTypesPresent = [...new Set(property.rooms.map((r) => r.roomType || 'SHARED'))];
   const visibleRooms =
     roomFilter === 'ALL' ? property.rooms : property.rooms.filter((r) => (r.roomType || 'SHARED') === roomFilter);
   const isSaved = savedIds.includes(property.id);
   const isSignedIn = Boolean(user || guestPhone);
-  const propertyTypeLabel = PROPERTY_TYPE_LABELS[(property.propertyType || 'PG') as PropertyType] || 'Paying Guest (PG)';
+  const propertyTypeLabel = labelFromCatalog(catalog.propertyTypes, property.propertyType || 'PG') || 'Paying Guest (PG)';
+  const genderPolicyLabel = labelFromCatalog(catalog.genderPolicies, property.genderPolicy);
   const totalBedsCount = property.totalBeds ?? property.rooms.reduce((sum, r) => sum + (r.totalBeds ?? r.beds.length), 0);
 
   const handleSaveClick = () => {
@@ -306,7 +307,7 @@ export default function PGDetailPage() {
                   {propertyTypeLabel}
                 </span>
                 <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-navy-900">
-                  For {GENDER_LABELS[property.genderPolicy] || property.genderPolicy}
+                  For {genderPolicyLabel}
                 </span>
                 {property.ownerVerified && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-positive-bg px-3 py-1 text-xs font-bold text-positive">
@@ -408,7 +409,7 @@ export default function PGDetailPage() {
                           roomFilter === type ? 'bg-navy-900 text-white' : 'bg-surface text-ink hover:bg-hairline'
                         }`}
                       >
-                        {ROOM_TYPE_LABELS[type] || type}
+                        {labelFromCatalog(catalog.roomTypes, type)}
                       </button>
                     ))}
                   </div>
@@ -439,7 +440,7 @@ export default function PGDetailPage() {
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <h3 className="text-base font-bold text-navy-900">
-                              Room {room.roomNumber} · {ROOM_TYPE_LABELS[room.roomType || 'SHARED'] || room.roomType}
+                              Room {room.roomNumber} · {labelFromCatalog(catalog.roomTypes, room.roomType || 'SHARED')}
                             </h3>
                             {room.hasAc && (
                               <span className="rounded-full bg-info-bg px-2.5 py-0.5 text-xs font-semibold text-navy-900">AC</span>
@@ -656,7 +657,7 @@ export default function PGDetailPage() {
                 </div>
                 <div className="flex justify-between py-2.5">
                   <dt className="text-muted">Gender policy</dt>
-                  <dd className="font-semibold text-navy-900">{GENDER_LABELS[property.genderPolicy] || property.genderPolicy}</dd>
+                  <dd className="font-semibold text-navy-900">{genderPolicyLabel}</dd>
                 </div>
               </dl>
 

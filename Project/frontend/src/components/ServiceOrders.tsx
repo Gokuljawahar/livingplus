@@ -5,11 +5,12 @@ import toast from 'react-hot-toast';
 import { Loader2 } from 'lucide-react';
 import { CLEANING_SLOTS, MEAL_SLOTS, SLOT_LABELS, type ServiceSettings } from '@livingplus/shared';
 import api from '../api/axios';
+import { labelFromCatalog, usePlatformCatalog } from '../hooks/usePlatformCatalog';
 import StatusPill from './ui/StatusPill';
 import { apiErrorMessage } from '../utils/api-error';
 import { rupees, shortDate } from '../utils/money';
 
-type Order = { id: string; type: 'MEAL' | 'HOUSEKEEPING'; forDate: string; slot: keyof typeof SLOT_LABELS; quantity: number; unitPrice: number; status: string; notes?: string | null };
+type Order = { id: string; type: 'MEAL' | 'HOUSEKEEPING'; forDate: string; slot: string; quantity: number; unitPrice: number; status: string; notes?: string | null };
 type Data = { settings: ServiceSettings; orders: Order[]; today: string; daysAhead: number };
 
 const addDays = (day: string, days: number) => {
@@ -19,6 +20,7 @@ const addDays = (day: string, days: number) => {
 };
 
 export default function ServiceOrders({ tenantId }: { tenantId: string }) {
+  const { catalog } = usePlatformCatalog();
   const queryClient = useQueryClient();
   const queryKey = ['resident', 'service-orders', tenantId];
   const { data, isPending } = useQuery({ queryKey, queryFn: async (): Promise<Data> => (await api.get(`/pg/tenant/${tenantId}/service-orders`)).data });
@@ -42,8 +44,12 @@ export default function ServiceOrders({ tenantId }: { tenantId: string }) {
     );
   }
   const date = day || addDays(data.today, 1);
-  const slots = activeType === 'MEAL' ? MEAL_SLOTS : CLEANING_SLOTS;
-  const priceOf = (value: string) => (activeType === 'MEAL' ? data.settings.mealOrders.prices[value as keyof ServiceSettings['mealOrders']['prices']] : data.settings.housekeeping.price);
+  const mealSlotItems = catalog.mealSlots.length ? catalog.mealSlots : MEAL_SLOTS.map((v) => ({ value: v, label: SLOT_LABELS[v] || v }));
+  const cleaningSlotItems = catalog.cleaningSlots.length ? catalog.cleaningSlots : CLEANING_SLOTS.map((v) => ({ value: v, label: SLOT_LABELS[v] || v }));
+  const slots = activeType === 'MEAL' ? mealSlotItems : cleaningSlotItems;
+  const allSlotItems = [...mealSlotItems, ...cleaningSlotItems];
+  const slotLabel = (val: string) => labelFromCatalog(allSlotItems, val) || SLOT_LABELS[val] || val;
+  const priceOf = (value: string) => (activeType === 'MEAL' ? (data.settings.mealOrders.prices[value] ?? 0) : data.settings.housekeeping.price);
 
   const place = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -102,11 +108,11 @@ export default function ServiceOrders({ tenantId }: { tenantId: string }) {
           <fieldset>
             <legend className="text-sm font-medium text-navy-900">{activeType === 'MEAL' ? 'Meal' : 'Time'}</legend>
             <div className="mt-2 grid gap-2 sm:grid-cols-3">
-              {slots.map((value) => (
-                <label key={value} className={`flex min-h-11 cursor-pointer items-center justify-between rounded-[10px] border px-3 ${slot === value ? 'border-navy-900 bg-amber-50 font-medium text-navy-900' : 'border-hairline bg-white'}`}>
-                  <input type="radio" name="service-slot" className="sr-only" checked={slot === value} onChange={() => setSlot(value)} />
-                  <span>{SLOT_LABELS[value]}</span>
-                  <span className="tabular text-sm text-muted">{priceOf(value) ? rupees(priceOf(value)) : 'Free'}</span>
+              {slots.map((item) => (
+                <label key={item.value} className={`flex min-h-11 cursor-pointer items-center justify-between rounded-[10px] border px-3 ${slot === item.value ? 'border-navy-900 bg-amber-50 font-medium text-navy-900' : 'border-hairline bg-white'}`}>
+                  <input type="radio" name="service-slot" className="sr-only" checked={slot === item.value} onChange={() => setSlot(item.value)} />
+                  <span>{item.label}</span>
+                  <span className="tabular text-sm text-muted">{priceOf(item.value) ? rupees(priceOf(item.value)) : 'Free'}</span>
                 </label>
               ))}
             </div>
@@ -143,7 +149,7 @@ export default function ServiceOrders({ tenantId }: { tenantId: string }) {
               <li key={order.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div>
                   <p className="font-medium text-navy-900">
-                    {order.type === 'MEAL' ? `${SLOT_LABELS[order.slot]}${order.quantity > 1 ? ` × ${order.quantity}` : ''}` : `Cleaning, ${SLOT_LABELS[order.slot].toLowerCase()}`}
+                    {order.type === 'MEAL' ? `${slotLabel(order.slot)}${order.quantity > 1 ? ` × ${order.quantity}` : ''}` : `Cleaning, ${slotLabel(order.slot).toLowerCase()}`}
                   </p>
                   <p className="tabular text-sm text-muted">{shortDate(order.forDate)}{order.unitPrice ? ` · ${rupees(order.unitPrice * order.quantity)}` : ''}{order.notes ? ` · ${order.notes}` : ''}</p>
                 </div>

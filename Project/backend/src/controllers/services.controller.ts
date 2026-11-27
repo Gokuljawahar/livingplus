@@ -8,6 +8,7 @@ import { logAudit } from '../services/pg-audit.js';
 import { appTimeZone } from '../utils/app-time.js';
 import { accessiblePropertyIds, canManageProperty, currentUser, ownStay } from './pg.controller.js';
 import { cleanServiceSettings, isSlotFor, ORDER_DAYS_AHEAD, type ServiceSettings } from '@livingplus/shared';
+import { getPlatformCatalog } from '../services/platform-catalog.js';
 
 /** "YYYY-MM-DD" for a date in the app time zone. */
 const dayKey = (at: Date): string => new Intl.DateTimeFormat('en-CA', { timeZone: appTimeZone(), year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
@@ -18,8 +19,11 @@ const TYPES_BY_ROLE: Record<string, string[]> = { OWNER: ['MEAL', 'HOUSEKEEPING'
 const SERVICE_STAFF = Object.keys(TYPES_BY_ROLE);
 
 export async function settingsFor(propertyId: string): Promise<ServiceSettings> {
-  const property = await db.pGProperty.findUnique({ where: { id: propertyId }, select: { serviceSettings: true } });
-  return cleanServiceSettings(property?.serviceSettings);
+  const [property, catalog] = await Promise.all([
+    db.pGProperty.findUnique({ where: { id: propertyId }, select: { serviceSettings: true } }),
+    getPlatformCatalog()
+  ]);
+  return cleanServiceSettings(property?.serviceSettings, catalog.mealSlots.map((s) => s.value));
 }
 
 /** Owner: which services this PG offers, and their prices. */
@@ -27,7 +31,8 @@ export const updateServiceSettings = async (req: Request, res: Response): Promis
   const propertyId = String(req.params.propertyId);
   if (!await canManageProperty(req, propertyId, ['OWNER'])) return res.status(403).json({ message: 'Only the owner can change services' });
   try {
-    const settings = cleanServiceSettings(req.body?.settings);
+    const catalog = await getPlatformCatalog();
+    const settings = cleanServiceSettings(req.body?.settings, catalog.mealSlots.map((s) => s.value));
     await db.pGProperty.update({ where: { id: propertyId }, data: { serviceSettings: settings as unknown as Prisma.InputJsonValue } });
     logAudit(propertyId, currentUser(req)?.id ?? null, 'SERVICES_UPDATED', 'PGProperty', propertyId, JSON.stringify({ meals: settings.mealOrders.enabled, housekeeping: settings.housekeeping.enabled }));
     res.json(settings);
@@ -64,7 +69,10 @@ export const createServiceOrder = async (req: Request, res: Response): Promise<a
   const forDate = String(body.forDate || '');
   const quantity = type === 'MEAL' ? Math.min(5, Math.max(1, Math.round(Number(body.quantity) || 1))) : 1;
   const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 300) : '';
-  if (!isSlotFor(type, slot)) return res.status(400).json({ message: 'Choose a valid service and time' });
+  const catalog = await getPlatformCatalog();
+  if (!isSlotFor(type, slot, catalog.mealSlots.map((s) => s.value), catalog.cleaningSlots.map((s) => s.value))) {
+    return res.status(400).json({ message: 'Choose a valid service and time' });
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(forDate)) return res.status(400).json({ message: 'Choose a date' });
   const today = dayKey(new Date());
   const last = dayKey(new Date(Date.now() + ORDER_DAYS_AHEAD * 24 * 60 * 60 * 1000));
@@ -76,7 +84,7 @@ export const createServiceOrder = async (req: Request, res: Response): Promise<a
     const settings = await settingsFor(tenant.propertyId);
     const offered = type === 'MEAL' ? settings.mealOrders.enabled : settings.housekeeping.enabled;
     if (!offered) return res.status(409).json({ message: 'Your PG does not take these orders' });
-    const unitPrice = type === 'MEAL' ? settings.mealOrders.prices[slot as keyof ServiceSettings['mealOrders']['prices']] : settings.housekeeping.price;
+    const unitPrice = type === 'MEAL' ? (settings.mealOrders.prices[slot] ?? 0) : settings.housekeeping.price;
     const order = await db.pGServiceOrder.create({
       data: { propertyId: tenant.propertyId, tenantId: tenant.id, type, slot, forDate: asDate(forDate), quantity, unitPrice, notes: notes || null }
     });

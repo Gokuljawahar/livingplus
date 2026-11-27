@@ -1,5 +1,6 @@
 // Optional services a PG can switch on (the "modular owner console"), shared by
-// the API (validation) and the web app (forms). Prices are per order in rupees.
+// the API (validation) and the web app (forms). Slot catalogs are provisioned
+// dynamically in PostgreSQL (`PlatformCatalog.mealSlots` & `cleaningSlots`).
 export const MEAL_SLOTS = ['BREAKFAST', 'LUNCH', 'DINNER'];
 export const CLEANING_SLOTS = ['MORNING', 'AFTERNOON', 'EVENING'];
 export const SERVICE_ORDER_TYPES = ['MEAL', 'HOUSEKEEPING'];
@@ -19,22 +20,28 @@ const price = (value, fallback) => {
     const n = Number(value);
     return Number.isFinite(n) && n >= 0 && n <= 10000 ? Math.round(n) : fallback;
 };
-/** Fills defaults and drops anything unknown or invalid. */
-export function cleanServiceSettings(input) {
+/** Fills defaults and preserves dynamic meal slot prices. */
+export function cleanServiceSettings(input, mealSlots = MEAL_SLOTS) {
     const raw = (input && typeof input === 'object' ? input : {});
     const defaults = DEFAULT_SERVICE_SETTINGS;
+    const prices = {};
+    for (const slot of mealSlots) {
+        prices[slot] = price(raw.mealOrders?.prices?.[slot], defaults.mealOrders.prices[slot] ?? 0);
+    }
+    if (raw.mealOrders?.prices && typeof raw.mealOrders.prices === 'object') {
+        for (const [slotKey, val] of Object.entries(raw.mealOrders.prices)) {
+            if (!(slotKey in prices))
+                prices[slotKey] = price(val, 0);
+        }
+    }
     return {
         mealOrders: {
             enabled: raw.mealOrders?.enabled === true,
-            prices: {
-                BREAKFAST: price(raw.mealOrders?.prices?.BREAKFAST, defaults.mealOrders.prices.BREAKFAST),
-                LUNCH: price(raw.mealOrders?.prices?.LUNCH, defaults.mealOrders.prices.LUNCH),
-                DINNER: price(raw.mealOrders?.prices?.DINNER, defaults.mealOrders.prices.DINNER)
-            }
+            prices
         },
         housekeeping: { enabled: raw.housekeeping?.enabled === true, price: price(raw.housekeeping?.price, defaults.housekeeping.price) },
         vibeCheck: raw.vibeCheck !== false,
         kycAi: raw.kycAi !== false
     };
 }
-export const isSlotFor = (type, slot) => type === 'MEAL' ? MEAL_SLOTS.includes(slot) : type === 'HOUSEKEEPING' ? CLEANING_SLOTS.includes(slot) : false;
+export const isSlotFor = (type, slot, mealSlots = MEAL_SLOTS, cleaningSlots = CLEANING_SLOTS) => type === 'MEAL' ? mealSlots.includes(slot) : type === 'HOUSEKEEPING' ? cleaningSlots.includes(slot) : false;

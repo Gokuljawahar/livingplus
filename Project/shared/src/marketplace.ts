@@ -1,31 +1,31 @@
 // Marketplace property types, owner lead pipeline statuses, and categorized
-// facility definitions shared across the public site, owner workspace, and
-// internal concierge onboarding console.
+// facility definitions. Runtime values are loaded dynamically from PostgreSQL
+// (`PlatformCatalog`); functions accept dynamic catalog arrays with safe defaults.
 
 export const PROPERTY_TYPES = ['PG', 'HOSTEL', 'COLIVING', 'APARTMENT'] as const;
-export type PropertyType = (typeof PROPERTY_TYPES)[number];
+export type PropertyType = string;
 
-export const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
+export const PROPERTY_TYPE_LABELS: Record<string, string> = {
   PG: 'Paying Guest (PG)',
   HOSTEL: 'Hostel',
   COLIVING: 'Co-Living',
   APARTMENT: 'Serviced Apartment'
 };
 
-export const PROPERTY_TYPE_SHORT_LABELS: Record<PropertyType, string> = {
+export const PROPERTY_TYPE_SHORT_LABELS: Record<string, string> = {
   PG: 'PG',
   HOSTEL: 'Hostel',
   COLIVING: 'Co-Living',
   APARTMENT: 'Apartment'
 };
 
-export const isPropertyType = (value: string): value is PropertyType =>
-  (PROPERTY_TYPES as readonly string[]).includes(value);
+export const isPropertyType = (value: string, allowed: readonly string[] = PROPERTY_TYPES): value is PropertyType =>
+  allowed.includes(value);
 
 export const LEAD_STATUSES = ['NEW', 'CONTACTED', 'IN_PROGRESS', 'PUBLISHED', 'ARCHIVED'] as const;
-export type LeadStatus = (typeof LEAD_STATUSES)[number];
+export type LeadStatus = string;
 
-export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
+export const LEAD_STATUS_LABELS: Record<string, string> = {
   NEW: 'New inquiry',
   CONTACTED: 'Contacted',
   IN_PROGRESS: 'Onboarding',
@@ -33,8 +33,8 @@ export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
   ARCHIVED: 'Archived'
 };
 
-export const isLeadStatus = (value: string): value is LeadStatus =>
-  (LEAD_STATUSES as readonly string[]).includes(value);
+export const isLeadStatus = (value: string, allowed: readonly string[] = LEAD_STATUSES): value is LeadStatus =>
+  allowed.includes(value);
 
 export interface AmenityCategory {
   category: string;
@@ -120,13 +120,16 @@ export interface CategorizedAmenities {
 }
 
 /**
- * Groups an arbitrary list of facility labels (including legacy short tags)
- * into clean display categories without dropping custom entries.
+ * Groups an arbitrary list of facility labels into display categories using
+ * the active dynamic `categories` catalog from PostgreSQL without dropping custom entries.
  */
-export function categorizeAmenities(amenities: readonly string[]): CategorizedAmenities[] {
+export function categorizeAmenities(
+  amenities: readonly string[],
+  categories: readonly AmenityCategory[] = AMENITY_CATEGORIES
+): CategorizedAmenities[] {
   const seen = new Set<string>();
   const buckets = new Map<string, string[]>();
-  for (const group of AMENITY_CATEGORIES) buckets.set(group.category, []);
+  for (const group of categories) buckets.set(group.category, []);
   const extras: string[] = [];
 
   for (const raw of amenities) {
@@ -137,7 +140,7 @@ export function categorizeAmenities(amenities: readonly string[]): CategorizedAm
     seen.add(key);
 
     let matchedCategory: string | null = null;
-    for (const group of AMENITY_CATEGORIES) {
+    for (const group of categories) {
       if (group.options.some((option) => option.toLowerCase() === key)) {
         matchedCategory = group.category;
         break;
@@ -145,13 +148,13 @@ export function categorizeAmenities(amenities: readonly string[]): CategorizedAm
     }
     if (!matchedCategory) {
       for (const [pattern, category] of LEGACY_MATCHES) {
-        if (pattern.test(label)) {
+        if (buckets.has(category) && pattern.test(label)) {
           matchedCategory = category;
           break;
         }
       }
     }
-    if (matchedCategory) {
+    if (matchedCategory && buckets.has(matchedCategory)) {
       buckets.get(matchedCategory)!.push(label);
     } else {
       extras.push(label);
@@ -159,7 +162,7 @@ export function categorizeAmenities(amenities: readonly string[]): CategorizedAm
   }
 
   const result: CategorizedAmenities[] = [];
-  for (const group of AMENITY_CATEGORIES) {
+  for (const group of categories) {
     const items = buckets.get(group.category)!;
     if (items.length > 0) result.push({ category: group.category, items });
   }

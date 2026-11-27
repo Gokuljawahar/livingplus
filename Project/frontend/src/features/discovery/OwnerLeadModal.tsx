@@ -1,11 +1,9 @@
 import { useState } from 'react';
 import { Building2, CheckCircle2, Loader2, Sparkles, X } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { AMENITY_CATEGORIES, PROPERTY_TYPES, PROPERTY_TYPE_LABELS } from '@livingplus/shared';
 import api from '../../api/axios';
+import { usePlatformCatalog } from '../../hooks/usePlatformCatalog';
 import { apiErrorMessage } from '../../utils/api-error';
-
-const LEAD_FACILITIES = AMENITY_CATEGORIES.flatMap((group) => group.options.slice(0, 3));
 
 const fieldClass =
   'mt-1.5 block w-full rounded-[var(--radius-field)] border border-field-border bg-canvas px-3 py-2.5 text-sm text-ink outline-none focus:border-navy-900';
@@ -18,6 +16,8 @@ interface LeadFormProps {
 }
 
 export function OwnerLeadForm({ onSuccess, onCancel, compact = false }: LeadFormProps) {
+  const { catalog } = usePlatformCatalog();
+  const leadFacilities = catalog.amenityCategories.flatMap((group) => group.options.slice(0, 3));
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<{ reference: string; propertyName: string } | null>(null);
   const [form, setForm] = useState({
@@ -201,8 +201,8 @@ export function OwnerLeadForm({ onSuccess, onCancel, compact = false }: LeadForm
             onChange={(e) => setForm({ ...form, propertyType: e.target.value })}
             className={fieldClass}
           >
-            {PROPERTY_TYPES.map((type) => (
-              <option key={type} value={type}>{PROPERTY_TYPE_LABELS[type]}</option>
+            {(catalog.propertyTypes.length ? catalog.propertyTypes : [{ value: 'PG', label: 'Paying Guest (PG)' }]).map((type) => (
+              <option key={type.value} value={type.value}>{type.label}</option>
             ))}
           </select>
         </label>
@@ -228,9 +228,12 @@ export function OwnerLeadForm({ onSuccess, onCancel, compact = false }: LeadForm
             onChange={(e) => setForm({ ...form, genderPolicy: e.target.value })}
             className={fieldClass}
           >
-            <option value="ANY">Co-living / Any</option>
-            <option value="MEN">Men</option>
-            <option value="WOMEN">Women</option>
+            {(catalog.genderPolicies.length
+              ? catalog.genderPolicies
+              : [{ value: 'ANY', label: 'Co-living / Any' }, { value: 'MEN', label: 'Men' }, { value: 'WOMEN', label: 'Women' }]
+            ).map((g) => (
+              <option key={g.value} value={g.value}>{g.label}</option>
+            ))}
           </select>
         </label>
         <label className={labelClass}>
@@ -271,7 +274,7 @@ export function OwnerLeadForm({ onSuccess, onCancel, compact = false }: LeadForm
       <div>
         <span className={labelClass}>Facilities you offer</span>
         <div className="mt-2 flex flex-wrap gap-2">
-          {LEAD_FACILITIES.map((facility) => {
+          {leadFacilities.map((facility) => {
             const active = amenities.includes(facility);
             return (
               <button

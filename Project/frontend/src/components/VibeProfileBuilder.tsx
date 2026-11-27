@@ -9,6 +9,7 @@ import { VIBE_QUESTIONS, type VibeAnswers } from '@livingplus/shared';
 import api from '../api/axios';
 import { getHybridRemoteConfig } from '../ai/remote-config';
 import VibeQuiz from './VibeQuiz';
+import { usePlatformCatalog } from '../hooks/usePlatformCatalog';
 import { blobToBase64, useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { apiErrorMessage } from '../utils/api-error';
 import { useVibeLive } from '../hooks/useVibeLive';
@@ -205,7 +206,9 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
     }
   };
 
-  const learned = VIBE_QUESTIONS.filter((question) => answers[question.id] !== undefined)
+  const { catalog } = usePlatformCatalog();
+  const activeQuestions = catalog.vibeQuestions.length ? catalog.vibeQuestions : VIBE_QUESTIONS;
+  const learned = activeQuestions.filter((question) => answers[question.id] !== undefined)
     .map((question) => ({ id: question.id, label: question.phrase[answers[question.id]!] ?? question.id }));
 
   return (
@@ -421,7 +424,7 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
       {showQuiz ? (
         <div>
           <p className="mb-2 text-sm text-muted">{learned.length ? 'Fix anything I got wrong.' : 'Pick what fits you.'}</p>
-          <VibeQuiz value={answers} skip={skipTopics} onChange={(next) => onChange(next, summary)} />
+          <VibeQuiz value={answers} skip={skipTopics} questions={activeQuestions} onChange={(next) => onChange(next, summary)} />
         </div>
       ) : (
         <button type="button" onClick={() => setShowQuiz(true)} className="min-h-11 text-sm font-medium text-navy-700 underline-offset-2 hover:underline">

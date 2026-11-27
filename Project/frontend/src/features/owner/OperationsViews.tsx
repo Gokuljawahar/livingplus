@@ -7,6 +7,7 @@ import { STAFF_ROLES, STAFF_ROLE_HINTS, STAFF_ROLE_LABELS } from '@livingplus/sh
 import api from '../../api/axios';
 import type { OwnerOpenTicketsDigest } from '../../ai/ai';
 import { Button, Card, EmptyState, StatusPill } from '../../components/ui';
+import { usePlatformCatalog } from '../../hooks/usePlatformCatalog';
 import { apiErrorMessage } from '../../utils/api-error';
 import { ownerTicketSchema, staffSchema, type OwnerTicketForm, type StaffForm } from '../../validation/forms';
 import { ownerInputClass, ownerLabelClass, showFirstError, type Property, type Staff, type Ticket } from './types';
@@ -141,6 +142,7 @@ export function MaintenanceView({
     latencyMs?: number;
     fallback?: boolean;
   } | null>(null);
+  const { catalog } = usePlatformCatalog();
   const ticketFormApi = useForm<OwnerTicketForm>({ resolver: zodResolver(ownerTicketSchema), defaultValues: EMPTY_TICKET_FORM });
 
   const summarizeOpenTickets = async () => {
@@ -318,17 +320,20 @@ export function MaintenanceView({
             </div>
             <div className="grid grid-cols-2 gap-3">
               <select {...ticketFormApi.register('category')} className={`min-w-0 ${ownerInputClass}`}>
-                <option value="PLUMBING">Plumbing</option>
-                <option value="ELECTRICAL">Electrical</option>
-                <option value="APPLIANCE">Appliance</option>
-                <option value="CLEANING">Cleaning</option>
-                <option value="OTHER">Other</option>
+                {(catalog.maintenanceCategories.length
+                  ? catalog.maintenanceCategories
+                  : [{ value: 'PLUMBING', label: 'Plumbing' }, { value: 'OTHER', label: 'Other' }]
+                ).map((cat) => (
+                  <option key={cat.value} value={cat.value}>{cat.shortLabel || cat.label}</option>
+                ))}
               </select>
               <select {...ticketFormApi.register('priority')} className={`min-w-0 ${ownerInputClass}`}>
-                <option value="LOW">Low</option>
-                <option value="NORMAL">Normal</option>
-                <option value="HIGH">High</option>
-                <option value="URGENT">Urgent</option>
+                {(catalog.ticketPriorities.length
+                  ? catalog.ticketPriorities
+                  : [{ value: 'LOW', label: 'Low' }, { value: 'NORMAL', label: 'Normal' }, { value: 'HIGH', label: 'High' }, { value: 'URGENT', label: 'Urgent' }]
+                ).map((prio) => (
+                  <option key={prio.value} value={prio.value}>{prio.label}</option>
+                ))}
               </select>
             </div>
             <div>

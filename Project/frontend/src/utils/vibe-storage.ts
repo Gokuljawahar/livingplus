@@ -1,10 +1,11 @@
-import { cleanVibeAnswers, VIBE_QUESTIONS, type VibeAnswers } from '@livingplus/shared';
+import { cleanVibeAnswers, VIBE_QUESTIONS, type VibeAnswers, type VibeQuestion } from '@livingplus/shared';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
-/** Sleep, tidiness and noise matter most; matching needs at least these. */
+/** Sleep, tidiness and noise matter most; matching needs at least high-weight questions from the active catalog. */
 export const KEY_HABITS = VIBE_QUESTIONS.filter((question) => question.weight > 1).map((question) => question.id);
-export const hasKeyHabits = (answers: VibeAnswers): boolean => KEY_HABITS.every((id) => answers[id] !== undefined);
+export const hasKeyHabits = (answers: VibeAnswers, questions: readonly VibeQuestion[] = VIBE_QUESTIONS): boolean =>
+  questions.filter((q) => q.weight > 1).every((q) => answers[q.id] !== undefined);
 
 const KEY = 'vibeAnswers';
 const SUMMARY_KEY = 'vibeSummary';

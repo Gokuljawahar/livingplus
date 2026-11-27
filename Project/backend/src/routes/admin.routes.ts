@@ -5,10 +5,12 @@ import {
   adminUpdateProperty,
   conciergeOnboardProperty,
   getAdminOverview,
+  listAdminCatalog,
   listAdminOwners,
   listAdminProperties,
   listOwnerLeads,
   requirePlatformAdmin,
+  updateAdminCatalog,
   updateOwnerLead
 } from '../controllers/admin.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
@@ -26,5 +28,7 @@ router.post('/onboard', conciergeOnboardProperty);
 router.patch('/properties/:propertyId', adminUpdateProperty);
 router.post('/properties/:propertyId/rooms', adminCreateRoom);
 router.delete('/properties/:propertyId/rooms/:roomId', adminDeleteRoom);
+router.get('/catalog', listAdminCatalog);
+router.put('/catalog/:key', updateAdminCatalog);
 
 export default router;

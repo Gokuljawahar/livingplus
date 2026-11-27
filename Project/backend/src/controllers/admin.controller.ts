@@ -12,6 +12,11 @@ import {
   phoneVariants
 } from '@livingplus/shared';
 import { asSystem, db } from '../db/index.js';
+import {
+  isPlatformCatalogKey,
+  listPlatformCatalogEntries,
+  updatePlatformCatalogSection
+} from '../services/platform-catalog.js';
 import { logAudit } from '../services/pg-audit.js';
 import { scheduleSearchIndex } from '../services/semantic-search.js';
 import { logger } from '../utils/logger.js';
@@ -575,5 +580,34 @@ export const adminDeleteRoom = async (req: Request, res: Response): Promise<any>
   } catch (error) {
     logger.error({ err: error }, 'Admin room delete error');
     res.status(500).json({ message: 'Failed to delete room' });
+  }
+};
+
+export const listAdminCatalog = async (_req: Request, res: Response): Promise<any> => {
+  try {
+    res.json(await listPlatformCatalogEntries());
+  } catch (error) {
+    logger.error({ err: error }, 'Admin catalog list error');
+    res.status(500).json({ message: 'Failed to load platform catalog' });
+  }
+};
+
+export const updateAdminCatalog = async (req: Request, res: Response): Promise<any> => {
+  const key = String(req.params.key || '').trim();
+  if (!isPlatformCatalogKey(key)) {
+    return res.status(404).json({ message: `Unknown catalog section: ${key}` });
+  }
+  if (!req.body || !('data' in req.body)) {
+    return res.status(400).json({ message: 'Request body must include data' });
+  }
+  try {
+    const saved = await updatePlatformCatalogSection(key, req.body.data, currentUser(req)?.id ?? null);
+    res.json({ key, data: saved });
+  } catch (error: any) {
+    if (String(error?.message || '').startsWith('INVALID_CATALOG_DATA:')) {
+      return res.status(400).json({ message: String(error.message).replace(/^INVALID_CATALOG_DATA:\s*/, '') });
+    }
+    logger.error({ err: error }, 'Admin catalog update error');
+    res.status(500).json({ message: 'Failed to save catalog section' });
   }
 };

@@ -4,27 +4,39 @@
 // the resident declared and flag mismatches. The owner still verifies; the AI
 // only helps. The full ID number is never requested or stored.
 import { z } from 'zod';
-import { KYC_TYPES } from '@livingplus/shared';
 import { aiEnabled, generateStructured } from './ai-provider.js';
+import { getPlatformCatalog } from './platform-catalog.js';
 import { readStoredFile } from './storage.js';
 
 export const MAX_KYC_BYTES = 8 * 1024 * 1024;
 
-const extraction = z.object({
-  documentType: z.enum([...KYC_TYPES, 'OTHER_ID', 'NOT_AN_ID']).describe('Which identity document this is'),
-  nameOnDocument: z.string().describe('The holder name exactly as printed, or empty if unreadable'),
-  idNumberLast4: z.string().describe('Only the last 4 characters of the document number, or empty'),
-  legible: z.boolean().describe('Whether the name and number are clearly readable'),
-  notes: z.array(z.string()).describe('Short plain-language problems, e.g. "photo is blurred", "document looks expired"')
-});
-export type KycExtraction = z.infer<typeof extraction>;
+function buildKycExtractionSchema(kycTypeValues: readonly string[]) {
+  const enumValues = [...new Set([...kycTypeValues, 'OTHER_ID', 'NOT_AN_ID'])] as [string, ...string[]];
+  return z.object({
+    documentType: z.enum(enumValues).describe('Which identity document this is'),
+    nameOnDocument: z.string().describe('The holder name exactly as printed, or empty if unreadable'),
+    idNumberLast4: z.string().describe('Only the last 4 characters of the document number, or empty'),
+    legible: z.boolean().describe('Whether the name and number are clearly readable'),
+    notes: z.array(z.string()).describe('Short plain-language problems, e.g. "photo is blurred", "document looks expired"')
+  });
+}
 
-const PROMPT = [
-  'You help a PG (paying-guest accommodation) owner check an identity document a resident uploaded.',
-  'Look at the document and report only: the document type, the holder name as printed, the LAST 4 characters of the document number, whether it is legible, and short notes on any problems (blurred, cropped, expired, edited, not an ID).',
-  'Never output the full document number, the address, the date of birth or the photo description.',
-  'Indian document types: AADHAAR, PAN, PASSPORT, DRIVING_LICENSE, STUDENT_ID, WORK_ID. Use OTHER_ID for other IDs and NOT_AN_ID if it is not an identity document.'
-].join(' ');
+export interface KycExtraction {
+  documentType: string;
+  nameOnDocument: string;
+  idNumberLast4: string;
+  legible: boolean;
+  notes: string[];
+}
+
+function buildKycPrompt(kycTypeValues: readonly string[]): string {
+  return [
+    'You help a PG (paying-guest accommodation) owner check an identity document a resident uploaded.',
+    'Look at the document and report only: the document type, the holder name as printed, the LAST 4 characters of the document number, whether it is legible, and short notes on any problems (blurred, cropped, expired, edited, not an ID).',
+    'Never output the full document number, the address, the date of birth or the photo description.',
+    `Document types: ${kycTypeValues.join(', ')}. Use OTHER_ID for other IDs and NOT_AN_ID if it is not an identity document.`
+  ].join(' ');
+}
 
 export interface KycCheck {
   checkedAt: string;
@@ -43,10 +55,12 @@ export interface KycCheckDeps {
 
 async function defaultReadDocument(data: Buffer, contentType: string): Promise<KycExtraction> {
   if (!aiEnabled()) throw new Error('AI_ORCHESTRATOR_NOT_CONFIGURED');
+  const catalog = await getPlatformCatalog();
+  const kycValues = catalog.kycTypes.map((k) => k.value);
   return generateStructured({
     system: 'You read identity documents for a paying-guest housing platform. Answer with one JSON object only.',
-    parts: [{ text: PROMPT }, { inlineData: { mimeType: contentType, data: data.toString('base64') } }],
-    schema: extraction
+    parts: [{ text: buildKycPrompt(kycValues) }, { inlineData: { mimeType: contentType, data: data.toString('base64') } }],
+    schema: buildKycExtractionSchema(kycValues)
   });
 }
 

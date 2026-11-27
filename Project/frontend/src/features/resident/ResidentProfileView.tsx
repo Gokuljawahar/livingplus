@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import api from '../../api/axios';
 import KycAiSummary, { type KycAiCheck } from '../../components/KycAiSummary';
 import { Button, Card, EmptyState, StatusPill } from '../../components/ui';
+import { usePlatformCatalog } from '../../hooks/usePlatformCatalog';
 import { apiErrorMessage } from '../../utils/api-error';
 import { residentProfileSchema, type ResidentProfileForm } from '../../validation/forms';
 import type { Stay } from './types';
@@ -26,6 +27,7 @@ interface Props {
 }
 
 export default function ResidentProfileView({ stays, onChanged }: Props) {
+  const { catalog } = usePlatformCatalog();
   const [profileEditingFor, setProfileEditingFor] = useState('');
   const [profileFile, setProfileFile] = useState<File | null>(null);
   const profileFormApi = useForm<ResidentProfileForm>({
@@ -148,13 +150,13 @@ export default function ResidentProfileView({ stays, onChanged }: Props) {
                 <label className="text-xs font-bold text-muted">Blood group
                   <select {...profileFormApi.register('bloodGroup')} className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline bg-canvas px-3 py-2 text-sm font-medium text-ink outline-none focus:border-navy-900">
                     <option value="">Not provided</option>
-                    {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((group) => <option key={group} value={group}>{group}</option>)}
+                    {catalog.bloodGroups.map((group) => <option key={group} value={group}>{group}</option>)}
                   </select>
                 </label>
                 <label className="text-xs font-bold text-muted">KYC document type
                   <select {...profileFormApi.register('kycType')} className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline bg-canvas px-3 py-2 text-sm font-medium text-ink outline-none focus:border-navy-900">
                     <option value="">Select document</option>
-                    {[['AADHAAR', 'Aadhaar Card'], ['PAN', 'PAN Card'], ['PASSPORT', 'Passport'], ['DRIVING_LICENSE', 'Driving License'], ['STUDENT_ID', 'Student College ID'], ['WORK_ID', 'Work Employee ID']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    {catalog.kycTypes.map((doc) => <option key={doc.value} value={doc.value}>{doc.label}</option>)}
                   </select>
                 </label>
                 <label className="text-xs font-bold text-muted sm:col-span-2">Replace KYC document

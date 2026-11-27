@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { ArrowRight, Building2, Check, Loader2, MapPin, MessageCircle, Phone, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { LEAD_STATUSES, LEAD_STATUS_LABELS, PROPERTY_TYPE_SHORT_LABELS, type LeadStatus, type PropertyType } from '@livingplus/shared';
 import api from '../../api/axios';
+import { labelFromCatalog, usePlatformCatalog } from '../../hooks/usePlatformCatalog';
 import { apiErrorMessage } from '../../utils/api-error';
 import { rupees } from '../../utils/money';
 import type { AdminOverview, OwnerLead } from './types';
@@ -38,6 +38,7 @@ export default function AdminLeadsView({
   onStartOnboard,
   onChanged
 }: Props) {
+  const { catalog } = usePlatformCatalog();
   const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
 
@@ -92,16 +93,16 @@ export default function AdminLeadsView({
           >
             All ({overview?.totalLeads ?? leads.length})
           </button>
-          {LEAD_STATUSES.map((status) => (
+          {catalog.leadStatuses.map((status) => (
             <button
-              key={status}
+              key={status.value}
               type="button"
-              onClick={() => setStatusFilter(status)}
+              onClick={() => setStatusFilter(status.value)}
               className={`rounded-full px-3.5 py-1.5 text-xs font-semibold ${
-                statusFilter === status ? 'bg-navy-900 text-white' : 'bg-surface text-ink hover:bg-hairline'
+                statusFilter === status.value ? 'bg-navy-900 text-white' : 'bg-surface text-ink hover:bg-hairline'
               }`}
             >
-              {LEAD_STATUS_LABELS[status]} ({overview?.leadCounts[status] ?? 0})
+              {status.label} ({overview?.leadCounts[status.value] ?? 0})
             </button>
           ))}
         </div>
@@ -134,7 +135,8 @@ export default function AdminLeadsView({
         <div className="space-y-4">
           {leads.map((lead) => {
             const noteValue = notesDraft[lead.id] ?? lead.internalNotes ?? '';
-            const typeLabel = PROPERTY_TYPE_SHORT_LABELS[lead.propertyType as PropertyType] || lead.propertyType;
+            const typeLabel = labelFromCatalog(catalog.propertyTypes, lead.propertyType, true) || lead.propertyType;
+            const statusLabel = labelFromCatalog(catalog.leadStatuses, lead.status) || lead.status;
             const waDigits = lead.phone.replace(/\D/g, '');
             return (
               <article key={lead.id} className="rounded-[var(--radius-card)] border border-hairline bg-canvas p-5">
@@ -142,7 +144,7 @@ export default function AdminLeadsView({
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={`rounded-full border px-2.5 py-0.5 text-xs font-bold ${STATUS_COLORS[lead.status] || STATUS_COLORS.NEW}`}>
-                        {LEAD_STATUS_LABELS[lead.status as LeadStatus] || lead.status}
+                        {statusLabel}
                       </span>
                       <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs font-semibold text-navy-900">
                         {typeLabel} · {lead.genderPolicy}
@@ -219,8 +221,8 @@ export default function AdminLeadsView({
                     onChange={(e) => void updateLead(lead.id, { status: e.target.value })}
                     className="rounded-[var(--radius-field)] border border-hairline bg-surface px-3 py-1.5 text-xs font-semibold text-navy-900 outline-none"
                   >
-                    {LEAD_STATUSES.map((s) => (
-                      <option key={s} value={s}>{LEAD_STATUS_LABELS[s]}</option>
+                    {catalog.leadStatuses.map((s) => (
+                      <option key={s.value} value={s.value}>{s.label}</option>
                     ))}
                   </select>
                   <input

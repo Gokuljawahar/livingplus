@@ -14,14 +14,9 @@ import {
   X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import {
-  AMENITY_CATEGORIES,
-  PROPERTY_TYPES,
-  PROPERTY_TYPE_LABELS,
-  ROOM_AMENITY_OPTIONS
-} from '@livingplus/shared';
 import api from '../../api/axios';
 import { SecureImage } from '../../components/SecureImage';
+import { usePlatformCatalog } from '../../hooks/usePlatformCatalog';
 import { apiErrorMessage } from '../../utils/api-error';
 import { ROUTES } from '../../utils/app-areas';
 import type { AdminOwner, OnboardRoomDraft, OwnerLead } from './types';
@@ -36,12 +31,6 @@ interface Props {
 const fieldClass =
   'mt-1 block w-full rounded-[var(--radius-field)] border border-field-border bg-canvas px-3 py-2 text-sm text-ink outline-none focus:border-navy-900';
 const labelClass = 'block text-xs font-semibold text-navy-900';
-
-const DEFAULT_RULES = [
-  '24/7 CCTV in common areas',
-  'Visitors permitted in reception lounge until 8:00 pm',
-  '15 days prior notice before move-out'
-];
 
 function emptyRoom(index: number): OnboardRoomDraft {
   return {
@@ -71,6 +60,7 @@ function generateStrongPassword(): string {
 }
 
 export default function ConciergeOnboardWizard({ owners, prefillLead, onClearLead, onCompleted }: Props) {
+  const { catalog } = usePlatformCatalog();
   const [ownerMode, setOwnerMode] = useState<'new' | 'existing'>('new');
   const [existingOwnerId, setExistingOwnerId] = useState('');
   const [ownerName, setOwnerName] = useState(prefillLead?.ownerName || '');
@@ -85,7 +75,7 @@ export default function ConciergeOnboardWizard({ owners, prefillLead, onClearLea
   const [description, setDescription] = useState(prefillLead?.notes || '');
   const [address, setAddress] = useState(prefillLead?.address || '');
   const [locality, setLocality] = useState(prefillLead?.locality || '');
-  const [city, setCity] = useState(prefillLead?.city || 'Chennai');
+  const [city, setCity] = useState(prefillLead?.city || catalog.defaultCity || 'Chennai');
   const [landmark, setLandmark] = useState('');
   const [pincode, setPincode] = useState('');
   const [latitude, setLatitude] = useState('');
@@ -103,7 +93,7 @@ export default function ConciergeOnboardWizard({ owners, prefillLead, onClearLea
   const [highlightsText, setHighlightsText] = useState('');
   const [foodDetails, setFoodDetails] = useState('');
   const [nearbyText, setNearbyText] = useState('');
-  const [rulesText, setRulesText] = useState(DEFAULT_RULES.join('\n'));
+  const [rulesText, setRulesText] = useState(() => catalog.defaultHouseRules.join('\n'));
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
 
@@ -426,17 +416,17 @@ export default function ConciergeOnboardWizard({ owners, prefillLead, onClearLea
           <label className={labelClass}>
             Accommodation type
             <select value={propertyType} onChange={(e) => setPropertyType(e.target.value)} className={fieldClass}>
-              {PROPERTY_TYPES.map((type) => (
-                <option key={type} value={type}>{PROPERTY_TYPE_LABELS[type]}</option>
+              {catalog.propertyTypes.map((type) => (
+                <option key={type.value} value={type.value}>{type.label}</option>
               ))}
             </select>
           </label>
           <label className={labelClass}>
             Resident policy
             <select value={genderPolicy} onChange={(e) => setGenderPolicy(e.target.value)} className={fieldClass}>
-              <option value="ANY">Co-living / Any</option>
-              <option value="WOMEN">Women</option>
-              <option value="MEN">Men</option>
+              {catalog.genderPolicies.map((policy) => (
+                <option key={policy.value} value={policy.value}>{policy.label}</option>
+              ))}
             </select>
           </label>
           <label className={`${labelClass} sm:col-span-2 lg:col-span-3`}>
@@ -501,7 +491,7 @@ export default function ConciergeOnboardWizard({ owners, prefillLead, onClearLea
         </div>
 
         <div className="mt-4 grid gap-4 md:grid-cols-2">
-          {AMENITY_CATEGORIES.map((group) => (
+          {catalog.amenityCategories.map((group) => (
             <div key={group.category} className="rounded-[var(--radius-field)] border border-hairline bg-surface p-3.5">
               <p className="text-xs font-bold text-navy-900">{group.category}</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -760,7 +750,7 @@ export default function ConciergeOnboardWizard({ owners, prefillLead, onClearLea
               </div>
 
               <div className="mt-3 flex flex-wrap gap-1.5">
-                {ROOM_AMENITY_OPTIONS.map((opt) => {
+                {catalog.roomAmenityOptions.map((opt) => {
                   const active = room.amenities.includes(opt);
                   return (
                     <button

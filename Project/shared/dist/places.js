@@ -1,7 +1,5 @@
-// Campuses and offices people move to Chennai for, so guests can see how far
-// each PG is from where they'll study or work. Coordinates are approximate
-// (main gate / campus centre); distances are straight-line, so the UI says
-// "about". Used by the guest site and the assistant's search tool.
+// Campuses and offices people move to a city for, provisioned dynamically in
+// PostgreSQL (`PlatformCatalog.landmarks`) and used by discovery + AI search.
 export const CHENNAI_LANDMARKS = [
     { id: 'iit-madras', name: 'IIT Madras', kind: 'campus', latitude: 12.9916, longitude: 80.2336 },
     { id: 'anna-university', name: 'Anna University, Guindy', kind: 'campus', latitude: 13.0108, longitude: 80.2354 },
@@ -18,13 +16,13 @@ export function distanceKm(a, b) {
     const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.latitude)) * Math.cos(rad(b.latitude)) * Math.sin(dLon / 2) ** 2;
     return 6371 * 2 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
-/** Finds a landmark by id or by a loose name ("tidel", "IIT madras"). */
-export function findLandmark(query) {
+/** Finds a landmark by id or by a loose name ("tidel", "IIT madras") from the active catalog. */
+export function findLandmark(query, landmarks = CHENNAI_LANDMARKS) {
     const text = query.trim().toLowerCase();
     if (!text)
         return null;
-    return CHENNAI_LANDMARKS.find((place) => place.id === text)
-        ?? CHENNAI_LANDMARKS.find((place) => place.name.toLowerCase().includes(text) || text.includes(place.name.toLowerCase().split(',')[0]))
+    return landmarks.find((place) => place.id === text)
+        ?? landmarks.find((place) => place.name.toLowerCase().includes(text) || text.includes(place.name.toLowerCase().split(',')[0]))
         ?? null;
 }
 /** "about 1.2 km" under 10 km, "about 14 km" beyond. */

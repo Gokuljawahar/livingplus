@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import api from '../api/axios';
 import A2uiSurface, { type A2uiAction, type A2uiMessage } from './a2ui/A2uiSurface';
 import { useAuth } from '../context/auth';
+import { usePlatformCatalog } from '../hooks/usePlatformCatalog';
 import { OWNER_USER_KEY, RESIDENT_USER_KEY } from '../utils/session';
 import { usePreferencesStore } from '../utils/preferences-store';
 import { transcribeVoiceBlob, useVoiceRecorder } from '../hooks/useVoiceRecorder';
@@ -80,6 +81,7 @@ interface AIChatPanelProps {
 
 export default function AIChatPanel({ limited = false, hideLauncher = false, openRequest = null }: AIChatPanelProps) {
   const { user } = useAuth();
+  const { catalog } = usePlatformCatalog();
   // The global auth context only loads on full page load, so after SPA
   // navigation it can still hold a previous session (e.g. an owner account
   // while viewing the resident portal). Resolve the persona from the stored
@@ -104,7 +106,11 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
   } else if (residentRole === 'PG_TENANT') {
     persona = 'resident';
   }
-  const copy = PERSONA_COPY[persona];
+  const dynamicCopy = catalog.assistantPersonas[persona];
+  const copy = {
+    welcome: dynamicCopy?.welcome || PERSONA_COPY[persona].welcome,
+    placeholder: dynamicCopy?.placeholder || PERSONA_COPY[persona].placeholder
+  };
   // Reply language (Tamil, Hindi or English), remembered on this device via Zustand persist.
   const language = usePreferencesStore((s) => s.assistantLanguage);
   const setLanguage = usePreferencesStore((s) => s.setAssistantLanguage);
@@ -248,12 +254,13 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
     );
   }
 
-  const SUGGESTED_PROMPTS: Record<AssistantPersona, string[]> = {
+  const FALLBACK_PROMPTS: Record<AssistantPersona, string[]> = {
     guest: ['Single rooms under ₹8,000', 'PGs with food included', 'How does deposit refund work?'],
     resident: ['When is my rent due?', 'How to request room swap?', 'Report WiFi / maintenance'],
     warden: ['Pending booking requests', 'Open maintenance tickets'],
     owner: ['Occupancy summary', 'Rent collection status', 'Draft vacancy update']
   };
+  const suggestedPrompts = dynamicCopy?.suggestedPrompts?.length ? dynamicCopy.suggestedPrompts : FALLBACK_PROMPTS[persona];
 
   return (
     <section
@@ -314,7 +321,7 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
             <div className="pt-2">
               <p className="text-xs font-bold text-muted px-1 mb-2">Try asking</p>
               <div className="flex flex-wrap gap-1.5">
-                {SUGGESTED_PROMPTS[persona].map((promptText) => (
+                {suggestedPrompts.map((promptText) => (
                   <button
                     key={promptText}
                     type="button"

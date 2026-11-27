@@ -1,11 +1,12 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight, Camera, Check, Heart, MapPin, Sparkles } from 'lucide-react';
-import { formatDistance, PROPERTY_TYPE_SHORT_LABELS, type PropertyType } from '@livingplus/shared';
+import { formatDistance } from '@livingplus/shared';
 import { SecureImage } from '../../components/SecureImage';
 import PgPlaceholder from '../../components/ui/PgPlaceholder';
+import { labelFromCatalog, usePlatformCatalog } from '../../hooks/usePlatformCatalog';
 import { ROUTES } from '../../utils/app-areas';
 import { rupees } from '../../utils/money';
-import { availabilityText, computePriceFacts, GENDER_LABELS, ROOM_TYPE_LABELS, type PGProperty } from './types';
+import { availabilityText, computePriceFacts, type PGProperty } from './types';
 
 interface Props {
   property: PGProperty;
@@ -17,10 +18,12 @@ interface Props {
 }
 
 export default function PropertyCard({ property, matchesRoom, nearName, distanceKmValue, saved = false, onToggleSave }: Props) {
+  const { catalog } = usePlatformCatalog();
   const price = computePriceFacts(property, matchesRoom);
   const detailPath = ROUTES.propertyDetail(property.slug || property.id);
-  const typeLabel = PROPERTY_TYPE_SHORT_LABELS[(property.propertyType || 'PG') as PropertyType] || 'PG';
-  const sharingTags = [...new Set(property.rooms.map((r) => ROOM_TYPE_LABELS[r.roomType || ''] || r.roomType).filter(Boolean))].slice(0, 3);
+  const typeLabel = labelFromCatalog(catalog.propertyTypes, property.propertyType || 'PG', true) || 'PG';
+  const genderLabel = labelFromCatalog(catalog.genderPolicies, property.genderPolicy);
+  const sharingTags = [...new Set(property.rooms.map((r) => labelFromCatalog(catalog.roomTypes, r.roomType || '')).filter(Boolean))].slice(0, 3);
   const topAmenities = (property.amenities || []).slice(0, 3);
   const extraAmenities = Math.max(0, (property.amenities || []).length - topAmenities.length);
 
@@ -45,7 +48,7 @@ export default function PropertyCard({ property, matchesRoom, nearName, distance
 
         <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-1.5">
           <span className="rounded-full bg-canvas/95 px-2.5 py-1 text-xs font-semibold text-navy-900 shadow-[var(--shadow-float)]">
-            {typeLabel} · {GENDER_LABELS[property.genderPolicy] || property.genderPolicy}
+            {typeLabel} · {genderLabel}
           </span>
           {property.featured && (
             <span className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-2.5 py-1 text-xs font-bold text-navy-900 shadow-[var(--shadow-float)]">

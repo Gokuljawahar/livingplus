@@ -8,6 +8,7 @@ import { db } from '../../db/index.js';
 import { logAudit } from '../../services/pg-audit.js';
 import { calculateMonthlyRent, ensureFoodEntries } from '../../services/pg-billing.js';
 import { checkKycDocument, type KycCheckDeps } from '../../services/kyc-check.js';
+import { getPlatformCatalog } from '../../services/platform-catalog.js';
 import { INVALID_REQUEST, parseBody } from '../../utils/validate.js';
 import { logger } from '../../utils/logger.js';
 import {
@@ -369,19 +370,22 @@ export const updateResidentProfile = async (req: Request, res: Response): Promis
       if (value.length > LIMITS.profileText) return res.status(400).json({ message: `${field} must be ${LIMITS.profileText} characters or less` });
       data[field] = value || null;
     }
-    if (input.bloodGroup !== undefined) {
-      const bloodGroup = String(input.bloodGroup).toUpperCase();
-      if (bloodGroup && !isBloodGroup(bloodGroup)) {
-        return res.status(400).json({ message: MESSAGES.bloodGroup });
+    if (input.bloodGroup !== undefined || input.kycType !== undefined) {
+      const catalog = await getPlatformCatalog();
+      if (input.bloodGroup !== undefined) {
+        const bloodGroup = String(input.bloodGroup).toUpperCase();
+        if (bloodGroup && !isBloodGroup(bloodGroup, catalog.bloodGroups)) {
+          return res.status(400).json({ message: MESSAGES.bloodGroup });
+        }
+        data.bloodGroup = bloodGroup || null;
       }
-      data.bloodGroup = bloodGroup || null;
-    }
-    if (input.kycType !== undefined) {
-      const kycType = String(input.kycType).toUpperCase();
-      if (kycType && !isKycType(kycType)) {
-        return res.status(400).json({ message: MESSAGES.kycType });
+      if (input.kycType !== undefined) {
+        const kycType = String(input.kycType).toUpperCase();
+        if (kycType && !isKycType(kycType, catalog.kycTypes.map((k) => k.value))) {
+          return res.status(400).json({ message: MESSAGES.kycType });
+        }
+        data.kycType = kycType || null;
       }
-      data.kycType = kycType || null;
     }
     if (input.kycDocumentUrl !== undefined) {
       const fileKey = String(input.kycDocumentUrl || '').trim();

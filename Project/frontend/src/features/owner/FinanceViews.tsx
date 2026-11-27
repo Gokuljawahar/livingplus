@@ -5,6 +5,7 @@ import { Download, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../../api/axios';
 import { Button, Card, EmptyState, StatusPill } from '../../components/ui';
+import { usePlatformCatalog } from '../../hooks/usePlatformCatalog';
 import { apiErrorMessage } from '../../utils/api-error';
 import { billName, shortDate } from '../../utils/money';
 import { downloadXlsx } from '../../utils/xlsx';
@@ -248,6 +249,7 @@ export function ExpensesView({
   setSelectedPropertyId: (id: string) => void;
   onChanged: () => void;
 }) {
+  const { catalog } = usePlatformCatalog();
   const expenseFormApi = useForm<ExpenseForm>({ resolver: zodResolver(expenseSchema), defaultValues: emptyExpenseForm() });
 
   const submitExpense = expenseFormApi.handleSubmit(async (expenseForm) => {
@@ -316,8 +318,11 @@ export function ExpensesView({
             <div>
               <label className={ownerLabelClass}>Category</label>
               <select {...expenseFormApi.register('category')} className={ownerInputClass}>
-                {['FOOD', 'STAFF', 'MAINTENANCE', 'UTILITIES', 'OTHER'].map((category) => (
-                  <option key={category} value={category}>{category.charAt(0) + category.slice(1).toLowerCase()}</option>
+                {(catalog.expenseCategories.length
+                  ? catalog.expenseCategories
+                  : [{ value: 'FOOD', label: 'Food' }, { value: 'OTHER', label: 'Other' }]
+                ).map((cat) => (
+                  <option key={cat.value} value={cat.value}>{cat.label}</option>
                 ))}
               </select>
             </div>

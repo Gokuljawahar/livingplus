@@ -3,14 +3,17 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import http from 'node:http';
 import jwt from 'jsonwebtoken';
-import { getPublicProperty, createOwnerLead } from '../src/controllers/pg/discovery-bookings.controller.js';
+import { getPublicCatalog, getPublicProperty, createOwnerLead } from '../src/controllers/pg/discovery-bookings.controller.js';
 import {
   adminCreateRoom,
   adminDeleteRoom,
   adminUpdateProperty,
   conciergeOnboardProperty,
-  requirePlatformAdmin
+  listAdminCatalog,
+  requirePlatformAdmin,
+  updateAdminCatalog
 } from '../src/controllers/admin.controller.js';
+import { invalidatePlatformCatalogCache, provisionPlatformCatalog } from '../src/services/platform-catalog.js';
 import { authenticate, optionalAuthenticate } from '../src/middleware/auth.middleware.js';
 import { issueGuestToken } from '../src/utils/guest-token.js';
 import { db, systemPrisma } from '../src/db/index.js';
@@ -305,5 +308,58 @@ describe('marketplace detail, owner leads, and concierge onboarding APIs', () =>
       });
       assert.equal(patchRes.status, 200);
     });
+  });
+
+  it('provisions dynamic PlatformCatalog in DB, serves it publicly, and updates sections via admin API', async () => {
+    const store = new Map<string, { key: string; description: string | null; data: any; updatedBy: string | null; updatedAt: Date }>();
+    const origCatalog = (db as any).platformCatalog;
+    (db as any).platformCatalog = {
+      findMany: async () => [...store.values()],
+      upsert: async ({ where, update, create }: any) => {
+        const existing = store.get(where.key);
+        const row = existing
+          ? { ...existing, ...update, updatedAt: new Date() }
+          : { key: create.key, description: create.description ?? null, data: create.data, updatedBy: create.updatedBy ?? null, updatedAt: new Date() };
+        store.set(where.key, row);
+        return row;
+      }
+    };
+    invalidatePlatformCatalogCache();
+
+    try {
+      const inserted = await provisionPlatformCatalog(db);
+      assert.ok(inserted >= 15);
+
+      const app = express();
+      app.use(express.json());
+      app.get('/api/pg/catalog', getPublicCatalog);
+      app.get('/api/admin/catalog', authenticate, requirePlatformAdmin, listAdminCatalog);
+      app.put('/api/admin/catalog/:key', authenticate, requirePlatformAdmin, updateAdminCatalog);
+
+      await withServer(app, async (base) => {
+        const pubRes = await fetch(`${base}/api/pg/catalog`);
+        assert.equal(pubRes.status, 200);
+        const initialCatalog = await pubRes.json();
+        assert.equal(initialCatalog.defaultCity, 'Chennai');
+        assert.ok(Array.isArray(initialCatalog.amenityCategories));
+
+        const updateRes = await fetch(`${base}/api/admin/catalog/defaultCity`, {
+          method: 'PUT',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${adminToken('PLATFORM_ADMIN')}`
+          },
+          body: JSON.stringify({ data: 'Bengaluru' })
+        });
+        assert.equal(updateRes.status, 200);
+
+        const refreshedRes = await fetch(`${base}/api/pg/catalog`);
+        const refreshedCatalog = await refreshedRes.json();
+        assert.equal(refreshedCatalog.defaultCity, 'Bengaluru');
+      });
+    } finally {
+      (db as any).platformCatalog = origCatalog;
+      invalidatePlatformCatalogCache();
+    }
   });
 });

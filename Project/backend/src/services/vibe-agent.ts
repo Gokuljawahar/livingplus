@@ -24,8 +24,9 @@
 // resident those are that resident's own habits. They stay within the project's
 // Vertex AI and are shown to visitors only as habit-level phrases.
 import { z } from 'zod';
-import { cleanVibeAnswers, cleanVibeSummary, VIBE_QUESTIONS, vibeMatch, type VibeAnswers, type VibeMatch } from '@livingplus/shared';
+import { cleanVibeAnswers, cleanVibeSummary, VIBE_QUESTIONS, vibeMatch, type VibeAnswers, type VibeMatch, type VibeQuestion } from '@livingplus/shared';
 import { aiEnabled, generateStructured, modelConfig } from './ai-provider.js';
+import { getPlatformCatalog } from './platform-catalog.js';
 import { logger } from '../utils/logger.js';
 
 /** How far the matcher may move a score away from the deterministic baseline. */
@@ -71,8 +72,8 @@ export function vibeAiStatus(): { enabled: boolean; configured: boolean; model: 
   return { enabled: aiEnabled(), configured: aiEnabled() && Boolean(model), model };
 }
 
-function phraseFor(questionId: string, value: number): string {
-  const question = VIBE_QUESTIONS.find((item) => item.id === questionId);
+function phraseFor(questionId: string, value: number, questions: readonly VibeQuestion[]): string {
+  const question = questions.find((item) => item.id === questionId);
   return question?.phrase[value] ?? `${questionId}=${value}`;
 }
 
@@ -80,11 +81,13 @@ function phraseFor(questionId: string, value: number): string {
 
 // Lenient on purpose: one out-of-range value is dropped by cleanVibeAnswers, not the whole answer.
 const habitValue = z.number().nullable();
-const vibeProfileSchema = z.object({
-  answers: z.object(Object.fromEntries(VIBE_QUESTIONS.map((question) => [question.id, habitValue.describe(`${question.question} 0, 1 or 2, or null if not mentioned`)])) as Record<string, typeof habitValue>),
-  summary: z.string().describe('One or two short sentences about lifestyle habits only, in English'),
-  followUp: z.string().nullable().describe('One short question about the most important missing habit, or null')
-});
+function buildVibeProfileSchema(questions: readonly VibeQuestion[]) {
+  return z.object({
+    answers: z.object(Object.fromEntries(questions.map((question) => [question.id, habitValue.describe(`${question.question} 0, 1 or 2, or null if not mentioned`)])) as Record<string, typeof habitValue>),
+    summary: z.string().describe('One or two short sentences about lifestyle habits only, in English'),
+    followUp: z.string().nullable().describe('One short question about the most important missing habit, or null')
+  });
+}
 
 export interface VibeProfile {
   answers: VibeAnswers;
@@ -94,8 +97,8 @@ export interface VibeProfile {
   missing: string[];
 }
 
-function profilerInstruction(): string {
-  const scale = VIBE_QUESTIONS.map((question) =>
+function profilerInstruction(questions: readonly VibeQuestion[]): string {
+  const scale = questions.map((question) =>
     `- ${question.id}: ${question.question} 0 = ${question.options[0].label}, 1 = ${question.options[1].label}, 2 = ${question.options[2].label}`
   ).join('\n');
   return [
@@ -123,20 +126,22 @@ export async function buildVibeProfile(text: string, current: VibeAnswers = {}, 
   if (!description) throw new Error('VIBE_TEXT_EMPTY');
   const model = vibeModelName();
   if (!deps.runProfiler && (!aiEnabled() || !model)) throw new Error('VIBE_AI_UNAVAILABLE');
+  const { vibeQuestions } = await getPlatformCatalog();
+  const profileSchema = buildVibeProfileSchema(vibeQuestions);
   let raw: unknown;
   if (deps.runProfiler) {
     raw = await deps.runProfiler(description);
   } else {
-    raw = await generateStructured({ system: profilerInstruction(), parts: [{ text: description }], schema: vibeProfileSchema, model: model! });
+    raw = await generateStructured({ system: profilerInstruction(vibeQuestions), parts: [{ text: description }], schema: profileSchema, model: model! });
   }
-  const parsed = vibeProfileSchema.parse(raw);
-  const found = cleanVibeAnswers(Object.fromEntries(Object.entries(parsed.answers).filter(([, value]) => value !== null))) ?? {};
+  const parsed = profileSchema.parse(raw);
+  const found = cleanVibeAnswers(Object.fromEntries(Object.entries(parsed.answers).filter(([, value]) => value !== null)), vibeQuestions) ?? {};
   const answers = { ...current, ...found };
   return {
     answers,
     summary: cleanVibeSummary(parsed.summary),
     followUp: cleanVibeSummary(parsed.followUp),
-    missing: VIBE_QUESTIONS.filter((question) => answers[question.id] === undefined).map((question) => question.id)
+    missing: vibeQuestions.filter((question) => answers[question.id] === undefined).map((question) => question.id)
   };
 }
 
@@ -145,13 +150,15 @@ export async function buildVibeProfile(text: string, current: VibeAnswers = {}, 
 /** One spoken (or typed) turn of the VibeCheck interview. */
 export interface VibeTurn { role: 'assistant' | 'user'; text: string }
 
-const interviewSchema = z.object({
-  heard: z.string().describe('What the person just said, transcribed in their own language and script; empty if nothing intelligible'),
-  answers: vibeProfileSchema.shape.answers,
-  summary: z.string().describe('One or two short sentences about their lifestyle habits so far, in English'),
-  reply: z.string().describe('What you say next as their PG buddy, in their language and style: a short, natural reaction and at most one follow-up, or a warm closing line when done. At most 30 words, no lists.'),
-  done: z.boolean().describe('True once you have a good feel for their sleep, tidiness and noise and the chat has reached a natural pause, or after about eight exchanges')
-});
+function buildInterviewSchema(questions: readonly VibeQuestion[]) {
+  return z.object({
+    heard: z.string().describe('What the person just said, transcribed in their own language and script; empty if nothing intelligible'),
+    answers: buildVibeProfileSchema(questions).shape.answers,
+    summary: z.string().describe('One or two short sentences about their lifestyle habits so far, in English'),
+    reply: z.string().describe('What you say next as their PG buddy, in their language and style: a short, natural reaction and at most one follow-up, or a warm closing line when done. At most 30 words, no lists.'),
+    done: z.boolean().describe('True once you have a good feel for their sleep, tidiness and noise and the chat has reached a natural pause, or after about eight exchanges')
+  });
+}
 
 export interface VibeInterviewTurn {
   heard: string;
@@ -162,8 +169,8 @@ export interface VibeInterviewTurn {
   missing: string[];
 }
 
-function interviewInstruction(topics: { skip: string[]; facts: string[] } = { skip: [], facts: [] }): string {
-  const scale = VIBE_QUESTIONS.map((question) =>
+function interviewInstruction(questions: readonly VibeQuestion[], topics: { skip: string[]; facts: string[] } = { skip: [], facts: [] }): string {
+  const scale = questions.map((question) =>
     `- ${question.id}: ${question.question} 0 = ${question.options[0].label}, 1 = ${question.options[1].label}, 2 = ${question.options[2].label}`
   ).join('\n');
   return [
@@ -201,6 +208,8 @@ export async function vibeInterviewTurn(
   if (!text && !input.audio) throw new Error('VIBE_TURN_EMPTY');
   const model = vibeModelName();
   if (!deps.runInterviewer && (!aiEnabled() || !model)) throw new Error('VIBE_AI_UNAVAILABLE');
+  const { vibeQuestions } = await getPlatformCatalog();
+  const interviewSchema = buildInterviewSchema(vibeQuestions);
   const history = input.history.slice(-12).map((turn) => `${turn.role === 'assistant' ? 'VibeCheck' : 'Person'}: ${turn.text.slice(0, 500)}`).join('\n');
   const known = Object.entries(input.known).map(([id, value]) => `${id}=${value}`).join(', ') || 'none yet';
   let raw: unknown;
@@ -211,12 +220,12 @@ export async function vibeInterviewTurn(
       { text: `Conversation so far:\n${history || '(just started)'}\n\nHabits already known: ${known}\n\nThe person's new answer${input.audio ? ' is in the audio clip' : `: ${text}`}.` }
     ];
     if (input.audio) parts.push({ inlineData: { mimeType: input.audio.mimeType.split(';')[0] || 'audio/webm', data: input.audio.data } });
-    raw = await generateStructured({ system: interviewInstruction(topics), parts, schema: interviewSchema, model: model! });
+    raw = await generateStructured({ system: interviewInstruction(vibeQuestions, topics), parts, schema: interviewSchema, model: model! });
   }
   const parsed = interviewSchema.parse(raw);
-  const found = cleanVibeAnswers(Object.fromEntries(Object.entries(parsed.answers).filter(([id, value]) => value !== null && !topics.skip.includes(id)))) ?? {};
+  const found = cleanVibeAnswers(Object.fromEntries(Object.entries(parsed.answers).filter(([id, value]) => value !== null && !topics.skip.includes(id))), vibeQuestions) ?? {};
   const answers = { ...input.known, ...found };
-  const missing = VIBE_QUESTIONS.filter((question) => !topics.skip.includes(question.id) && answers[question.id] === undefined).map((question) => question.id);
+  const missing = vibeQuestions.filter((question) => !topics.skip.includes(question.id) && answers[question.id] === undefined).map((question) => question.id);
   const turns = input.history.filter((turn) => turn.role === 'user').length + 1;
   return {
     heard: (parsed.heard || text).trim().slice(0, 500),
@@ -238,40 +247,40 @@ const vibeJudgment = z.object({
 });
 const vibeJudgments = z.object({ rooms: z.record(z.string(), vibeJudgment) });
 
-function describeAnswers(answers: VibeAnswers): string {
+function describeAnswers(answers: VibeAnswers, questions: readonly VibeQuestion[]): string {
   const lines: string[] = [];
-  for (const question of VIBE_QUESTIONS) {
+  for (const question of questions) {
     const value = answers[question.id];
     if (value === undefined) continue;
-    lines.push(`- ${question.question} ${phraseFor(question.id, value)}${question.weight > 1 ? ' (matters a lot)' : ''}`);
+    lines.push(`- ${question.question} ${phraseFor(question.id, value, questions)}${question.weight > 1 ? ' (matters a lot)' : ''}`);
   }
   return lines.join('\n');
 }
 
 /** Per-question answer counts and habit summaries: never names or phone numbers. */
-function describeRoommates(room: VibeRoomInput): string {
+function describeRoommates(room: VibeRoomInput, questions: readonly VibeQuestion[]): string {
   const lines: string[] = [];
-  for (const question of VIBE_QUESTIONS) {
+  for (const question of questions) {
     const counts = [0, 0, 0];
     for (const mate of room.roommates) {
       const value = mate[question.id];
       if (value !== undefined) counts[value] = (counts[value] ?? 0) + 1;
     }
-    const parts = counts.map((n, v) => (n ? `${n} × ${phraseFor(question.id, v)}` : '')).filter(Boolean);
+    const parts = counts.map((n, v) => (n ? `${n} × ${phraseFor(question.id, v, questions)}` : '')).filter(Boolean);
     if (parts.length) lines.push(`- ${question.question} ${parts.join('; ')}`);
   }
   for (const summary of room.summaries ?? []) lines.push(`- A resident in their own words: "${summary}"`);
   return lines.join('\n');
 }
 
-function judgePrompt(person: VibeAnswers, personSummary: string | null, judged: { room: VibeRoomInput; baseline: VibeMatch }[]): string {
+function judgePrompt(person: VibeAnswers, personSummary: string | null, judged: { room: VibeRoomInput; baseline: VibeMatch }[], questions: readonly VibeQuestion[]): string {
   const sections = judged.map(({ room, baseline }, index) => [
     `Room ${room.roomNumber || `#${index + 1}`} (id ${room.roomId}): ${baseline.compared} resident${baseline.compared === 1 ? '' : 's'} answered; deterministic baseline score ${baseline.score ?? 'none'}.`,
-    describeRoommates(room)
+    describeRoommates(room, questions)
   ].join('\n'));
   return [
     'The visitor answered these lifestyle questions:',
-    describeAnswers(person),
+    describeAnswers(person, questions),
     ...(personSummary ? [`In their own words: "${personSummary}"`] : []),
     '',
     ...sections.flatMap((section) => [section, '']),
@@ -329,17 +338,18 @@ export async function scoreVibeRooms(
   personSummary: string | null = null,
   deps: VibeMatcherDeps = {}
 ): Promise<Map<string, AiVibeMatch>> {
+  const { vibeQuestions } = await getPlatformCatalog();
   const matches = new Map<string, AiVibeMatch>();
   const judged: { room: VibeRoomInput; baseline: VibeMatch }[] = [];
   for (const room of rooms) {
-    const baseline = vibeMatch(person, room.roommates);
+    const baseline = vibeMatch(person, room.roommates, vibeQuestions);
     matches.set(room.roomId, { ...baseline, ai: false });
     if (baseline.score !== null) judged.push({ room, baseline });
   }
   const model = vibeModelName();
   if (!judged.length || (!deps.runMatcherText && (!aiEnabled() || !model))) return matches;
   try {
-    const { rooms: judgments } = await runVibeMatcher(judgePrompt(person, personSummary, judged), model ?? 'test', deps);
+    const { rooms: judgments } = await runVibeMatcher(judgePrompt(person, personSummary, judged, vibeQuestions), model ?? 'test', deps);
     for (const { room, baseline } of judged) {
       const judgment = judgments[room.roomId];
       if (!judgment) continue;

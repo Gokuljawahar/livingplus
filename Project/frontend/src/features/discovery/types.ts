@@ -66,36 +66,6 @@ export interface ResidentStay {
   bed?: { label: string; room: { roomNumber: string; roomType: string } } | null;
 }
 
-export const ROOM_TYPES = [
-  { value: 'PRIVATE', label: 'Private room' },
-  { value: 'DOUBLE', label: '2 sharing' },
-  { value: 'TRIPLE', label: '3 sharing' },
-  { value: 'SHARED', label: 'Shared dorm' }
-];
-
-export const ROOM_TYPE_LABELS: Record<string, string> = {
-  PRIVATE: 'Private room',
-  DOUBLE: '2 sharing',
-  TRIPLE: '3 sharing',
-  SHARED: 'Shared dorm'
-};
-
-export const PRICE_BANDS = [
-  { label: 'Under ₹5,000', min: '', max: '5000' },
-  { label: '₹5,000 – ₹8,000', min: '5000', max: '8000' },
-  { label: '₹8,000 – ₹12,000', min: '8000', max: '12000' },
-  { label: 'Above ₹12,000', min: '12000', max: '' }
-];
-
-export const SORTS = [
-  { value: 'featured', label: 'Best match' },
-  { value: 'price-asc', label: 'Lowest rent' },
-  { value: 'price-desc', label: 'Highest rent' },
-  { value: 'beds-desc', label: 'Most beds free' }
-];
-
-export const GENDER_LABELS: Record<string, string> = { MEN: 'Men', WOMEN: 'Women', ANY: 'Co-living' };
-
 export function keywordMatch(property: PGProperty, text: string): boolean {
   const haystack = [
     property.name,

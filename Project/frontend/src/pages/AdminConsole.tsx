@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Building2,
   ClipboardList,
+  Database,
   ExternalLink,
   LogOut,
   Menu,
@@ -15,13 +16,14 @@ import api from '../api/axios';
 import { queryKeys } from '../api/query-keys';
 import BrandLogo from '../components/ui/BrandLogo';
 import { useAuth } from '../context/auth';
+import AdminCatalogView from '../features/admin/AdminCatalogView';
 import AdminLeadsView from '../features/admin/AdminLeadsView';
 import AdminPropertiesView from '../features/admin/AdminPropertiesView';
 import ConciergeOnboardWizard from '../features/admin/ConciergeOnboardWizard';
 import type { AdminOverview, AdminOwner, AdminProperty, OwnerLead } from '../features/admin/types';
 import { ROUTES } from '../utils/app-areas';
 
-type AdminTab = 'leads' | 'onboard' | 'properties';
+type AdminTab = 'leads' | 'onboard' | 'properties' | 'catalog';
 
 export default function AdminConsole() {
   const { user, logout } = useAuth();
@@ -34,6 +36,8 @@ export default function AdminConsole() {
       ? 'onboard'
       : location.pathname.startsWith('/admin/properties')
       ? 'properties'
+      : location.pathname.startsWith('/admin/catalog')
+      ? 'catalog'
       : 'leads';
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -73,7 +77,8 @@ export default function AdminConsole() {
   const navItems: { id: AdminTab; label: string; to: string; icon: typeof ClipboardList }[] = [
     { id: 'leads', label: 'Leads Inbox', to: ROUTES.adminHome, icon: ClipboardList },
     { id: 'onboard', label: 'Onboard New PG', to: ROUTES.adminOnboard, icon: PlusCircle },
-    { id: 'properties', label: 'All PGs', to: ROUTES.adminProperties, icon: Building2 }
+    { id: 'properties', label: 'All PGs', to: ROUTES.adminProperties, icon: Building2 },
+    { id: 'catalog', label: 'Platform Catalog', to: ROUTES.adminCatalog, icon: Database }
   ];
 
   const startOnboardFromLead = (lead: OwnerLead) => {
@@ -159,7 +164,13 @@ export default function AdminConsole() {
               <Menu className="h-5 w-5" />
             </button>
             <h1 className="text-lg font-bold text-navy-900 sm:text-xl">
-              {activeTab === 'leads' ? 'Owner Onboarding Leads' : activeTab === 'onboard' ? 'Concierge PG Onboarding' : 'Marketplace PG Catalog'}
+              {activeTab === 'leads'
+                ? 'Owner Onboarding Leads'
+                : activeTab === 'onboard'
+                ? 'Concierge PG Onboarding'
+                : activeTab === 'catalog'
+                ? 'Dynamic Platform Catalog'
+                : 'Marketplace PG Catalog'}
             </h1>
           </div>
           <div className="flex items-center gap-3 text-sm">
@@ -206,6 +217,7 @@ export default function AdminConsole() {
               onChanged={refreshAll}
             />
           )}
+          {activeTab === 'catalog' && <AdminCatalogView />}
         </main>
       </div>
     </div>

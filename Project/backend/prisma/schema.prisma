@@ -480,3 +480,17 @@ model OwnerLead {
   @@index([status, createdAt])
   @@index([phone])
 }
+
+/// Dynamic platform-wide configuration and domain catalogs (amenities, room amenities,
+/// landmarks, property types, room types, price bands, VibeCheck questions, KYC types,
+/// expense & maintenance categories, payment methods, meal/cleaning slots, assistant copy).
+/// Provisioned automatically into PostgreSQL on startup and editable via `/admin/catalog`.
+model PlatformCatalog {
+  key         String   @id
+  description String?
+  data        Json
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+

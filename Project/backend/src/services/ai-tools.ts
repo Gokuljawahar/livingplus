@@ -20,7 +20,8 @@ import { notifyWhatsAppTemplate } from './pg-notifications.js';
 import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExclusionWhere } from '../utils/resident-search.js';
 import { periodOf } from '../utils/app-time.js';
 import { z } from 'zod';
-import { CHENNAI_LANDMARKS, distanceKm, findLandmark } from '@livingplus/shared';
+import { distanceKm, findLandmark } from '@livingplus/shared';
+import { getPlatformCatalog } from './platform-catalog.js';
 import { semanticScores, semanticSearchEnabled, type SemanticSearchDeps } from './semantic-search.js';
 
 export interface Actor {
@@ -184,8 +185,9 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     roles: ['GUEST', 'PG_TENANT', 'PG_OWNER', 'PG_WARDEN'],
     execute: async (actor, args = {}, deps) => {
       const q = str(args.location).toLowerCase();
-      const landmark = args.near ? findLandmark(str(args.near)) : null;
-      if (args.near && !landmark) throw new Error(`UNKNOWN_PLACE: use one of ${CHENNAI_LANDMARKS.map((place) => place.name).join('; ')}`);
+      const catalog = await getPlatformCatalog();
+      const landmark = args.near ? findLandmark(str(args.near), catalog.landmarks) : null;
+      if (args.near && !landmark) throw new Error(`UNKNOWN_PLACE: use one of ${catalog.landmarks.map((place) => place.name).join('; ')}`);
       const exclusion = actor.role === 'PG_TENANT' && actor.propertyId ? ownPropertyExclusionWhere([actor.propertyId]) : {};
       const properties = await publicProperties(exclusion);
       const matches = properties

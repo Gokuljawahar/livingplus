@@ -7,6 +7,7 @@ import api from '../../api/axios';
 import { SecureImage } from '../../components/SecureImage';
 import VibeProfileBuilder from '../../components/VibeProfileBuilder';
 import { useOtpCooldown } from '../../hooks/useOtpCooldown';
+import { labelFromCatalog, usePlatformCatalog } from '../../hooks/usePlatformCatalog';
 import { apiErrorMessage, apiErrorStatus } from '../../utils/api-error';
 import {
   getGuestSession,
@@ -18,7 +19,7 @@ import {
 import { rupees } from '../../utils/money';
 import { phoneOtpErrorMessage, startPhoneVerification, type PhoneChallenge } from '../../utils/phone-otp';
 import { hasKeyHabits, loadVibeAnswers, loadVibeSummary, saveVibeAnswers, saveVibeSummary } from '../../utils/vibe-storage';
-import { availabilityText, computePriceFacts, GENDER_LABELS, type PGProperty } from './types';
+import { availabilityText, computePriceFacts, type PGProperty } from './types';
 
 interface Props {
   property: PGProperty;
@@ -70,8 +71,9 @@ export default function BookingModal({
   });
   const { cooldown: otpCooldown, startCooldown: startOtpCooldown } = useOtpCooldown();
 
+  const { catalog } = usePlatformCatalog();
   const facts = computePriceFacts(property, matchesRoom);
-  const vibeComplete = hasKeyHabits(vibeAnswers);
+  const vibeComplete = hasKeyHabits(vibeAnswers, catalog.vibeQuestions.length ? catalog.vibeQuestions : undefined);
   const bedChoices = property.rooms
     .filter(matchesRoom)
     .flatMap((room) => room.beds.map((bed) => ({ room, bed, match: vibeMatches?.get(bed.id) ?? null })))
@@ -212,7 +214,7 @@ export default function BookingModal({
               )}
               <dl className="divide-y divide-hairline">
                 {[
-                  ['For', GENDER_LABELS[property.genderPolicy] || property.genderPolicy],
+                  ['For', labelFromCatalog(catalog.genderPolicies, property.genderPolicy)],
                   ['Rent', facts.from === null ? 'Ask the owner' : facts.to !== null && facts.to !== facts.from ? `${rupees(facts.from)} – ${rupees(facts.to)} a month` : `${rupees(facts.from)} a month`],
                   ['Food', facts.food ?? 'Ask the owner'],
                   ['Deposit', facts.deposit === 'Deposit not listed' ? 'Not listed: ask the owner' : facts.deposit.replace('Deposit ', '')],

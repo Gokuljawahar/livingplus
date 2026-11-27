@@ -1,8 +1,6 @@
 // VibeCheck: lifestyle compatibility between a person and the residents of a room.
-// Lifestyle habits only (sleep, tidiness, noise, guests, kitchen, schedule,
-// temperature, lights). Never caste, religion, diet or any identity question.
-// Shared by the API (scoring) and the web app (the questions people answer).
-// Every phrase reads after both "You both …" and "A roommate tends to …".
+// Questions, weights, options, and phrases are provisioned dynamically in PostgreSQL
+// (`PlatformCatalog.vibeQuestions`) and passed into scoring and validation helpers.
 
 export interface VibeOption {
   value: number;
@@ -65,10 +63,10 @@ export const VIBE_QUESTIONS: readonly VibeQuestion[] = [
 export type VibeAnswers = Record<string, number>;
 
 /** Keeps only known questions with a valid option value. Null when nothing valid is left. */
-export function cleanVibeAnswers(input: unknown): VibeAnswers | null {
+export function cleanVibeAnswers(input: unknown, questions: readonly VibeQuestion[] = VIBE_QUESTIONS): VibeAnswers | null {
   if (!input || typeof input !== 'object') return null;
   const out: VibeAnswers = {};
-  for (const question of VIBE_QUESTIONS) {
+  for (const question of questions) {
     const value = Number((input as Record<string, unknown>)[question.id]);
     if (Number.isInteger(value) && value >= 0 && value <= 2) out[question.id] = value;
   }
@@ -87,10 +85,10 @@ export interface VibeMatch {
 }
 
 /** Similarity of two people on the questions both answered: 0–1, or null. */
-function pairScore(a: VibeAnswers, b: VibeAnswers): number | null {
+function pairScore(a: VibeAnswers, b: VibeAnswers, questions: readonly VibeQuestion[]): number | null {
   let weighted = 0;
   let total = 0;
-  for (const question of VIBE_QUESTIONS) {
+  for (const question of questions) {
     if (a[question.id] === undefined || b[question.id] === undefined) continue;
     weighted += question.weight * (1 - Math.abs(a[question.id]! - b[question.id]!) / 2);
     total += question.weight;
@@ -99,16 +97,19 @@ function pairScore(a: VibeAnswers, b: VibeAnswers): number | null {
 }
 
 /**
- * Scores a person against everyone already in a room. Reasons name habits, never
- * people: roommates' individual answers are not revealed.
+ * Scores a person against everyone already in a room using the active `questions` catalog.
  */
-export function vibeMatch(person: VibeAnswers, roommates: VibeAnswers[]): VibeMatch {
-  const scores = roommates.map((mate) => pairScore(person, mate)).filter((s): s is number => s !== null);
+export function vibeMatch(
+  person: VibeAnswers,
+  roommates: VibeAnswers[],
+  questions: readonly VibeQuestion[] = VIBE_QUESTIONS
+): VibeMatch {
+  const scores = roommates.map((mate) => pairScore(person, mate, questions)).filter((s): s is number => s !== null);
   if (!scores.length) return { score: null, compared: 0, reasons: [], differences: [] };
   const score = Math.round((scores.reduce((sum, s) => sum + s, 0) / scores.length) * 100);
   const shared: { weight: number; text: string }[] = [];
   const apart: { weight: number; text: string }[] = [];
-  for (const question of VIBE_QUESTIONS) {
+  for (const question of questions) {
     const mine = person[question.id];
     if (mine === undefined) continue;
     const theirs = roommates.map((mate) => mate[question.id]).filter((v): v is number => v !== undefined);
@@ -150,7 +151,6 @@ export interface VibePlace {
 /**
  * Which lifestyle topics matter for this PG. A PG with no shared kitchen makes
  * kitchen use irrelevant; with no AC rooms, room temperature is not shared.
- * `facts` describe the PG for the conversation; `skip` lists habit ids to leave out.
  */
 export function vibeTopicsFor(place: VibePlace | null | undefined): { skip: string[]; facts: string[] } {
   if (!place) return { skip: [], facts: [] };

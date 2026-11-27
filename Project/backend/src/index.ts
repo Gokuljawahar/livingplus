@@ -14,11 +14,12 @@ const { logger } = await import('./utils/logger.js');
 
 getJwtSecret();
 
-const [{ default: app, systemPrisma }, { startMonthlyRentScheduler }, { startRentReminderScheduler }, { assignMissingPgSlugs }] = await Promise.all([
+const [{ default: app, systemPrisma }, { startMonthlyRentScheduler }, { startRentReminderScheduler }, { assignMissingPgSlugs }, { provisionPlatformCatalog }] = await Promise.all([
   import('./app.js'),
   import('./services/pg-rent-scheduler.js'),
   import('./services/pg-rent-reminders.js'),
-  import('./utils/pg-slug.js')
+  import('./utils/pg-slug.js'),
+  import('./services/platform-catalog.js')
 ]);
 
 if (process.env.OTP_DEMO_MODE === 'true') {
@@ -27,6 +28,8 @@ if (process.env.OTP_DEMO_MODE === 'true') {
 
 const { asSystem } = await import('./db/context.js');
 // Boot and in-process scheduled jobs span every PG: they run as the system (no RLS).
+const provisionedCatalogs = await asSystem('boot: provision platform catalog', () => provisionPlatformCatalog(systemPrisma));
+if (provisionedCatalogs) logger.info(`[catalog] Provisioned ${provisionedCatalogs} dynamic PlatformCatalog sections in PostgreSQL`);
 const backfilledSlugs = await asSystem('boot: backfill PG slugs', () => assignMissingPgSlugs(systemPrisma));
 if (backfilledSlugs) logger.info(`[PG host routing] Assigned ${backfilledSlugs} property slugs`);
 

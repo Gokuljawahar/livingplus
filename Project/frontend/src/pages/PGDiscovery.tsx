@@ -19,7 +19,7 @@ import {
   Sparkles,
   UserCheck
 } from 'lucide-react';
-import { CHENNAI_LANDMARKS, distanceKm, PROPERTY_TYPES, PROPERTY_TYPE_SHORT_LABELS } from '@livingplus/shared';
+import { distanceKm } from '@livingplus/shared';
 import api from '../api/axios';
 import { queryKeys } from '../api/query-keys';
 import AIChatPanel from '../components/AIChatPanel';
@@ -31,8 +31,9 @@ import { useAuth } from '../context/auth';
 import FilterSheet from '../features/discovery/FilterSheet';
 import OwnerLeadModal from '../features/discovery/OwnerLeadModal';
 import PropertyCard from '../features/discovery/PropertyCard';
-import { keywordMatch, SORTS, type PGProperty, type ResidentStay } from '../features/discovery/types';
+import { keywordMatch, type PGProperty, type ResidentStay } from '../features/discovery/types';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { usePlatformCatalog } from '../hooks/usePlatformCatalog';
 import { ROUTES } from '../utils/app-areas';
 import { clearGuestSession, useGuestSession, type GuestSession } from '../utils/guest-session';
 import { toggleSavedPg, useSavedPgs } from '../utils/saved-pgs';
@@ -85,7 +86,8 @@ export default function PGDiscovery() {
   const [nearId, setNearId] = useState('');
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
-  const nearPlace = CHENNAI_LANDMARKS.find((place) => place.id === nearId) ?? null;
+  const { catalog } = usePlatformCatalog();
+  const nearPlace = catalog.landmarks.find((place) => place.id === nearId) ?? null;
   const distanceTo = useCallback(
     (property: PGProperty): number | null =>
       nearPlace && property.latitude != null && property.longitude != null
@@ -239,18 +241,28 @@ export default function PGDiscovery() {
   }
 
   const profileName = stays[0]?.name || user?.name || null;
+  const quickPriceBand = catalog.priceBands.find((band) => !band.min && band.max) ?? catalog.priceBands[1];
   const quickChips: { label: string; active: boolean; toggle: () => void }[] = [
-    { label: 'Women', active: gender === 'WOMEN', toggle: () => setGender(gender === 'WOMEN' ? '' : 'WOMEN') },
-    { label: 'Men', active: gender === 'MEN', toggle: () => setGender(gender === 'MEN' ? '' : 'MEN') },
-    { label: 'Co-living', active: gender === 'ANY', toggle: () => setGender(gender === 'ANY' ? '' : 'ANY') },
-    {
-      label: 'Under ₹8,000',
-      active: !minRent && maxRent === '8000',
-      toggle: () => {
-        setMinRent('');
-        setMaxRent(maxRent === '8000' && !minRent ? '' : '8000');
-      }
-    },
+    ...catalog.genderPolicies.map((policy) => ({
+      label: policy.label,
+      active: gender === policy.value,
+      toggle: () => setGender(gender === policy.value ? '' : policy.value)
+    })),
+    ...(quickPriceBand
+      ? [{
+          label: quickPriceBand.label,
+          active: minRent === quickPriceBand.min && maxRent === quickPriceBand.max,
+          toggle: () => {
+            if (minRent === quickPriceBand.min && maxRent === quickPriceBand.max) {
+              setMinRent('');
+              setMaxRent('');
+            } else {
+              setMinRent(quickPriceBand.min);
+              setMaxRent(quickPriceBand.max);
+            }
+          }
+        }]
+      : []),
     { label: 'Food available', active: foodOnly, toggle: () => setFoodOnly(!foodOnly) },
     { label: 'AC', active: acOnly, toggle: () => setAcOnly(!acOnly) }
   ];
@@ -422,7 +434,7 @@ export default function PGDiscovery() {
               <div className="mt-6 flex flex-wrap gap-1.5" role="tablist" aria-label="Accommodation type">
                 {[
                   { value: '', label: 'All stays' },
-                  ...PROPERTY_TYPES.map((t) => ({ value: t, label: PROPERTY_TYPE_SHORT_LABELS[t] }))
+                  ...catalog.propertyTypes.map((t) => ({ value: t.value, label: t.shortLabel || t.label }))
                 ].map((tab) => {
                   const active = propertyType === tab.value;
                   return (
@@ -500,7 +512,7 @@ export default function PGDiscovery() {
                     !queryScope ? 'bg-navy-900 text-white' : 'bg-canvas text-ink border border-hairline hover:border-field-border'
                   }`}
                 >
-                  All Chennai
+                  All {catalog.defaultCity || 'areas'}
                 </button>
                 {localityOptions.map((loc) => (
                   <button
@@ -531,12 +543,12 @@ export default function PGDiscovery() {
                 >
                   <option value="">Near my campus or office</option>
                   <optgroup label="Campuses">
-                    {CHENNAI_LANDMARKS.filter((place) => place.kind === 'campus').map((place) => (
+                    {catalog.landmarks.filter((place) => place.kind === 'campus').map((place) => (
                       <option key={place.id} value={place.id}>Near {place.name}</option>
                     ))}
                   </optgroup>
                   <optgroup label="Offices">
-                    {CHENNAI_LANDMARKS.filter((place) => place.kind === 'office').map((place) => (
+                    {catalog.landmarks.filter((place) => place.kind === 'office').map((place) => (
                       <option key={place.id} value={place.id}>Near {place.name}</option>
                     ))}
                   </optgroup>
@@ -588,7 +600,7 @@ export default function PGDiscovery() {
               <p className="text-ink" aria-live="polite">
                 <span className="tabular font-semibold text-navy-900">{filteredProperties.length}</span>{' '}
                 {filteredProperties.length === 1 ? 'PG' : 'PGs'}
-                {query.trim() ? <> for “{query.trim()}”</> : queryScope ? <> in {queryScope}</> : ' in Chennai'}
+                {query.trim() ? <> for “{query.trim()}”</> : queryScope ? <> in {queryScope}</> : catalog.defaultCity ? ` in ${catalog.defaultCity}` : ''}
                 {nearPlace && sort === 'featured' && <span className="hidden text-muted sm:inline">, nearest to {nearPlace.name.split(',')[0]} first</span>}
                 {query.trim() && semanticScores && semanticScores.size > 0 && (
                   <span className="ml-2 text-sm text-muted" title="Includes PGs that match what you described, not just the exact words">including close matches</span>
@@ -602,7 +614,7 @@ export default function PGDiscovery() {
                   onChange={(event) => setSort(event.target.value)}
                   className="rounded-[var(--radius-field)] bg-transparent py-1 font-medium text-navy-900 outline-none"
                 >
-                  {SORTS.map((option) => (
+                  {catalog.sortOptions.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
