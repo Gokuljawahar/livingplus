@@ -164,20 +164,33 @@ if [ "$DRY_RUN" != "1" ] && [ "$(secret_value livingplus-database-url)" != "$EXP
   echo "  secret livingplus-database-url updated to ${SQL_CONNECTION}"
 fi
 
+# Reads a value from a Firebase / Identity Toolkit / App Check REST endpoint (read-only).
+firebase_get() {
+  curl -fsS -H "Authorization: Bearer $(gcloud auth print-access-token 2>/dev/null)" \
+    -H "x-goog-user-project: ${PROJECT_ID}" "$1" 2>/dev/null
+}
+
+if [ "${SKIP_FIREBASE:-0}" != "1" ] && [ -z "${VITE_RECAPTCHA_SITE_KEY:-}" ] && [ "$DRY_RUN" != "1" ]; then
+  if RC_APP_ID="$(firebase_get "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}/webApps" | python3 -c 'import sys,json; a=json.load(sys.stdin).get("apps",[]); print(a[0]["appId"] if a else "")' 2>/dev/null)" && [ -n "$RC_APP_ID" ]; then
+    PROJECT_NUM="${RC_APP_ID%%:*}"
+    RC_SITE_KEY="$(firebase_get "https://firebaseappcheck.googleapis.com/v1/projects/${PROJECT_NUM}/apps/${RC_APP_ID}/recaptchaEnterpriseConfig" | python3 -c 'import sys,json; print((json.load(sys.stdin).get("siteKey") or "").split("/")[-1])' 2>/dev/null || true)"
+    if [ -n "$RC_SITE_KEY" ]; then
+      VITE_RECAPTCHA_SITE_KEY="$RC_SITE_KEY"
+      VITE_RECAPTCHA_ENTERPRISE="${VITE_RECAPTCHA_ENTERPRISE:-true}"
+      echo "  using Firebase App Check reCAPTCHA Enterprise key ${VITE_RECAPTCHA_SITE_KEY}"
+    fi
+  fi
+fi
+
 step "Building the image with Cloud Build"
 if [ "${SKIP_BUILD:-0}" = "1" ]; then
   echo "  SKIP_BUILD=1: reusing existing image ${IMAGE}"
 else
   run gcloud builds submit --project "$PROJECT_ID" --region "$REGION" --config deploy/cloudbuild.yaml \
-    --substitutions "_IMAGE=${IMAGE},_VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY:-}" .
+    --substitutions "_IMAGE=${IMAGE},_VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY:-},_VITE_RECAPTCHA_SITE_KEY=${VITE_RECAPTCHA_SITE_KEY:-},_VITE_RECAPTCHA_ENTERPRISE=${VITE_RECAPTCHA_ENTERPRISE:-}" .
 fi
 
 step "Firebase Authentication"
-# Reads a value from a Firebase / Identity Toolkit REST endpoint (read-only).
-firebase_get() {
-  curl -fsS -H "Authorization: Bearer $(gcloud auth print-access-token 2>/dev/null)" \
-    -H "x-goog-user-project: ${PROJECT_ID}" "$1" 2>/dev/null
-}
 if [ "${SKIP_FIREBASE:-0}" = "1" ]; then
   echo "  SKIP_FIREBASE=1: not using Firebase."
   FIREBASE_PROJECT_ID=""; FIREBASE_WEB_API_KEY=""
