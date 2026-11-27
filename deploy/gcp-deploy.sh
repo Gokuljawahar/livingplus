@@ -172,14 +172,17 @@ firebase_get() {
 
 if [ "${SKIP_FIREBASE:-0}" != "1" ] && [ -z "${VITE_RECAPTCHA_SITE_KEY:-}" ] && [ "$DRY_RUN" != "1" ]; then
   if RC_APP_ID="$(firebase_get "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}/webApps" | python3 -c 'import sys,json; a=json.load(sys.stdin).get("apps",[]); print(a[0]["appId"] if a else "")' 2>/dev/null)" && [ -n "$RC_APP_ID" ]; then
-    PROJECT_NUM="${RC_APP_ID%%:*}"
+    RC_PARTS=(${RC_APP_ID//:/ })
+    PROJECT_NUM="${RC_PARTS[1]:-}"
     RC_SITE_KEY="$(firebase_get "https://firebaseappcheck.googleapis.com/v1/projects/${PROJECT_NUM}/apps/${RC_APP_ID}/recaptchaEnterpriseConfig" | python3 -c 'import sys,json; print((json.load(sys.stdin).get("siteKey") or "").split("/")[-1])' 2>/dev/null || true)"
     if [ -n "$RC_SITE_KEY" ]; then
       VITE_RECAPTCHA_SITE_KEY="$RC_SITE_KEY"
-      VITE_RECAPTCHA_ENTERPRISE="${VITE_RECAPTCHA_ENTERPRISE:-true}"
       echo "  using Firebase App Check reCAPTCHA Enterprise key ${VITE_RECAPTCHA_SITE_KEY}"
     fi
   fi
+fi
+if [ -n "${VITE_RECAPTCHA_SITE_KEY:-}" ]; then
+  VITE_RECAPTCHA_ENTERPRISE="${VITE_RECAPTCHA_ENTERPRISE:-true}"
 fi
 
 step "Building the image with Cloud Build"
