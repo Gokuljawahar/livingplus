@@ -41,10 +41,17 @@ model PGProperty {
   latitude     Float?
   longitude    Float?
   genderPolicy String   @default("ANY")
+  propertyType String   @default("PG")
+  tagline      String?
   amenities    Json     @default("[]")
+  highlights   Json     @default("[]")
+  foodDetails  String?
+  nearbyPlaces Json     @default("[]")
   houseRules   Json     @default("[]")
   photoUrls    Json     @default("[]")
   status       String   @default("ACTIVE")
+  featured     Boolean  @default(false)
+  onboardedByAdmin Boolean @default(false)
   bookingLockMinutes Int @default(120)
   rentDay      Int      @default(1)
   rentDueDay   Int      @default(5)
@@ -101,6 +108,9 @@ model PGRoom {
   hasAc              Boolean    @default(false)
   foodIncluded       Boolean    @default(false)
   foodCharge         Float      @default(0)
+  description        String?
+  amenities          Json       @default("[]")
+  photoUrls          Json       @default("[]")
   status             String     @default("ACTIVE")
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
@@ -439,4 +449,34 @@ model PGServiceOrder {
 
   @@index([propertyId, forDate])
   @@index([tenantId, forDate])
+}
+
+/// Incoming inquiry from a PG owner on the landing page ("List Your PG").
+/// Managed in the internal concierge onboarding console (/admin) before publishing.
+model OwnerLead {
+  id                  String   @id @default(uuid())
+  ownerName           String
+  phone               String
+  email               String?
+  propertyName        String
+  city                String   @default("Chennai")
+  locality            String
+  address             String?
+  propertyType        String   @default("PG")
+  genderPolicy        String   @default("ANY")
+  propertyCount       Int      @default(1)
+  totalRooms          Int?
+  totalBeds           Int?
+  startingRent        Float?
+  amenities           Json     @default("[]")
+  notes               String?
+  status              String   @default("NEW")
+  internalNotes       String?
+  onboardedPropertyId String?
+  onboardedOwnerId    String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([phone])
 }

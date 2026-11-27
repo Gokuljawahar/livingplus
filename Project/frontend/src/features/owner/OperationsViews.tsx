@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Plus } from 'lucide-react';
+import { Cloud, Loader2, Plus, Sparkles, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { STAFF_ROLES, STAFF_ROLE_HINTS, STAFF_ROLE_LABELS } from '@livingplus/shared';
 import api from '../../api/axios';
+import type { OwnerOpenTicketsDigest } from '../../ai/ai';
 import { Button, Card, EmptyState, StatusPill } from '../../components/ui';
 import { apiErrorMessage } from '../../utils/api-error';
 import { ownerTicketSchema, staffSchema, type OwnerTicketForm, type StaffForm } from '../../validation/forms';
@@ -134,7 +135,57 @@ export function MaintenanceView({
   const [ticketImage, setTicketImage] = useState<File | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [openedAt] = useState(() => Date.now());
+  const [digestLoading, setDigestLoading] = useState(false);
+  const [digestState, setDigestState] = useState<{
+    data: OwnerOpenTicketsDigest;
+    latencyMs?: number;
+    fallback?: boolean;
+  } | null>(null);
   const ticketFormApi = useForm<OwnerTicketForm>({ resolver: zodResolver(ownerTicketSchema), defaultValues: EMPTY_TICKET_FORM });
+
+  const summarizeOpenTickets = async () => {
+    const open = tickets.filter((t) => t.status === 'OPEN' || t.status === 'IN_PROGRESS');
+    if (open.length === 0) {
+      toast('No open tickets to summarise right now.');
+      return;
+    }
+    setDigestLoading(true);
+    try {
+      const { summarizeOwnerOpenTickets } = await import('../../ai/ai');
+      const res = await summarizeOwnerOpenTickets(
+        open.map((t) => ({
+          id: t.id,
+          title: t.title,
+          category: t.category,
+          priority: t.priority,
+          status: t.status,
+          description: t.description,
+          tenantName: t.tenant?.name
+        }))
+      );
+      setDigestState({ data: res.data, latencyMs: res.latencyMs, fallback: false });
+    } catch {
+      const urgentCount = open.filter((t) => t.priority === 'URGENT' || t.priority === 'HIGH').length;
+      const byCat = open.reduce<Record<string, number>>((acc, t) => {
+        acc[t.category] = (acc[t.category] || 0) + 1;
+        return acc;
+      }, {});
+      const topCat = Object.entries(byCat).sort((a, b) => b[1] - a[1])[0];
+      setDigestState({
+        fallback: true,
+        data: {
+          bullets: [
+            `${open.length} open or active ticket${open.length === 1 ? '' : 's'} across your PGs (${urgentCount} high/urgent priority).`,
+            topCat ? `Most frequent category right now: ${topCat[0]} (${topCat[1]} ticket${topCat[1] === 1 ? '' : 's'}).` : 'Tickets span mixed categories.',
+            'Configure VITE_FIREBASE_* keys to enable live Cloud Gemini cross-ticket reasoning.'
+          ],
+          repeatedPatterns: topCat && topCat[1] >= 2 ? [`Multiple ${topCat[0]} issues open simultaneously (${topCat[1]})`] : []
+        }
+      });
+    } finally {
+      setDigestLoading(false);
+    }
+  };
 
   const createTicket = ticketFormApi.handleSubmit(async (ticketForm) => {
     if (!selectedPropertyId) return;
@@ -181,8 +232,53 @@ export function MaintenanceView({
     <section className="space-y-5 pt-2">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-muted">{columns[0]!.items.length} new · {columns[1]!.items.length} being fixed</p>
-        <Button onClick={() => setShowForm((open) => !open)}>{showForm ? 'Close' : 'Report an issue'}</Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            disabled={digestLoading}
+            onClick={() => void summarizeOpenTickets()}
+          >
+            {digestLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-amber-600" />}
+            Summarise today&apos;s open tickets
+          </Button>
+          <Button onClick={() => setShowForm((open) => !open)}>{showForm ? 'Close' : 'Report an issue'}</Button>
+        </div>
       </div>
+
+      {digestState && (
+        <Card className="border-navy-900/20 bg-surface/60 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline pb-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-sm font-bold text-navy-900">Today&apos;s open tickets digest</h2>
+              <span className="inline-flex items-center gap-1 rounded-full border border-hairline bg-canvas px-2.5 py-0.5 text-[11px] font-bold text-navy-900">
+                <Cloud className="h-3 w-3 text-sky-700" />
+                {digestState.fallback
+                  ? 'Local summary fallback (Cloud Gemini unconfigured)'
+                  : `Analysed in the cloud ☁️${digestState.latencyMs ? ` · ${digestState.latencyMs} ms` : ''}`}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDigestState(null)}
+              aria-label="Close ticket digest"
+              className="rounded p-1 text-muted hover:bg-canvas hover:text-ink"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <ul className="mt-3 list-disc space-y-1.5 pl-5 text-sm text-ink">
+            {digestState.data.bullets.map((bullet, idx) => (
+              <li key={idx}>{bullet}</li>
+            ))}
+          </ul>
+          {digestState.data.repeatedPatterns.length > 0 && (
+            <div className="mt-3 rounded-[var(--radius-field)] border border-amber-500/30 bg-amber-50/70 px-3 py-2 text-xs text-amber-950">
+              <span className="font-bold">Repeated patterns: </span>
+              {digestState.data.repeatedPatterns.join(' · ')}
+            </div>
+          )}
+        </Card>
+      )}
       {showForm && (
       <Card className="h-fit p-6">
         <form onSubmit={createTicket}>

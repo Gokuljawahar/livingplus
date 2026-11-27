@@ -35,6 +35,17 @@ export function createLiveProtocol(z) {
             done: z.boolean(),
             missing: z.array(z.string()).optional()
         }),
+        z.object({ type: z.literal('latency'), ms: z.number() }),
+        z.object({
+            type: z.literal('action'),
+            phase: z.enum(['proposed', 'done', 'cancelled', 'failed']),
+            summary: z.string()
+        }),
+        z.object({
+            type: z.literal('handoff'),
+            target: z.enum(['rent', 'bookings', 'maintenance']),
+            reason: z.string()
+        }),
         z.object({ type: z.literal('error'), message: z.string() }),
         z.object({ type: z.literal('end'), reason: z.string().optional() })
     ]);

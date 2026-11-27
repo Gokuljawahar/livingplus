@@ -40,6 +40,7 @@ export type MaintenanceTicket = {
   category: string;
   priority: string;
   status: string;
+  imageUrl?: string | null;
   createdAt: string;
 };
 

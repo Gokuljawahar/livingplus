@@ -17,7 +17,7 @@ export interface AuthContextType {
   user: User | null;
   token: string | null;
   login: (token: string, user: User) => void;
-  logout: (role?: 'PG_OWNER' | 'PG_TENANT') => void;
+  logout: (role?: 'PG_OWNER' | 'PG_TENANT' | 'PLATFORM_ADMIN') => void;
   updateUser: (newUser: User) => void;
   isLoading: boolean;
 }

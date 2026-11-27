@@ -5,12 +5,25 @@ import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
 
 export const E2E_OWNER = { phone: '9555500001', password: 'Owner@e2e-pass1', name: 'E2E Owner' };
+export const E2E_ADMIN = { phone: '9555500099', email: 'e2e-ops@livingplus.in', password: 'Admin@e2e-pass1', name: 'E2E Ops Admin' };
 
 const prisma = new PrismaClient();
 const owner = await prisma.user.upsert({
   where: { phone: E2E_OWNER.phone },
-  update: {},
-  create: { phone: E2E_OWNER.phone, name: E2E_OWNER.name, role: 'PG_OWNER', password: await bcrypt.hash(E2E_OWNER.password, 10) }
+  update: { phoneVerifiedAt: new Date(), password: await bcrypt.hash(E2E_OWNER.password, 10) },
+  create: { phone: E2E_OWNER.phone, name: E2E_OWNER.name, role: 'PG_OWNER', phoneVerifiedAt: new Date(), password: await bcrypt.hash(E2E_OWNER.password, 10) }
+});
+await prisma.user.upsert({
+  where: { phone: E2E_ADMIN.phone },
+  update: { role: 'PLATFORM_ADMIN', password: await bcrypt.hash(E2E_ADMIN.password, 10) },
+  create: {
+    phone: E2E_ADMIN.phone,
+    email: E2E_ADMIN.email,
+    name: E2E_ADMIN.name,
+    role: 'PLATFORM_ADMIN',
+    phoneVerifiedAt: new Date(),
+    password: await bcrypt.hash(E2E_ADMIN.password, 10)
+  }
 });
 const properties = await prisma.pGProperty.findMany({ select: { id: true } });
 for (const property of properties) {

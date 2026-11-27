@@ -1,28 +1,51 @@
-// AudioWorkletProcessor that captures mono microphone audio in 4096-sample chunks
-// and transfers them to the main thread for 16 kHz PCM16 downsampling.
-// Replaces the deprecated ScriptProcessorNode in useVibeLive.ts.
+// AudioWorkletProcessor that captures mono microphone audio, applies box-averaged
+// downsampling if hardware sampleRate differs from targetSampleRate (16 kHz),
+// and transfers clamped 1024-sample Int16 PCM buffers zero-copy to main thread.
 class PcmCaptureProcessor extends AudioWorkletProcessor {
-  constructor() {
+  constructor(options) {
     super();
-    this._buffer = new Float32Array(4096);
+    this._targetRate = options?.processorOptions?.targetSampleRate || 16000;
+    this._chunkSize = 1024;
+    this._pcm = new Int16Array(this._chunkSize);
     this._offset = 0;
+    this._ratio = sampleRate > this._targetRate ? sampleRate / this._targetRate : 1;
+    this._sum = 0;
+    this._count = 0;
+    this._acc = 0;
+  }
+
+  _pushSample(sample) {
+    const clamped = sample < -1 ? -1 : sample > 1 ? 1 : sample;
+    this._pcm[this._offset] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+    this._offset += 1;
+    if (this._offset === this._chunkSize) {
+      const out = this._pcm;
+      this.port.postMessage(out.buffer, [out.buffer]);
+      this._pcm = new Int16Array(this._chunkSize);
+      this._offset = 0;
+    }
   }
 
   process(inputs) {
     const channel = inputs[0]?.[0];
     if (!channel || channel.length === 0) return true;
-    let read = 0;
-    while (read < channel.length) {
-      const space = this._buffer.length - this._offset;
-      const take = Math.min(space, channel.length - read);
-      this._buffer.set(channel.subarray(read, read + take), this._offset);
-      this._offset += take;
-      read += take;
-      if (this._offset === this._buffer.length) {
-        const out = this._buffer;
-        this.port.postMessage(out, [out.buffer]);
-        this._buffer = new Float32Array(4096);
-        this._offset = 0;
+
+    if (Math.abs(this._ratio - 1) < 0.01) {
+      for (let i = 0; i < channel.length; i += 1) {
+        this._pushSample(channel[i]);
+      }
+      return true;
+    }
+
+    for (let i = 0; i < channel.length; i += 1) {
+      this._sum += channel[i];
+      this._count += 1;
+      this._acc += 1;
+      if (this._acc >= this._ratio) {
+        this._pushSample(this._sum / this._count);
+        this._sum = 0;
+        this._count = 0;
+        this._acc -= this._ratio;
       }
     }
     return true;

@@ -28,17 +28,31 @@ interface Props {
   onGuestChange: (session: GuestSession | null) => void;
   onClose: () => void;
   onSubmitted: () => Promise<void>;
+  initialStep?: 'details' | 'bed';
+  initialBedId?: string;
+  initialVibeOpen?: boolean;
 }
 
 const fieldClass = 'mt-1.5 block w-full rounded-[var(--radius-field)] border border-field-border bg-canvas px-3 py-2.5 text-ink outline-none focus:border-navy-900';
 const labelClass = 'block text-sm font-medium text-navy-900';
 
-export default function BookingModal({ property, matchesRoom, guest, defaultName, onGuestChange, onClose, onSubmitted }: Props) {
-  const [step, setStep] = useState<'details' | 'bed' | 'you' | 'verify'>('details');
-  const [selectedBed, setSelectedBed] = useState('');
+export default function BookingModal({
+  property,
+  matchesRoom,
+  guest,
+  defaultName,
+  onGuestChange,
+  onClose,
+  onSubmitted,
+  initialStep = 'details',
+  initialBedId = '',
+  initialVibeOpen = false
+}: Props) {
+  const [step, setStep] = useState<'details' | 'bed' | 'you' | 'verify'>(initialStep);
+  const [selectedBed, setSelectedBed] = useState(initialBedId);
   const [vibeAnswers, setVibeAnswers] = useState<VibeAnswers>(() => loadVibeAnswers());
   const [vibeSummary, setVibeSummary] = useState(() => loadVibeSummary());
-  const [vibeOpen, setVibeOpen] = useState(false);
+  const [vibeOpen, setVibeOpen] = useState(initialVibeOpen);
   const [vibeLoading, setVibeLoading] = useState(false);
   const [vibeMatches, setVibeMatches] = useState<Map<string, VibeMatch> | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -454,7 +468,20 @@ export default function BookingModal({ property, matchesRoom, guest, defaultName
               )}
             </div>
             <div className="flex items-center justify-between gap-3 border-t border-hairline px-5 py-3">
-              <button type="button" onClick={() => setStep(step === 'bed' ? 'details' : step === 'you' ? 'bed' : 'you')} className="btn-secondary">
+              <button
+                type="button"
+                onClick={() => {
+                  if (step === 'bed') {
+                    if (initialStep === 'bed') onClose();
+                    else setStep('details');
+                  } else if (step === 'you') {
+                    setStep('bed');
+                  } else {
+                    setStep('you');
+                  }
+                }}
+                className="btn-secondary"
+              >
                 Back
               </button>
               {step === 'verify' ? (

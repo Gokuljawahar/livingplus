@@ -67,7 +67,7 @@ export const postTranscribe = async (req: Request, res: Response): Promise<any> 
   } catch (error: any) {
     const code = String(error?.message || '');
     if (code === 'AI_VOICE_INVALID_AUDIO' || code === 'AI_VOICE_EMPTY_TRANSCRIPT') {
-      return res.status(400).json({ message: 'That recording could not be transcribed. Send a short WAV voice note and retry.' });
+      return res.status(400).json({ message: 'That recording could not be transcribed. Send a short voice note and retry.' });
     }
     if (code === 'AI_ORCHESTRATOR_NOT_CONFIGURED' || code.startsWith('AI_MODEL_INIT_FAILED')) {
       return res.status(503).json({ message: 'Voice notes are not connected. Configure an audio-capable AI_MODEL or AI_VOICE_MODEL to enable them.' });

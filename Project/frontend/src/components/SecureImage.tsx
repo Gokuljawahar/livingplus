@@ -16,7 +16,7 @@ const batchFetchImages = () => {
 
   const keysToFetch = [...new Set(imageQueue)];
   imageQueue = [];
-  
+
   const currentResolvers = resolvers;
   resolvers = {};
 
@@ -51,7 +51,7 @@ const getSecureImageUrl = (srcKey: string): Promise<string> => {
       resolvers[srcKey] = [];
     }
     resolvers[srcKey].push(resolve);
-    
+
     imageQueue.push(srcKey);
 
     if (!batchTimeout) {
@@ -77,7 +77,7 @@ export const SecureImage: React.FC<SecureImageProps> = ({ srcKey, fallbackSrc, c
       }
 
       if (srcKey.startsWith('/') || srcKey.startsWith('http') || srcKey.startsWith('data:')) {
-        setImgSrc(srcKey.startsWith('/') ? `${API_URL}${srcKey}` : srcKey);
+        setImgSrc(srcKey.startsWith('/uploads/') ? `${API_URL}${srcKey}` : srcKey);
         setLoading(false);
         return;
       }

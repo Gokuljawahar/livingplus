@@ -19,6 +19,9 @@ export type LiveServerMessage =
   | { type: 'interrupted' }
   | { type: 'turn' }
   | { type: 'habits'; answers: VibeAnswers; summary: string | null; done: boolean; missing?: string[] | undefined }
+  | { type: 'latency'; ms: number }
+  | { type: 'action'; phase: 'proposed' | 'done' | 'cancelled' | 'failed'; summary: string }
+  | { type: 'handoff'; target: 'rent' | 'bookings' | 'maintenance'; reason: string }
   | { type: 'error'; message: string }
   | { type: 'end'; reason?: string | undefined };
 
@@ -39,6 +42,7 @@ export interface ZodLike {
   string(): any;
   number(): any;
   boolean(): any;
+  enum(values: readonly string[]): any;
   record(key: any, value: any): any;
   array(element: any): any;
 }
@@ -86,6 +90,17 @@ export function createLiveProtocol(z: ZodLike): LiveProtocol {
       summary: z.string().nullable(),
       done: z.boolean(),
       missing: z.array(z.string()).optional()
+    }),
+    z.object({ type: z.literal('latency'), ms: z.number() }),
+    z.object({
+      type: z.literal('action'),
+      phase: z.enum(['proposed', 'done', 'cancelled', 'failed']),
+      summary: z.string()
+    }),
+    z.object({
+      type: z.literal('handoff'),
+      target: z.enum(['rent', 'bookings', 'maintenance']),
+      reason: z.string()
     }),
     z.object({ type: z.literal('error'), message: z.string() }),
     z.object({ type: z.literal('end'), reason: z.string().optional() })

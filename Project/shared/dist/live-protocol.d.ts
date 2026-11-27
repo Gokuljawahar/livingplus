@@ -31,6 +31,17 @@ export type LiveServerMessage = {
     done: boolean;
     missing?: string[] | undefined;
 } | {
+    type: 'latency';
+    ms: number;
+} | {
+    type: 'action';
+    phase: 'proposed' | 'done' | 'cancelled' | 'failed';
+    summary: string;
+} | {
+    type: 'handoff';
+    target: 'rent' | 'bookings' | 'maintenance';
+    reason: string;
+} | {
     type: 'error';
     message: string;
 } | {
@@ -54,6 +65,7 @@ export interface ZodLike {
     string(): any;
     number(): any;
     boolean(): any;
+    enum(values: readonly string[]): any;
     record(key: any, value: any): any;
     array(element: any): any;
 }

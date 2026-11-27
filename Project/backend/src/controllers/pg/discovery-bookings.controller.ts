@@ -1,6 +1,15 @@
 import type { Request, Response } from 'express';
 import { randomUUID } from 'crypto';
-import { cleanVibeAnswers, cleanVibeSummary, phoneVariants, vibeMatch } from '@livingplus/shared';
+import {
+  cleanVibeAnswers,
+  cleanVibeSummary,
+  isGenderPolicy,
+  isPropertyType,
+  isValidPhone,
+  normalizeIndianPhone,
+  phoneVariants,
+  vibeMatch
+} from '@livingplus/shared';
 import { db } from '../../db/index.js';
 import { asSystem } from '../../db/context.js';
 import { featureFlags, notifyWhatsAppSafely } from '../../services/pg-notifications.js';
@@ -14,7 +23,7 @@ import { ACTIVE_RESIDENT_STATUSES, OWN_PROPERTY_BOOKING_MESSAGE, ownPropertyExcl
 import { INVALID_REQUEST, parseBody } from '../../utils/validate.js';
 import { logger } from '../../utils/logger.js';
 import { bookingRequestBody } from '../../validation/pg.schemas.js';
-import { cancelBookingBody, updateBookingStatusBody } from '../../validation/request.schemas.js';
+import { cancelBookingBody, ownerLeadBody, updateBookingStatusBody } from '../../validation/request.schemas.js';
 import { accessiblePropertyIds, canManageProperty, currentUser, ownStayPropertyIds, releaseExpiredBookingHolds, requestPropertyId } from './access.js';
 import { roommateAnswersByRoom } from './vibecheck.controller.js';
 
@@ -105,6 +114,7 @@ export const listProperties = async (req: Request, res: Response): Promise<any> 
   const search = String(req.query.search || '').trim();
   const locality = String(req.query.locality || '').trim();
   const genderPolicy = String(req.query.genderPolicy || '').trim();
+  const propertyType = String(req.query.propertyType || '').trim().toUpperCase();
 
   try {
     await releaseExpiredBookingHolds();
@@ -117,21 +127,24 @@ export const listProperties = async (req: Request, res: Response): Promise<any> 
         ...(scopedId ? { id: scopedId } : {}),
         ...(locality ? { locality: { contains: locality, mode: 'insensitive' } } : {}),
         ...(genderPolicy ? { genderPolicy: { in: [genderPolicy, 'ANY'] } } : {}),
+        ...(isPropertyType(propertyType) ? { propertyType } : {}),
         ...(search ? {
           OR: [
             { name: { contains: search, mode: 'insensitive' } },
             { locality: { contains: search, mode: 'insensitive' } },
-            { address: { contains: search, mode: 'insensitive' } }
+            { address: { contains: search, mode: 'insensitive' } },
+            { tagline: { contains: search, mode: 'insensitive' } }
           ]
         } : {})
       },
       include: {
         rooms: {
           where: { status: 'ACTIVE' },
-          include: { beds: { where: { status: 'AVAILABLE' } } }
+          include: { beds: { select: { id: true, label: true, status: true } } },
+          orderBy: { monthlyRent: 'asc' }
         }
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: [{ featured: 'desc' }, { createdAt: 'desc' }]
     });
 
     const verifiedOwners: Array<{ propertyId: string }> = await asSystem('listing badge: does the owner have a verified phone', () => db.pGPropertyAccess.findMany({
@@ -141,17 +154,157 @@ export const listProperties = async (req: Request, res: Response): Promise<any> 
     const verified = new Set(verifiedOwners.map((row) => row.propertyId));
     res.json(properties.map((property: any) => {
       const ownerPhone = String(property.contactPhone || '').replace(/\D/g, '');
+      const rooms = property.rooms.map((room: any) => {
+        const available = room.beds.filter((bed: any) => bed.status === 'AVAILABLE').map(({ id, label }: any) => ({ id, label }));
+        const totalBeds = room.beds.length;
+        const occupiedBeds = room.beds.filter((bed: any) => bed.status === 'OCCUPIED').length;
+        return {
+          ...room,
+          beds: available,
+          availableBeds: available.length,
+          totalBeds,
+          occupiedBeds
+        };
+      });
       return {
         ...property,
         ownerVerified: verified.has(property.id),
+        hasContactPhone: Boolean(ownerPhone),
         managerPhone: ownerPhone.length === 10 ? `91${ownerPhone}` : ownerPhone || null,
-        availableBeds: property.rooms.reduce((total: number, room: any) => total + room.beds.length, 0),
-        rooms: property.rooms.map((room: any) => ({ ...room, availableBeds: room.beds.length }))
+        availableBeds: rooms.reduce((total: number, room: any) => total + room.availableBeds, 0),
+        totalBeds: rooms.reduce((total: number, room: any) => total + room.totalBeds, 0),
+        rooms
       };
     }));
   } catch (error) {
     logger.error({ err: error }, 'PG property search error');
     res.status(500).json({ message: 'Failed to search properties' });
+  }
+};
+
+/** Full public PG overview by slug or id. Reveals full owner contact only to signed-in/verified visitors. */
+export const getPublicProperty = async (req: Request, res: Response): Promise<any> => {
+  const rawKey = String(req.params.slugOrId || '').trim();
+  if (!rawKey) return res.status(400).json({ message: 'Property slug or id is required' });
+
+  try {
+    await releaseExpiredBookingHolds();
+    const scopedId = requestPropertyId(req);
+    const property: any = await db.pGProperty.findFirst({
+      where: {
+        status: 'ACTIVE',
+        ...(scopedId ? { id: scopedId } : {}),
+        OR: [
+          { slug: rawKey.toLowerCase() },
+          { id: rawKey }
+        ]
+      },
+      include: {
+        rooms: {
+          where: { status: 'ACTIVE' },
+          include: { beds: { select: { id: true, label: true, status: true } } },
+          orderBy: { monthlyRent: 'asc' }
+        }
+      }
+    });
+    if (!property) return res.status(404).json({ message: 'PG property not found' });
+
+    const [ownerAccess, ownStayIds] = await Promise.all([
+      asSystem('public PG detail: owner name and phone verification badge', () =>
+        db.pGPropertyAccess.findFirst({
+          where: { propertyId: property.id, role: 'OWNER' },
+          include: { user: { select: { name: true, phoneVerifiedAt: true } } },
+          orderBy: { createdAt: 'asc' }
+        })
+      ),
+      ownStayPropertyIds(req)
+    ]);
+
+    const callerSignedIn = Boolean(currentUser(req) || guestPhoneFrom(req));
+    const ownerDigits = String(property.contactPhone || '').replace(/\D/g, '');
+    const normalizedPhone = ownerDigits.length === 10 ? `91${ownerDigits}` : ownerDigits || null;
+    const rooms = property.rooms.map((room: any) => {
+      const available = room.beds.filter((bed: any) => bed.status === 'AVAILABLE').map(({ id, label }: any) => ({ id, label }));
+      const totalBeds = room.beds.length;
+      const occupiedBeds = room.beds.filter((bed: any) => bed.status === 'OCCUPIED').length;
+      return {
+        ...room,
+        beds: available,
+        availableBeds: available.length,
+        totalBeds,
+        occupiedBeds
+      };
+    });
+
+    res.json({
+      ...property,
+      ownerName: ownerAccess?.user?.name ?? null,
+      ownerVerified: Boolean(ownerAccess?.user?.phoneVerifiedAt),
+      hasContactPhone: Boolean(normalizedPhone),
+      managerPhone: callerSignedIn ? normalizedPhone : null,
+      isOwnStay: ownStayIds.includes(property.id),
+      availableBeds: rooms.reduce((total: number, room: any) => total + room.availableBeds, 0),
+      totalBeds: rooms.reduce((total: number, room: any) => total + room.totalBeds, 0),
+      rooms
+    });
+  } catch (error) {
+    logger.error({ err: error }, 'PG public detail error');
+    res.status(500).json({ message: 'Failed to load PG details' });
+  }
+};
+
+/** Public inquiry submitted by a PG owner on the marketplace landing page for concierge onboarding. */
+export const createOwnerLead = async (req: Request, res: Response): Promise<any> => {
+  const input: any = parseBody(ownerLeadBody, req, res, INVALID_REQUEST);
+  if (!input) return;
+
+  const ownerName = String(input.ownerName || '').trim();
+  const propertyName = String(input.propertyName || '').trim();
+  const locality = String(input.locality || '').trim();
+  const phone = String(input.phone || '').trim();
+
+  if (!ownerName || !propertyName || !locality || !isValidPhone(phone)) {
+    return res.status(400).json({ message: 'Owner name, valid 10-digit phone, PG name, and locality are required' });
+  }
+
+  const normalizedPhone = normalizeIndianPhone(phone);
+  const propertyCount = Number.isInteger(Number(input.propertyCount)) && Number(input.propertyCount) >= 1 ? Number(input.propertyCount) : 1;
+  const totalRooms = input.totalRooms != null && input.totalRooms !== '' && Number.isFinite(Number(input.totalRooms)) ? Math.max(1, Math.round(Number(input.totalRooms))) : null;
+  const totalBeds = input.totalBeds != null && input.totalBeds !== '' && Number.isFinite(Number(input.totalBeds)) ? Math.max(1, Math.round(Number(input.totalBeds))) : null;
+  const startingRent = input.startingRent != null && input.startingRent !== '' && Number.isFinite(Number(input.startingRent)) ? Math.max(0, Number(input.startingRent)) : null;
+
+  try {
+    const lead = await db.ownerLead.create({
+      data: {
+        ownerName,
+        phone: normalizedPhone,
+        email: input.email ? String(input.email).trim() : null,
+        propertyName,
+        city: input.city ? String(input.city).trim() : 'Chennai',
+        locality,
+        address: input.address ? String(input.address).trim() : null,
+        propertyType: isPropertyType(String(input.propertyType || '').toUpperCase()) ? String(input.propertyType).toUpperCase() : 'PG',
+        genderPolicy: isGenderPolicy(String(input.genderPolicy || '').toUpperCase()) ? String(input.genderPolicy).toUpperCase() : 'ANY',
+        propertyCount,
+        totalRooms,
+        totalBeds,
+        startingRent,
+        amenities: Array.isArray(input.amenities) ? input.amenities.map((v: unknown) => String(v).trim()).filter(Boolean) : [],
+        notes: input.notes ? String(input.notes).trim() : null,
+        status: 'NEW'
+      }
+    });
+
+    const reference = `LEAD-${lead.id.slice(0, 8).toUpperCase()}`;
+    res.status(201).json({
+      id: lead.id,
+      reference,
+      status: lead.status,
+      message: 'Thanks! Our Living Plus onboarding team will call you shortly to collect photos, room details, and publish your PG.'
+    });
+  } catch (error) {
+    logger.error({ err: error }, 'Owner lead submission error');
+    res.status(500).json({ message: 'Could not submit your PG onboarding request' });
   }
 };
 

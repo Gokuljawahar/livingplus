@@ -863,9 +863,10 @@ export const toolCatalogue: Record<string, ToolExecutor> = {
     requiresConfirmation: true,
     roles: ['PG_OWNER', 'PG_WARDEN'],
     execute: async (actor, args = {}) => {
-      if (!actor.propertyIds.includes(String(args.property_id))) throw new Error('FORBIDDEN');
+      const propertyId = await resolveScopedPropertyId(actor, args.property_id);
+      if (!propertyId) throw new Error('FORBIDDEN');
       const expense = await createExpense(db, actor.userId, {
-        propertyId: String(args.property_id),
+        propertyId,
         category: typeof args.category === 'string' ? args.category : 'OTHER',
         amount: Number(args.amount),
         spentOn: typeof args.spent_on === 'string' ? args.spent_on : undefined,

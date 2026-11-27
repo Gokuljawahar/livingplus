@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 560" width="800" height="560">
+  <rect width="800" height="560" fill="#E7F5EE" opacity="0.5"/>
+  <rect y="390" width="800" height="170" fill="#E2E7EE"/>
+  <!-- Wall shelves -->
+  <rect x="110" y="100" width="240" height="14" rx="4" fill="#02224B"/>
+  <rect x="135" y="64" width="28" height="36" rx="3" fill="#FEB109"/>
+  <rect x="170" y="56" width="24" height="44" rx="3" fill="#0A3B75"/>
+  <rect x="202" y="68" width="30" height="32" rx="3" fill="#17734A"/>
+  <!-- Sofa -->
+  <rect x="100" y="260" width="340" height="135" rx="14" fill="#0A3B75"/>
+  <rect x="125" y="315" width="290" height="65" rx="8" fill="#FFFFFF" opacity="0.16"/>
+  <rect x="135" y="285" width="52" height="45" rx="8" fill="#FEB109"/>
+  <rect x="355" y="285" width="52" height="45" rx="8" fill="#FEB109"/>
+  <!-- Dining / coworking table -->
+  <rect x="495" y="275" width="225" height="18" rx="6" fill="#02224B"/>
+  <rect x="520" y="293" width="14" height="105" fill="#02224B"/>
+  <rect x="680" y="293" width="14" height="105" fill="#02224B"/>
+  <!-- Laptop & coffee -->
+  <rect x="550" y="242" width="75" height="33" rx="4" fill="#FFFFFF" stroke="#02224B" stroke-width="3"/>
+  <rect x="645" y="255" width="22" height="20" rx="4" fill="#FEB109"/>
+</svg>

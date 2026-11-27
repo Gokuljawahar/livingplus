@@ -5,6 +5,8 @@
 substitutions:
   _IMAGE: ''
   _VITE_GOOGLE_MAPS_API_KEY: ''
+  _VITE_RECAPTCHA_SITE_KEY: ''
+  _VITE_RECAPTCHA_ENTERPRISE: ''
 
 steps:
   - id: build
@@ -15,6 +17,10 @@ steps:
       - ${_IMAGE}
       - --build-arg
       - VITE_GOOGLE_MAPS_API_KEY=${_VITE_GOOGLE_MAPS_API_KEY}
+      - --build-arg
+      - VITE_RECAPTCHA_SITE_KEY=${_VITE_RECAPTCHA_SITE_KEY}
+      - --build-arg
+      - VITE_RECAPTCHA_ENTERPRISE=${_VITE_RECAPTCHA_ENTERPRISE}
       - --build-arg
       - VITE_SINGLE_HOST_MODE=true
       - .

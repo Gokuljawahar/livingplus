@@ -8,7 +8,7 @@ import api from '../api/axios';
 import A2uiSurface, { type A2uiAction, type A2uiMessage } from './a2ui/A2uiSurface';
 import { useAuth } from '../context/auth';
 import { OWNER_USER_KEY, RESIDENT_USER_KEY } from '../utils/session';
-import { blobToWav16k } from '../utils/audio';
+import { transcribeVoiceBlob, useVoiceRecorder } from '../hooks/useVoiceRecorder';
 
 function readStoredRole(key: string): string | null {
   try {
@@ -116,13 +116,9 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
   const [busy, setBusy] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const [photo, setPhoto] = useState<string | null>(null);
-  const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const stopTimerRef = useRef<number | null>(null);
 
   const applyResponse = (data: { sessionId?: string; reply: string; needsConfirmation?: { confirmationId: string; tool: string; preview: string }; ui?: A2uiMessage[] }, cancelConfirmationId?: string) => {
     if (data.sessionId) setSessionId(data.sessionId);
@@ -198,50 +194,10 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
     }
   };
 
-  const stopRecording = () => {
-    recorderRef.current?.stop();
-  };
-
-  const toggleRecording = async () => {
-    if (recording) {
-      stopRecording();
-      return;
-    }
-    if (!navigator.mediaDevices?.getUserMedia) {
-      toast.error('Voice recording is not supported in this browser');
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      chunksRef.current = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data.size) chunksRef.current.push(event.data);
-      };
-      recorder.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop());
-        setRecording(false);
-        if (stopTimerRef.current) window.clearTimeout(stopTimerRef.current);
-        void transcribeNote(new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' }));
-      };
-      recorderRef.current = recorder;
-      recorder.start();
-      setRecording(true);
-      stopTimerRef.current = window.setTimeout(stopRecording, MAX_RECORD_SECONDS * 1000);
-    } catch {
-      toast.error('Microphone access was denied');
-    }
-  };
-
   const transcribeNote = async (blob: Blob) => {
-    if (!blob.size) return;
     setTranscribing(true);
     try {
-      const wav = await blobToWav16k(blob);
-      const form = new FormData();
-      form.append('audio', wav, 'note.wav');
-      const response = await api.post('/pg/ai/transcribe', form);
-      const transcript = String(response.data?.transcript || '').trim();
+      const transcript = await transcribeVoiceBlob(blob);
       if (transcript) {
         setInput((current) => (current ? `${current} ${transcript}` : transcript));
       } else {
@@ -253,6 +209,14 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
       setTranscribing(false);
     }
   };
+
+  const voice = useVoiceRecorder({
+    maxSeconds: MAX_RECORD_SECONDS,
+    onRecorded: transcribeNote,
+    onError: (reason) => {
+      toast.error(reason === 'unsupported' ? 'Voice recording is not supported in this browser' : 'Microphone access was denied');
+    }
+  });
 
   // Opening from the global search is derived state, applied during render
   // (the documented alternative to a setState-in-effect).
@@ -414,7 +378,7 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
         </div>
       )}
 
-      {recording && (
+      {voice.recording && (
         <div className="flex items-center gap-2 border-t border-negative/30 bg-negative-bg p-2.5 text-xs font-semibold text-negative animate-pulse">
           <span className="h-2 w-2 rounded-full bg-negative" />
           <span>Recording voice note… tap stop to transcribe (max {MAX_RECORD_SECONDS}s)</span>
@@ -455,12 +419,12 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
         {!limited && (
           <button
             type="button"
-            onClick={() => void toggleRecording()}
-            aria-label={recording ? 'Stop recording' : 'Record a voice note'}
-            className={`p-2 rounded-[var(--radius-button)] transition-colors ${recording ? 'text-negative bg-negative-bg' : 'text-muted hover:text-navy-900 hover:bg-surface'}`}
-            title={recording ? 'Stop voice note' : 'Record voice note'}
+            onClick={() => void voice.toggle()}
+            aria-label={voice.recording ? 'Stop recording' : 'Record a voice note'}
+            className={`p-2 rounded-[var(--radius-button)] transition-colors ${voice.recording ? 'text-negative bg-negative-bg' : 'text-muted hover:text-navy-900 hover:bg-surface'}`}
+            title={voice.recording ? 'Stop voice note' : 'Record voice note'}
           >
-            {recording ? <Square className="h-4.5 w-4.5" /> : <Mic className="h-4.5 w-4.5" />}
+            {voice.recording ? <Square className="h-4.5 w-4.5" /> : <Mic className="h-4.5 w-4.5" />}
           </button>
         )}
         <button

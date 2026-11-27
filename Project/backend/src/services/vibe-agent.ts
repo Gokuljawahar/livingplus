@@ -210,7 +210,7 @@ export async function vibeInterviewTurn(
     const parts: Array<Record<string, unknown>> = [
       { text: `Conversation so far:\n${history || '(just started)'}\n\nHabits already known: ${known}\n\nThe person's new answer${input.audio ? ' is in the audio clip' : `: ${text}`}.` }
     ];
-    if (input.audio) parts.push({ inlineData: { mimeType: input.audio.mimeType, data: input.audio.data } });
+    if (input.audio) parts.push({ inlineData: { mimeType: input.audio.mimeType.split(';')[0] || 'audio/webm', data: input.audio.data } });
     raw = await generateStructured({ system: interviewInstruction(topics), parts, schema: interviewSchema, model: model! });
   }
   const parsed = interviewSchema.parse(raw);

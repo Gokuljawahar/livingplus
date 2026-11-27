@@ -9,12 +9,14 @@ import {
   checkOutTenant,
   createBookingRequest,
   createMaintenanceTicket,
+  createOwnerLead,
   createProperty,
   createPropertyStaff,
   createRentEntry,
   createRoom,
   deleteProperty,
   getPublicConfig,
+  getPublicProperty,
   listTenantStays,
   submitTenantNotice,
   cancelTenantNotice,
@@ -138,6 +140,8 @@ router.get('/owner/kitchen-forecast', authenticate, aiChatLimiter, validateQuery
 router.get('/sites', systemRoute('directory of PG resident sites (name and place only)', listPgSites));
 router.get('/sites/:slug', systemRoute('resident sites of unpublished PGs still resolve', getPgSite));
 router.get('/properties', optionalAuthenticate, listProperties);
+router.get('/properties/:slugOrId', optionalAuthenticate, getPublicProperty);
+router.post('/owner-leads', aiChatLimiter, systemRoute('public owner onboarding lead submission', createOwnerLead));
 // VibeCheck compares a visitor with residents of any published PG, so it reads across RLS by design;
 // it returns only scores and habit-level reasons.
 router.post('/properties/:propertyId/vibecheck', aiChatLimiter, validateBody(vibeCheckBody), systemRoute('VibeCheck scores a visitor against a published PG', vibeCheckProperty));

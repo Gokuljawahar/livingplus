@@ -5,7 +5,9 @@ import { useState } from 'react';
 import type { VibeAnswers } from '@livingplus/shared';
 
 const api = vi.hoisted(() => ({ post: vi.fn() }));
+const hybridAi = vi.hoisted(() => ({ extractVibeHabitsOnDevice: vi.fn() }));
 vi.mock('../api/axios', () => ({ default: api }));
+vi.mock('../ai/ai', () => hybridAi);
 import VibeProfileBuilder from './VibeProfileBuilder';
 
 function Harness() {
@@ -71,5 +73,32 @@ describe('VibeProfileBuilder (voice VibeCheck)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('tap the mic for each answer instead');
     expect(screen.getByText(/Studying or working these days\?/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tap to answer' })).toBeInTheDocument();
+  });
+
+  it('extracts VibeCheck habits privately on-device without sending free-text to the server', async () => {
+    hybridAi.extractVibeHabitsOnDevice.mockResolvedValueOnce({
+      data: {
+        answers: { sleep: 2, tidiness: 0, noise: 0 },
+        summary: 'Night owl who keeps the room spotless.'
+      },
+      source: 'on-device',
+      latencyMs: 95,
+      modeUsed: 'ONLY_ON_DEVICE'
+    });
+
+    render(<Harness />);
+    await userEvent.click(screen.getByRole('button', { name: /In your own words/i }));
+    expect(screen.getByText(/Your words stay on this device\. Only your habits are shared for matching\./)).toBeInTheDocument();
+
+    await userEvent.type(
+      screen.getByLabelText('Describe your daily routine'),
+      'I study past midnight, keep my desk neat, and always use headphones.'
+    );
+    await userEvent.click(screen.getByRole('button', { name: /Build habits privately/i }));
+
+    expect(hybridAi.extractVibeHabitsOnDevice).toHaveBeenCalledTimes(1);
+    expect(api.post).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Analysed on your device/)).toBeInTheDocument();
+    expect(screen.getByText('Night owl who keeps the room spotless.')).toBeInTheDocument();
   });
 });

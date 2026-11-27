@@ -59,7 +59,7 @@ export const createTenantTicket = async (req: Request, res: Response): Promise<a
   if (!input) return;
   const user = currentUser(req);
   const propertyId = requestPropertyId(req) || user?.propertyId;
-  const { tenantId, title, description, category } = input;
+  const { tenantId, title, description, category, aiPriority, safetyRisk, imageUrl } = input;
   if (!user || user.role !== 'PG_TENANT') return res.status(403).json({ message: 'Resident access is required' });
   if (!propertyId || (user.propertyId && user.propertyId !== propertyId)) {
     return res.status(403).json({ message: 'This resident session belongs to a different PG' });
@@ -73,6 +73,13 @@ export const createTenantTicket = async (req: Request, res: Response): Promise<a
   const allowedCategories = ['PLUMBING', 'ELECTRICAL', 'APPLIANCE', 'CLEANING', 'SAFETY', 'PEST', 'OTHER'];
   const ticketCategory = String(category || 'OTHER').toUpperCase();
   if (!allowedCategories.includes(ticketCategory)) return res.status(400).json({ message: 'Invalid maintenance category' });
+  const allowedPriorities = ['LOW', 'NORMAL', 'HIGH', 'URGENT'];
+  const normalizedAiPriority = String(aiPriority || '').toUpperCase();
+  const ticketPriority = safetyRisk === true || safetyRisk === 'true'
+    ? 'URGENT'
+    : allowedPriorities.includes(normalizedAiPriority)
+      ? normalizedAiPriority
+      : 'NORMAL';
 
   try {
     const account = await db.user.findUnique({ where: { id: user.id }, select: { phone: true } });
@@ -96,7 +103,8 @@ export const createTenantTicket = async (req: Request, res: Response): Promise<a
         title: title.trim(),
         description: description.trim(),
         category: ticketCategory,
-        priority: 'NORMAL'
+        priority: ticketPriority,
+        imageUrl: imageUrl?.trim() ? String(imageUrl).trim().slice(0, 1_000_000) : null
       }
     });
     res.status(201).json(ticket);

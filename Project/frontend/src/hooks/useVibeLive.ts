@@ -1,6 +1,7 @@
-// Live voice VibeCheck: streams the microphone to our server's Gemini Live
-// relay and plays Gemini's spoken replies. The mic is paused while Gemini is
-// speaking (half duplex), so it never hears and answers itself.
+// Live voice relay hook: requests native 16 kHz AudioContext + WebRTC AEC/NS/AGC,
+// streams full-duplex binary 16 kHz PCM16 frames to the @google/adk Gemini Live
+// relay so native server-side VAD handles barge-in cleanly, and plays 24 kHz
+// spoken replies with a 40 ms jitter buffer.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { createLiveProtocol, type LiveClientMessage, type VibeAnswers } from '@livingplus/shared';
@@ -10,9 +11,13 @@ const { parseLiveServerMessage } = createLiveProtocol(z);
 export type LiveStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'ended' | 'failed';
 export interface LiveTurn { role: 'assistant' | 'user'; text: string }
 export interface LiveHabits { answers: VibeAnswers; summary: string | null; done: boolean }
+export interface LiveAction { phase: 'proposed' | 'done' | 'cancelled' | 'failed'; summary: string }
+export interface LiveHandoff { target: 'rent' | 'bookings' | 'maintenance'; reason: string }
+export interface UseVibeLiveOptions { onActionDone?: (action: LiveAction) => void }
 
 const IN_RATE = 16000;
 const OUT_RATE = 24000;
+const JITTER_BUFFER_SEC = 0.04;
 
 export function toBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -20,32 +25,56 @@ export function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-/** Float samples at `rate` -> 16 kHz little-endian PCM16. */
+/** Float samples at `rate` -> anti-aliased box-averaged 16 kHz little-endian PCM16. */
 export function downsample(input: Float32Array, rate: number): Uint8Array {
+  if (rate <= IN_RATE || Math.abs(rate / IN_RATE - 1) < 0.01) {
+    const pcm = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i += 1) {
+      const sample = Math.max(-1, Math.min(1, input[i] ?? 0));
+      pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    }
+    return new Uint8Array(pcm.buffer);
+  }
   const ratio = rate / IN_RATE;
   const length = Math.floor(input.length / ratio);
   const pcm = new Int16Array(length);
   for (let i = 0; i < length; i += 1) {
-    const sample = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)] ?? 0));
+    const start = Math.floor(i * ratio);
+    const end = Math.min(input.length, Math.max(start + 1, Math.floor((i + 1) * ratio)));
+    let sum = 0;
+    for (let j = start; j < end; j += 1) sum += input[j] ?? 0;
+    const sample = Math.max(-1, Math.min(1, sum / (end - start)));
     pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
   }
   return new Uint8Array(pcm.buffer);
 }
 
-export function liveUrl(propertyId?: string): string {
-  const query = propertyId ? `?propertyId=${encodeURIComponent(propertyId)}` : '';
-  return `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/pg/vibecheck/live${query}`;
+function withBinaryParam(url: string): string {
+  if (/[?&]binary=1\b/.test(url)) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}binary=1`;
 }
 
-export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
+export function liveUrl(propertyId?: string): string {
+  const params = new URLSearchParams({ binary: '1' });
+  if (propertyId) params.set('propertyId', propertyId);
+  return `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/pg/vibecheck/live?${params.toString()}`;
+}
+
+export function useVibeLive(onHabits: (habits: LiveHabits) => void, options?: UseVibeLiveOptions) {
   const [status, setStatus] = useState<LiveStatus>('idle');
   const [turns, setTurns] = useState<LiveTurn[]>([]);
   const [error, setError] = useState('');
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
+  const [actions, setActions] = useState<LiveAction[]>([]);
+  const [handoff, setHandoff] = useState<LiveHandoff | null>(null);
+
   const socketRef = useRef<WebSocket | null>(null);
   const micRef = useRef<{ stream: MediaStream; ctx: AudioContext; node: AudioWorkletNode } | null>(null);
   const playRef = useRef<{ ctx: AudioContext; next: number; sources: AudioBufferSourceNode[] } | null>(null);
   const habitsRef = useRef(onHabits);
+  const optionsRef = useRef(options);
   useEffect(() => { habitsRef.current = onHabits; }, [onHabits]);
+  useEffect(() => { optionsRef.current = options; }, [options]);
   const doneRef = useRef(false);
 
   const appendText = (role: LiveTurn['role'], text: string) => {
@@ -56,34 +85,29 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     });
   };
 
-  const stopPlayback = () => {
+  const stopPlayback = useCallback(() => {
     const play = playRef.current;
     if (!play) return;
     play.sources.forEach((source) => { try { source.stop(); } catch { /* already stopped */ } });
     play.sources = [];
     play.next = play.ctx.currentTime;
-  };
+  }, []);
 
-  const speakingNow = () => {
-    const play = playRef.current;
-    return Boolean(play && play.next > play.ctx.currentTime + 0.05);
-  };
-
-  const playChunk = (base64: string) => {
+  const playPcm16 = (pcmBuffer: ArrayBuffer) => {
     const play = playRef.current;
     if (!play) return;
     if (play.ctx.state === 'suspended') void play.ctx.resume();
-    const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
-    const samples = new Int16Array(bytes.buffer, 0, Math.floor(bytes.length / 2));
+    const samples = new Int16Array(pcmBuffer, 0, Math.floor(pcmBuffer.byteLength / 2));
+    if (!samples.length) return;
     const buffer = play.ctx.createBuffer(1, samples.length, OUT_RATE);
     const channel = buffer.getChannelData(0);
     for (let i = 0; i < samples.length; i += 1) channel[i] = (samples[i] ?? 0) / 0x8000;
     const source = play.ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(play.ctx.destination);
-    const start = Math.max(play.ctx.currentTime + 0.02, play.next);
-    source.start(start);
-    play.next = start + buffer.duration;
+    const startAt = Math.max(play.ctx.currentTime + JITTER_BUFFER_SEC, play.next);
+    source.start(startAt);
+    play.next = startAt + buffer.duration;
     play.sources.push(source);
     source.onended = () => { if (playRef.current) playRef.current.sources = playRef.current.sources.filter((item) => item !== source); };
   };
@@ -102,7 +126,6 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     }
     const play = playRef.current;
     if (play) {
-      // Let a closing line finish before releasing the speaker.
       const wait = Math.max(0, (play.next - play.ctx.currentTime) * 1000);
       window.setTimeout(() => { void play.ctx.close(); }, wait + 200);
       playRef.current = null;
@@ -115,12 +138,17 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
   const start = useCallback(async (propertyId?: string, url?: string): Promise<boolean> => {
     setError('');
     setTurns([]);
+    setLatencyMs(null);
+    setActions([]);
+    setHandoff(null);
     doneRef.current = false;
     if (typeof WebSocket === 'undefined' || !navigator.mediaDevices?.getUserMedia) return false;
     setStatus('connecting');
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
+      });
     } catch {
       setStatus('failed');
       setError('Microphone access was blocked. Allow microphone access in your browser and try again.');
@@ -130,7 +158,13 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     const playCtx = new Ctor();
     void playCtx.resume();
     playRef.current = { ctx: playCtx, next: 0, sources: [] };
-    const micCtx = new Ctor();
+    let micCtx: AudioContext;
+    try {
+      micCtx = new Ctor({ sampleRate: IN_RATE });
+    } catch {
+      micCtx = new Ctor();
+    }
+    if (micCtx.state === 'suspended') void micCtx.resume();
     if (!micCtx.audioWorklet) {
       stream.getTracks().forEach((track) => track.stop());
       void micCtx.close();
@@ -143,7 +177,9 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     try {
       await micCtx.audioWorklet.addModule('/pcm-capture-worklet.js');
       const source = micCtx.createMediaStreamSource(stream);
-      node = new AudioWorkletNode(micCtx, 'pcm-capture-processor');
+      node = new AudioWorkletNode(micCtx, 'pcm-capture-processor', {
+        processorOptions: { targetSampleRate: IN_RATE }
+      });
       source.connect(node);
       micRef.current = { stream, ctx: micCtx, node };
     } catch {
@@ -156,10 +192,23 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     }
 
     const opened = await new Promise<boolean>((resolve) => {
-      const socket = new WebSocket(url ?? liveUrl(propertyId));
+      const socket = new WebSocket(withBinaryParam(url ?? liveUrl(propertyId)));
+      socket.binaryType = 'arraybuffer';
       socketRef.current = socket;
       const timeout = window.setTimeout(() => resolve(false), 12000);
       socket.onmessage = (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          playPcm16(event.data);
+          setStatus('speaking');
+          return;
+        }
+        if (typeof Blob !== 'undefined' && event.data instanceof Blob) {
+          void event.data.arrayBuffer().then((buf) => {
+            playPcm16(buf);
+            setStatus('speaking');
+          });
+          return;
+        }
         const message = parseLiveServerMessage(String(event.data));
         if (!message) return;
         switch (message.type) {
@@ -168,10 +217,12 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
             setStatus('listening');
             resolve(true);
             break;
-          case 'audio':
-            playChunk(message.data);
+          case 'audio': {
+            const bytes = Uint8Array.from(atob(message.data), (char) => char.charCodeAt(0));
+            playPcm16(bytes.buffer);
             setStatus('speaking');
             break;
+          }
           case 'said':
             appendText('assistant', message.text);
             break;
@@ -180,6 +231,19 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
             break;
           case 'interrupted':
             stopPlayback();
+            setStatus('listening');
+            break;
+          case 'latency':
+            setLatencyMs(Math.round(message.ms));
+            break;
+          case 'action': {
+            const nextAction: LiveAction = { phase: message.phase, summary: message.summary };
+            setActions((current) => [...current, nextAction]);
+            if (message.phase === 'done') optionsRef.current?.onActionDone?.(nextAction);
+            break;
+          }
+          case 'handoff':
+            setHandoff({ target: message.target, reason: message.reason });
             break;
           case 'turn': {
             const wait = playRef.current ? Math.max(0, (playRef.current.next - playRef.current.ctx.currentTime) * 1000) : 0;
@@ -212,14 +276,18 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
       setStatus('failed');
       return false;
     }
-    node.port.onmessage = (event: MessageEvent<Float32Array>) => {
+    node.port.onmessage = (event: MessageEvent<ArrayBuffer | Float32Array>) => {
       const socket = socketRef.current;
-      if (!socket || socket.readyState !== WebSocket.OPEN || speakingNow()) return;
-      const frame: LiveClientMessage = { type: 'audio', data: toBase64(downsample(event.data, micCtx.sampleRate)) };
-      socket.send(JSON.stringify(frame));
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      if (event.data instanceof ArrayBuffer) {
+        socket.send(event.data);
+      } else {
+        const bytes = downsample(event.data, micCtx.sampleRate);
+        socket.send(bytes.buffer as ArrayBuffer);
+      }
     };
     return true;
-  }, [stop]);
+  }, [stop, stopPlayback]);
 
   const sendText = useCallback((text: string) => {
     const socket = socketRef.current;
@@ -229,9 +297,19 @@ export function useVibeLive(onHabits: (habits: LiveHabits) => void) {
     const frame: LiveClientMessage = { type: 'text', text: text.trim() };
     socket.send(JSON.stringify(frame));
     return true;
-  }, []);
+  }, [stopPlayback]);
+
+  const interrupt = useCallback(() => {
+    stopPlayback();
+    const socket = socketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      const frame: LiveClientMessage = { type: 'pause' };
+      socket.send(JSON.stringify(frame));
+      setStatus('listening');
+    }
+  }, [stopPlayback]);
 
   const end = useCallback(() => { stop(); setStatus('ended'); }, [stop]);
 
-  return { status, turns, error, start, sendText, end };
+  return { status, turns, error, latencyMs, actions, handoff, start, sendText, interrupt, end };
 }
