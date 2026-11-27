@@ -8,6 +8,7 @@ import { Check, Loader2 } from 'lucide-react';
 import { type VibeAnswers, type VibeMatch } from '@livingplus/shared';
 import api from '../api/axios';
 import VibeProfileBuilder from './VibeProfileBuilder';
+import { usePlatformCatalog } from '../hooks/usePlatformCatalog';
 import { hasKeyHabits } from '../utils/vibe-storage';
 import { apiErrorMessage } from '../utils/api-error';
 import { shortDate } from '../utils/money';
@@ -23,11 +24,12 @@ export default function ResidentVibeCard({ tenantId, onRoomChange }: { tenantId:
     queryKey,
     queryFn: async (): Promise<VibeState> => (await api.get(`/pg/tenant/${tenantId}/vibe-match`)).data
   });
+  const { catalog } = usePlatformCatalog();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<VibeAnswers>({});
   const [draftSummary, setDraftSummary] = useState('');
   const [saving, setSaving] = useState(false);
-  const complete = hasKeyHabits(draft);
+  const complete = hasKeyHabits(draft, catalog.vibeQuestions.length ? catalog.vibeQuestions : undefined);
 
   const startEditing = () => {
     setDraft(data?.answers ?? {});

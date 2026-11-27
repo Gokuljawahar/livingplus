@@ -31,7 +31,8 @@ export const ROUTES = {
   adminLogin: '/admin/login',
   adminLeads: '/admin/leads',
   adminOnboard: '/admin/onboard',
-  adminProperties: '/admin/properties'
+  adminProperties: '/admin/properties',
+  adminCatalog: '/admin/catalog'
 } as const;
 
 const RESIDENT_SITE = /^\/stay\/([a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?)(?:\/|$)/;

@@ -1,20 +1,21 @@
 // Optional services a PG can switch on (the "modular owner console"), shared by
-// the API (validation) and the web app (forms). Prices are per order in rupees.
+// the API (validation) and the web app (forms). Slot catalogs are provisioned
+// dynamically in PostgreSQL (`PlatformCatalog.mealSlots` & `cleaningSlots`).
 
 export const MEAL_SLOTS = ['BREAKFAST', 'LUNCH', 'DINNER'] as const;
 export const CLEANING_SLOTS = ['MORNING', 'AFTERNOON', 'EVENING'] as const;
 export const SERVICE_ORDER_TYPES = ['MEAL', 'HOUSEKEEPING'] as const;
-export type MealSlot = (typeof MEAL_SLOTS)[number];
-export type CleaningSlot = (typeof CLEANING_SLOTS)[number];
+export type MealSlot = string;
+export type CleaningSlot = string;
 export type ServiceOrderType = (typeof SERVICE_ORDER_TYPES)[number];
 
-export const SLOT_LABELS: Record<MealSlot | CleaningSlot, string> = {
+export const SLOT_LABELS: Record<string, string> = {
   BREAKFAST: 'Breakfast', LUNCH: 'Lunch', DINNER: 'Dinner',
   MORNING: 'Morning (8–12)', AFTERNOON: 'Afternoon (12–4)', EVENING: 'Evening (4–8)'
 };
 
 export interface ServiceSettings {
-  mealOrders: { enabled: boolean; prices: Record<MealSlot, number> };
+  mealOrders: { enabled: boolean; prices: Record<string, number> };
   housekeeping: { enabled: boolean; price: number };
   /** Guests can compare habits with residents before requesting a bed. */
   vibeCheck: boolean;
@@ -37,18 +38,23 @@ const price = (value: unknown, fallback: number): number => {
   return Number.isFinite(n) && n >= 0 && n <= 10000 ? Math.round(n) : fallback;
 };
 
-/** Fills defaults and drops anything unknown or invalid. */
-export function cleanServiceSettings(input: unknown): ServiceSettings {
+/** Fills defaults and preserves dynamic meal slot prices. */
+export function cleanServiceSettings(input: unknown, mealSlots: readonly string[] = MEAL_SLOTS): ServiceSettings {
   const raw = (input && typeof input === 'object' ? input : {}) as Record<string, any>;
   const defaults = DEFAULT_SERVICE_SETTINGS;
+  const prices: Record<string, number> = {};
+  for (const slot of mealSlots) {
+    prices[slot] = price(raw.mealOrders?.prices?.[slot], defaults.mealOrders.prices[slot] ?? 0);
+  }
+  if (raw.mealOrders?.prices && typeof raw.mealOrders.prices === 'object') {
+    for (const [slotKey, val] of Object.entries(raw.mealOrders.prices)) {
+      if (!(slotKey in prices)) prices[slotKey] = price(val, 0);
+    }
+  }
   return {
     mealOrders: {
       enabled: raw.mealOrders?.enabled === true,
-      prices: {
-        BREAKFAST: price(raw.mealOrders?.prices?.BREAKFAST, defaults.mealOrders.prices.BREAKFAST),
-        LUNCH: price(raw.mealOrders?.prices?.LUNCH, defaults.mealOrders.prices.LUNCH),
-        DINNER: price(raw.mealOrders?.prices?.DINNER, defaults.mealOrders.prices.DINNER)
-      }
+      prices
     },
     housekeeping: { enabled: raw.housekeeping?.enabled === true, price: price(raw.housekeeping?.price, defaults.housekeeping.price) },
     vibeCheck: raw.vibeCheck !== false,
@@ -56,5 +62,10 @@ export function cleanServiceSettings(input: unknown): ServiceSettings {
   };
 }
 
-export const isSlotFor = (type: string, slot: string): boolean =>
-  type === 'MEAL' ? (MEAL_SLOTS as readonly string[]).includes(slot) : type === 'HOUSEKEEPING' ? (CLEANING_SLOTS as readonly string[]).includes(slot) : false;
+export const isSlotFor = (
+  type: string,
+  slot: string,
+  mealSlots: readonly string[] = MEAL_SLOTS,
+  cleaningSlots: readonly string[] = CLEANING_SLOTS
+): boolean =>
+  type === 'MEAL' ? mealSlots.includes(slot) : type === 'HOUSEKEEPING' ? cleaningSlots.includes(slot) : false;

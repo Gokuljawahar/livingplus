@@ -1,7 +1,7 @@
 // Form schemas (Zod) for react-hook-form. They mirror the API's rules, so
 // mistakes show next to the field before a request is sent.
 import { z } from 'zod';
-import { BLOOD_GROUPS, LIMITS, MESSAGES, PATTERNS, STAFF_ROLES, isValidPhone, isValidUpiId } from '@livingplus/shared';
+import { LIMITS, MESSAGES, PATTERNS, STAFF_ROLES, isValidPhone, isValidUpiId } from '@livingplus/shared';
 
 export const loginSchema = z.object({
   // Mobile number or admin username (the API field is named "email").
@@ -73,7 +73,7 @@ export const residentProfileSchema = z.object({
   institutionOrEmployer: z.string().max(LIMITS.profileText),
   emergencyName: z.string().max(LIMITS.profileText),
   emergencyPhone: z.string().max(LIMITS.emergencyPhone),
-  bloodGroup: z.union([z.literal(''), z.enum(BLOOD_GROUPS)]),
+  bloodGroup: z.string().max(10),
   kycType: z.string(),
   foodOptOut: z.boolean()
 });

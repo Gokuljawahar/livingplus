@@ -15,6 +15,7 @@ import {
   createRentEntry,
   createRoom,
   deleteProperty,
+  getPublicCatalog,
   getPublicConfig,
   getPublicProperty,
   listTenantStays,
@@ -111,6 +112,7 @@ const router = Router();
 
 
 router.get('/config', getPublicConfig);
+router.get('/catalog', systemRoute('public dynamic platform catalog read', getPublicCatalog));
 router.get('/ai/status', getAiStatus);
 router.post('/ai/chat', optionalAuthenticate, aiChatLimiter, validateBody(aiChatBody), postChat);
 router.post('/ai/transcribe', optionalAuthenticate, aiVoiceLimiter, voiceUpload.single('audio'), postTranscribe);

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { BLOOD_GROUPS, KYC_TYPES } from '@livingplus/shared';
+import { usePlatformCatalog } from '../../hooks/usePlatformCatalog';
 
 const tenantEditSchema = z.object({
   permanentAddress: z.string().max(500),
@@ -29,6 +29,7 @@ interface Props {
 }
 
 export default function TenantEditForm({ initial, saving, onSubmit }: Props) {
+  const { catalog } = usePlatformCatalog();
   const [kycFile, setKycFile] = useState<File | null>(null);
   const { register, handleSubmit } = useForm<TenantEditValues>({
     resolver: zodResolver(tenantEditSchema),
@@ -52,11 +53,11 @@ export default function TenantEditForm({ initial, saving, onSubmit }: Props) {
       <input {...register('emergencyPhone')} placeholder="Emergency contact phone" className={fieldCls} />
       <select {...register('bloodGroup')} className={fieldCls}>
         <option value="">Blood group</option>
-        {BLOOD_GROUPS.map((group) => <option key={group} value={group}>{group}</option>)}
+        {catalog.bloodGroups.map((group) => <option key={group} value={group}>{group}</option>)}
       </select>
       <select {...register('kycType')} className={fieldCls}>
         <option value="">KYC document type</option>
-        {KYC_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+        {catalog.kycTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
       </select>
       <input
         type="file"

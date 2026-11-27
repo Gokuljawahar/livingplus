@@ -1,6 +1,5 @@
 // Validation rules shared by the LivingPlus API and frontend: one source for
-// patterns, limits, allowed values and the messages users see. Each app wraps
-// these in its own Zod schemas; this package has no dependencies.
+// patterns, limits, and dynamic catalog validation helpers.
 export const PATTERNS = {
     /** UPI virtual payment address, e.g. "sunrisepg@okicici". */
     upiId: /^[a-zA-Z0-9._-]{2,100}@[a-zA-Z0-9.-]{2,60}$/,
@@ -39,10 +38,9 @@ export const isValidPhone = (value) => phoneDigits(value).length >= LIMITS.phone
 export const isValidUpiId = (value) => PATTERNS.upiId.test(value.trim());
 export const isStrongPassword = (value) => PATTERNS.strongPassword.test(value);
 export const isYearMonth = (value) => PATTERNS.yearMonth.test(value);
-const includes = (list, value) => list.includes(value);
-export const isBloodGroup = (value) => includes(BLOOD_GROUPS, value);
-export const isKycType = (value) => includes(KYC_TYPES, value);
-export const isGenderPolicy = (value) => includes(GENDER_POLICIES, value);
+export const isBloodGroup = (value, allowed = BLOOD_GROUPS) => allowed.includes(value);
+export const isKycType = (value, allowed = KYC_TYPES) => allowed.includes(value);
+export const isGenderPolicy = (value, allowed = GENDER_POLICIES) => allowed.includes(value);
 export * from './vibecheck.js';
 export * from './services.js';
 export * from './staff.js';
@@ -50,3 +48,4 @@ export * from './places.js';
 export * from './format.js';
 export * from './live-protocol.js';
 export * from './marketplace.js';
+export * from './catalog.js';

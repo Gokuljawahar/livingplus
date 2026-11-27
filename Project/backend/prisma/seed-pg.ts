@@ -1,6 +1,11 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import {
+  INITIAL_PLATFORM_CATALOG_SEEDS,
+  PLATFORM_CATALOG_DESCRIPTIONS,
+  PLATFORM_CATALOG_KEYS
+} from '@livingplus/shared';
 
 const prisma = new PrismaClient() as any;
 
@@ -923,6 +928,17 @@ async function seedLivelyDemo(ownerId: string | null) {
     { id: 'pg-demo-log-11', propertyId: northstar, actorId: ownerId, action: 'TENANT_CHECKED_IN', entityType: 'PGTenant', entityId: 'pg-demo-ns-priya', detail: 'Priya Nair · Room 402, Bed 1', createdAt: at(1, 17) }
   ];
   await prisma.pHAuditLog.createMany({ data: activity, skipDuplicates: true });
+  for (const key of PLATFORM_CATALOG_KEYS) {
+    await prisma.platformCatalog.upsert({
+      where: { key },
+      update: {},
+      create: {
+        key,
+        description: PLATFORM_CATALOG_DESCRIPTIONS[key],
+        data: INITIAL_PLATFORM_CATALOG_SEEDS[key] as any
+      }
+    });
+  }
 }
 
 main()

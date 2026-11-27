@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { cleanServiceSettings, cleanVibeAnswers, cleanVibeSummary, type VibeAnswers, vibeTopicsFor } from '@livingplus/shared';
 import { db } from '../../db/index.js';
 import { logger } from '../../utils/logger.js';
+import { getPlatformCatalog } from '../../services/platform-catalog.js';
 import { buildVibeProfile, scoreVibeRooms, vibeInterviewTurn, type VibeInterviewerDeps, type VibeMatcherDeps, type VibeProfilerDeps } from '../../services/vibe-agent.js';
 import { currentUser, ownStay, requestPropertyId } from './access.js';
 
@@ -21,12 +22,15 @@ export async function roommateAnswersByRoom(roomIds: string[], excludeTenantId?:
 export async function roommateVibesByRoom(roomIds: string[], excludeTenantId?: string): Promise<Map<string, { answers: VibeAnswers[]; summaries: string[] }>> {
   const byRoom = new Map<string, { answers: VibeAnswers[]; summaries: string[] }>();
   if (!roomIds.length) return byRoom;
-  const tenants = await db.pGTenant.findMany({
-    where: { status: { in: VIBE_ROOMMATE_STATUSES }, bed: { roomId: { in: [...new Set(roomIds)] } }, ...(excludeTenantId ? { id: { not: excludeTenantId } } : {}) },
-    select: { vibeAnswers: true, vibeSummary: true, bed: { select: { roomId: true } } }
-  });
+  const [tenants, catalog] = await Promise.all([
+    db.pGTenant.findMany({
+      where: { status: { in: VIBE_ROOMMATE_STATUSES }, bed: { roomId: { in: [...new Set(roomIds)] } }, ...(excludeTenantId ? { id: { not: excludeTenantId } } : {}) },
+      select: { vibeAnswers: true, vibeSummary: true, bed: { select: { roomId: true } } }
+    }),
+    getPlatformCatalog()
+  ]);
   for (const tenant of tenants) {
-    const answers = cleanVibeAnswers(tenant.vibeAnswers);
+    const answers = cleanVibeAnswers(tenant.vibeAnswers, catalog.vibeQuestions);
     if (!answers || !tenant.bed) continue;
     const room = byRoom.get(tenant.bed.roomId) ?? { answers: [], summaries: [] };
     room.answers.push(answers);
@@ -105,7 +109,8 @@ export const vibeInterviewStep = createVibeInterviewStepHandler();
  */
 export function createVibeCheckPropertyHandler(deps: VibeMatcherDeps = {}) {
   return async (req: Request, res: Response): Promise<any> => {
-    const answers = cleanVibeAnswers(req.body?.answers);
+    const { vibeQuestions } = await getPlatformCatalog();
+    const answers = cleanVibeAnswers(req.body?.answers, vibeQuestions);
     if (!answers) return res.status(400).json({ message: 'Answer at least one VibeCheck question' });
     try {
       const scopedId = requestPropertyId(req);
@@ -142,7 +147,8 @@ export const vibeCheckProperty = createVibeCheckPropertyHandler();
 /** Residents answer VibeCheck so future roommates can match with them. */
 export const saveTenantVibe = async (req: Request, res: Response): Promise<any> => {
   if (!currentUser(req)) return res.status(401).json({ message: 'Unauthorized' });
-  const answers = cleanVibeAnswers(req.body?.answers);
+  const { vibeQuestions } = await getPlatformCatalog();
+  const answers = cleanVibeAnswers(req.body?.answers, vibeQuestions);
   if (!answers) return res.status(400).json({ message: 'Answer at least one VibeCheck question' });
   try {
     const tenant = await ownStay(req, String(req.params.tenantId));
@@ -162,7 +168,8 @@ export const getTenantVibeMatch = async (req: Request, res: Response): Promise<a
   try {
     const tenant = await ownStay(req, String(req.params.tenantId));
     if (!tenant) return res.status(404).json({ message: 'Stay not found' });
-    const answers = cleanVibeAnswers(tenant.vibeAnswers);
+    const { vibeQuestions } = await getPlatformCatalog();
+    const answers = cleanVibeAnswers(tenant.vibeAnswers, vibeQuestions);
     const roomId = tenant.bed?.roomId;
     const vibes = roomId ? (await roommateVibesByRoom([roomId], tenant.id)).get(roomId) : undefined;
     const match = answers && roomId

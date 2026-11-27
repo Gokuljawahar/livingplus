@@ -1,6 +1,5 @@
 // Validation rules shared by the LivingPlus API and frontend: one source for
-// patterns, limits, allowed values and the messages users see. Each app wraps
-// these in its own Zod schemas; this package has no dependencies.
+// patterns, limits, and dynamic catalog validation helpers.
 
 export const PATTERNS = {
   /** UPI virtual payment address, e.g. "sunrisepg@okicici". */
@@ -27,11 +26,11 @@ export const PAYMENT_METHODS = ['CASH', 'NEFT', 'UPI', 'OTHER'] as const;
 export const EXPENSE_CATEGORIES = ['FOOD', 'STAFF', 'MAINTENANCE', 'UTILITIES', 'OTHER'] as const;
 export const GENDER_POLICIES = ['ANY', 'MEN', 'WOMEN'] as const;
 
-export type BloodGroup = (typeof BLOOD_GROUPS)[number];
-export type KycType = (typeof KYC_TYPES)[number];
-export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
-export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
-export type GenderPolicy = (typeof GENDER_POLICIES)[number];
+export type BloodGroup = string;
+export type KycType = string;
+export type PaymentMethod = string;
+export type ExpenseCategory = string;
+export type GenderPolicy = string;
 
 export const MESSAGES = {
   upiId: 'Enter a valid UPI ID',
@@ -51,10 +50,9 @@ export const isValidUpiId = (value: string): boolean => PATTERNS.upiId.test(valu
 export const isStrongPassword = (value: string): boolean => PATTERNS.strongPassword.test(value);
 export const isYearMonth = (value: string): boolean => PATTERNS.yearMonth.test(value);
 
-const includes = <T extends string>(list: readonly T[], value: string): value is T => (list as readonly string[]).includes(value);
-export const isBloodGroup = (value: string): value is BloodGroup => includes(BLOOD_GROUPS, value);
-export const isKycType = (value: string): value is KycType => includes(KYC_TYPES, value);
-export const isGenderPolicy = (value: string): value is GenderPolicy => includes(GENDER_POLICIES, value);
+export const isBloodGroup = (value: string, allowed: readonly string[] = BLOOD_GROUPS): value is BloodGroup => allowed.includes(value);
+export const isKycType = (value: string, allowed: readonly string[] = KYC_TYPES): value is KycType => allowed.includes(value);
+export const isGenderPolicy = (value: string, allowed: readonly string[] = GENDER_POLICIES): value is GenderPolicy => allowed.includes(value);
 
 export * from './vibecheck.js';
 export * from './services.js';
@@ -63,3 +61,4 @@ export * from './places.js';
 export * from './format.js';
 export * from './live-protocol.js';
 export * from './marketplace.js';
+export * from './catalog.js';

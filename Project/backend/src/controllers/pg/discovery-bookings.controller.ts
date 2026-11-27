@@ -26,8 +26,18 @@ import { bookingRequestBody } from '../../validation/pg.schemas.js';
 import { cancelBookingBody, ownerLeadBody, updateBookingStatusBody } from '../../validation/request.schemas.js';
 import { accessiblePropertyIds, canManageProperty, currentUser, ownStayPropertyIds, releaseExpiredBookingHolds, requestPropertyId } from './access.js';
 import { roommateAnswersByRoom } from './vibecheck.controller.js';
+import { getPlatformCatalog } from '../../services/platform-catalog.js';
 
 const SITE_SELECT = { slug: true, name: true, locality: true, city: true } as const;
+
+export const getPublicCatalog = async (_req: Request, res: Response): Promise<any> => {
+  try {
+    res.json(await getPlatformCatalog());
+  } catch (error) {
+    logger.error({ err: error }, 'Public platform catalog fetch error');
+    res.status(500).json({ message: 'Failed to load platform catalog' });
+  }
+};
 
 export const getPublicConfig = async (_req: Request, res: Response): Promise<any> => {
   const provider = otpProvider();

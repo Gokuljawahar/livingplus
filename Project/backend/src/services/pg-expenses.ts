@@ -3,6 +3,7 @@
 // AI layer may only propose entries through the log_expense tool.
 import { logAudit } from './pg-audit.js';
 import { EXPENSE_CATEGORIES, isYearMonth } from '@livingplus/shared';
+import { getPlatformCatalog } from './platform-catalog.js';
 import { periodRange } from '../utils/app-time.js';
 
 export { EXPENSE_CATEGORIES };
@@ -23,20 +24,21 @@ export interface ValidExpense {
   note: string | null;
 }
 
-export function validateExpenseInput(input: ExpenseInput): ValidExpense {
+export function validateExpenseInput(input: ExpenseInput, allowedCategories: readonly string[] = EXPENSE_CATEGORIES): ValidExpense {
   const propertyId = String(input.propertyId || '').trim();
   if (!propertyId) throw new Error('INVALID_PROPERTY');
   const amount = Number(input.amount);
   if (!Number.isFinite(amount) || amount <= 0 || amount > 10000000) throw new Error('INVALID_AMOUNT');
   const category = String(input.category || 'OTHER').trim().toUpperCase();
-  if (!EXPENSE_CATEGORIES.includes(category as (typeof EXPENSE_CATEGORIES)[number])) throw new Error('INVALID_CATEGORY');
+  if (!allowedCategories.includes(category)) throw new Error('INVALID_CATEGORY');
   const spentOn = input.spentOn ? new Date(String(input.spentOn)) : new Date();
   if (Number.isNaN(spentOn.getTime())) throw new Error('INVALID_DATE');
   return { propertyId, category, amount, spentOn, note: String(input.note || '').trim().slice(0, 500) || null };
 }
 
 export async function createExpense(db: any, actorId: string | null, input: ExpenseInput): Promise<any> {
-  const valid = validateExpenseInput(input);
+  const catalog = await getPlatformCatalog();
+  const valid = validateExpenseInput(input, catalog.expenseCategories.map((c) => c.value));
   const property = await db.pGProperty.findFirst({ where: { id: valid.propertyId, status: 'ACTIVE' }, select: { id: true, name: true } });
   if (!property) throw new Error('PROPERTY_NOT_FOUND');
   const expense = await db.pGExpense.create({

@@ -4,17 +4,18 @@ import { useState, Fragment } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Loader2 } from 'lucide-react';
-import { MEAL_SLOTS, SLOT_LABELS, type ServiceSettings } from '@livingplus/shared';
+import { MEAL_SLOTS, SLOT_LABELS, type CatalogOptionItem, type ServiceSettings } from '@livingplus/shared';
 import api from '../api/axios';
+import { labelFromCatalog, usePlatformCatalog } from '../hooks/usePlatformCatalog';
 import StatusPill from './ui/StatusPill';
 import { apiErrorMessage } from '../utils/api-error';
 import { rupees } from '../utils/money';
 
-type Order = { id: string; type: 'MEAL' | 'HOUSEKEEPING'; slot: keyof typeof SLOT_LABELS; quantity: number; unitPrice: number; status: string; notes?: string | null;
+type Order = { id: string; type: 'MEAL' | 'HOUSEKEEPING'; slot: string; quantity: number; unitPrice: number; status: string; notes?: string | null;
   tenant: { name: string; bed?: { label: string; room: { roomNumber: string } } | null }; property: { name: string } };
 type Data = { date: string; orders: Order[]; mealCounts: Record<string, number>; properties: { id: string; name: string; settings: ServiceSettings }[] };
 
-function SettingsCard({ property, onSaved }: { property: Data['properties'][number]; onSaved: () => void }) {
+function SettingsCard({ property, mealSlots, onSaved }: { property: Data['properties'][number]; mealSlots: readonly CatalogOptionItem[]; onSaved: () => void }) {
   const [draft, setDraft] = useState<ServiceSettings>(property.settings);
   const [saving, setSaving] = useState(false);
   const save = async () => {
@@ -52,7 +53,7 @@ function SettingsCard({ property, onSaved }: { property: Data['properties'][numb
           {toggle('Meal orders', draft.mealOrders.enabled, (enabled) => setDraft({ ...draft, mealOrders: { ...draft.mealOrders, enabled } }), 'Residents order breakfast, lunch or dinner for a day.')}
           {draft.mealOrders.enabled && (
             <div className="grid grid-cols-3 gap-2 pb-3 pl-8">
-              {MEAL_SLOTS.map((slot) => <Fragment key={slot}>{priceInput(SLOT_LABELS[slot], draft.mealOrders.prices[slot], (price) => setDraft({ ...draft, mealOrders: { ...draft.mealOrders, prices: { ...draft.mealOrders.prices, [slot]: price } } }))}</Fragment>)}
+              {mealSlots.map((slot) => <Fragment key={slot.value}>{priceInput(slot.label, draft.mealOrders.prices[slot.value] ?? 0, (price) => setDraft({ ...draft, mealOrders: { ...draft.mealOrders, prices: { ...draft.mealOrders.prices, [slot.value]: price } } }))}</Fragment>)}
             </div>
           )}
         </div>
@@ -69,6 +70,10 @@ function SettingsCard({ property, onSaved }: { property: Data['properties'][numb
 }
 
 export default function OwnerServices({ canEditSettings, part = 'orders', onOpenSettings }: { canEditSettings: boolean; part?: 'orders' | 'settings'; onOpenSettings?: () => void }) {
+  const { catalog } = usePlatformCatalog();
+  const mealSlotItems = catalog.mealSlots.length ? catalog.mealSlots : MEAL_SLOTS.map((v) => ({ value: v, label: SLOT_LABELS[v] || v }));
+  const allSlotItems = [...mealSlotItems, ...catalog.cleaningSlots];
+  const slotLabel = (val: string) => labelFromCatalog(allSlotItems, val) || SLOT_LABELS[val] || val;
   const queryClient = useQueryClient();
   const [date, setDate] = useState('');
   const queryKey = ['owner', 'service-orders', date];
@@ -96,10 +101,10 @@ export default function OwnerServices({ canEditSettings, part = 'orders', onOpen
           <input type="date" value={date || data.date} onChange={(event) => setDate(event.target.value)} className="mt-1 block rounded-[6px] border border-field-border bg-white px-3 py-2" />
         </label>
         <div className="grid grid-cols-3 gap-2 sm:max-w-md">
-          {MEAL_SLOTS.map((slot) => (
-            <div key={slot} className="rounded-[14px] border border-hairline bg-white p-3">
-              <span className="tabular block font-display text-2xl font-bold text-navy-900">{data.mealCounts[slot] ?? 0}</span>
-              <span className="text-sm text-muted">{SLOT_LABELS[slot].toLowerCase()} plates</span>
+          {mealSlotItems.map((slot) => (
+            <div key={slot.value} className="rounded-[14px] border border-hairline bg-white p-3">
+              <span className="tabular block font-display text-2xl font-bold text-navy-900">{data.mealCounts[slot.value] ?? 0}</span>
+              <span className="text-sm text-muted">{slot.label.toLowerCase()} plates</span>
             </div>
           ))}
         </div>
@@ -112,7 +117,7 @@ export default function OwnerServices({ canEditSettings, part = 'orders', onOpen
                 <li key={order.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
                   <div>
                     <p className="font-medium text-navy-900">
-                      {order.type === 'MEAL' ? `${SLOT_LABELS[order.slot]} × ${order.quantity}` : `Cleaning, ${SLOT_LABELS[order.slot].toLowerCase()}`} · {order.tenant.name}
+                      {order.type === 'MEAL' ? `${slotLabel(order.slot)} × ${order.quantity}` : `Cleaning, ${slotLabel(order.slot).toLowerCase()}`} · {order.tenant.name}
                     </p>
                     <p className="tabular text-sm text-muted">
                       {order.property.name}{order.tenant.bed ? `, Room ${order.tenant.bed.room.roomNumber}, ${order.tenant.bed.label}` : ''}
@@ -137,7 +142,7 @@ export default function OwnerServices({ canEditSettings, part = 'orders', onOpen
           <h2 className="text-xl font-semibold">Services each PG offers</h2>
           <p className="text-muted">Switch on only what you run. Residents and guests see only what's on.</p>
           <div className="grid gap-3 lg:grid-cols-2">
-            {data.properties.map((property) => <SettingsCard key={property.id} property={property} onSaved={() => void refresh()} />)}
+            {data.properties.map((property) => <SettingsCard key={property.id} property={property} mealSlots={mealSlotItems} onSaved={() => void refresh()} />)}
           </div>
         </section>
       )}

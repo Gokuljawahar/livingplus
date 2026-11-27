@@ -28,6 +28,7 @@ import {
   type QueuedMaintenanceTicket
 } from '../../ai/outbox';
 import { Button, Card, EmptyState, StatusPill } from '../../components/ui';
+import { usePlatformCatalog } from '../../hooks/usePlatformCatalog';
 import { apiErrorMessage } from '../../utils/api-error';
 import { transcribeVoiceBlob, useVoiceRecorder } from '../../hooks/useVoiceRecorder';
 import { shortDate } from '../../utils/money';
@@ -87,6 +88,7 @@ async function uploadPhotoBlob(blob: Blob): Promise<string | undefined> {
 }
 
 export default function ResidentMaintenanceView({ stays, tickets, onChanged }: Props) {
+  const { catalog } = usePlatformCatalog();
   const [ticketFormFor, setTicketFormFor] = useState('');
   const [snappedImage, setSnappedImage] = useState<DownscaledImage | null>(null);
   const [triageNote, setTriageNote] = useState('');
@@ -600,13 +602,20 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
                         {...ticketFormApi.register('category')}
                         className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline bg-canvas px-3 py-2 text-xs font-medium text-ink outline-none focus:border-navy-900"
                       >
-                        <option value="PLUMBING">Plumbing (Tap, Pipe, Flush, Leakage)</option>
-                        <option value="ELECTRICAL">Electrical (Fan, Light, Switch, Geyser)</option>
-                        <option value="APPLIANCE">Appliance (AC, Washing Machine, Fridge)</option>
-                        <option value="CLEANING">Cleaning &amp; Housekeeping</option>
-                        <option value="SAFETY">Safety &amp; Locks</option>
-                        <option value="PEST">Pest Control</option>
-                        <option value="OTHER">Other Query</option>
+                        {(catalog.maintenanceCategories.length
+                          ? catalog.maintenanceCategories
+                          : [
+                              { value: 'PLUMBING', label: 'Plumbing (Tap, Pipe, Flush, Leakage)' },
+                              { value: 'ELECTRICAL', label: 'Electrical (Fan, Light, Switch, Geyser)' },
+                              { value: 'APPLIANCE', label: 'Appliance (AC, Washing Machine, Fridge)' },
+                              { value: 'CLEANING', label: 'Cleaning & Housekeeping' },
+                              { value: 'SAFETY', label: 'Safety & Locks' },
+                              { value: 'PEST', label: 'Pest Control' },
+                              { value: 'OTHER', label: 'Other Query' }
+                            ]
+                        ).map((cat) => (
+                          <option key={cat.value} value={cat.value}>{cat.label}</option>
+                        ))}
                       </select>
                     </label>
                     <label className="block text-xs font-semibold text-ink">
@@ -616,10 +625,17 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
                         disabled={Boolean(triageBanner?.safetyRisk)}
                         className="mt-1 block w-full rounded-[var(--radius-field)] border border-hairline bg-canvas px-3 py-2 text-xs font-medium text-ink outline-none focus:border-navy-900 disabled:opacity-80"
                       >
-                        <option value="LOW">Low</option>
-                        <option value="NORMAL">Normal</option>
-                        <option value="HIGH">High</option>
-                        <option value="URGENT">Urgent</option>
+                        {(catalog.ticketPriorities.length
+                          ? catalog.ticketPriorities
+                          : [
+                              { value: 'LOW', label: 'Low' },
+                              { value: 'NORMAL', label: 'Normal' },
+                              { value: 'HIGH', label: 'High' },
+                              { value: 'URGENT', label: 'Urgent' }
+                            ]
+                        ).map((prio) => (
+                          <option key={prio.value} value={prio.value}>{prio.label}</option>
+                        ))}
                       </select>
                     </label>
                   </div>

@@ -14,9 +14,9 @@ import {
   X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { PROPERTY_TYPE_SHORT_LABELS, type PropertyType } from '@livingplus/shared';
 import api from '../../api/axios';
 import { SecureImage } from '../../components/SecureImage';
+import { labelFromCatalog, usePlatformCatalog } from '../../hooks/usePlatformCatalog';
 import { apiErrorMessage } from '../../utils/api-error';
 import { ROUTES } from '../../utils/app-areas';
 import { rupees } from '../../utils/money';
@@ -41,6 +41,7 @@ export default function AdminPropertiesView({
   setSearch,
   onChanged
 }: Props) {
+  const { catalog } = usePlatformCatalog();
   const [editing, setEditing] = useState<AdminProperty | null>(null);
   const [editDraft, setEditDraft] = useState<{
     name: string;
@@ -191,7 +192,7 @@ export default function AdminPropertiesView({
         <div className="space-y-3">
           {properties.map((property) => {
             const isLive = property.status === 'ACTIVE';
-            const typeLabel = PROPERTY_TYPE_SHORT_LABELS[property.propertyType as PropertyType] || property.propertyType;
+            const typeLabel = labelFromCatalog(catalog.propertyTypes, property.propertyType, true) || property.propertyType;
             return (
               <article key={property.id} className="flex flex-col gap-4 rounded-[var(--radius-card)] border border-hairline bg-canvas p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-start gap-4">

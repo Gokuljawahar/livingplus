@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import { GENDER_LABELS, PRICE_BANDS, ROOM_TYPES } from './types';
+import { usePlatformCatalog } from '../../hooks/usePlatformCatalog';
 
 interface Props {
   open: boolean;
@@ -50,6 +50,7 @@ export default function FilterSheet({
   setAmenities,
   amenityCounts
 }: Props) {
+  const { catalog } = usePlatformCatalog();
   if (!open) return null;
 
   return (
@@ -82,11 +83,11 @@ export default function FilterSheet({
           <section>
             <h3 className="text-xs font-bold text-muted">Resident policy</h3>
             <div className="mt-2.5 grid grid-cols-2 gap-1.5">
-              {['', 'WOMEN', 'MEN', 'ANY'].map((value) => {
-                const isChecked = gender === value;
+              {[{ value: '', label: 'All PGs' }, ...catalog.genderPolicies].map((option) => {
+                const isChecked = gender === option.value;
                 return (
                   <label
-                    key={value || 'all'}
+                    key={option.value || 'all'}
                     className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-button)] border px-3 py-2 text-xs font-semibold transition-all ${
                       isChecked
                         ? 'border-navy-900 bg-navy-900 text-white'
@@ -97,10 +98,10 @@ export default function FilterSheet({
                       type="radio"
                       name="gender"
                       checked={isChecked}
-                      onChange={() => setGender(value)}
+                      onChange={() => setGender(option.value)}
                       className="sr-only"
                     />
-                    {value === '' ? 'All PGs' : GENDER_LABELS[value]}
+                    {option.label}
                   </label>
                 );
               })}
@@ -110,7 +111,7 @@ export default function FilterSheet({
           <section>
             <h3 className="text-xs font-bold text-muted">Monthly budget</h3>
             <div className="mt-2.5 space-y-1.5">
-              {PRICE_BANDS.map((band) => {
+              {catalog.priceBands.map((band) => {
                 const active = minRent === band.min && maxRent === band.max;
                 return (
                   <label
@@ -168,7 +169,7 @@ export default function FilterSheet({
           <section>
             <h3 className="text-xs font-bold text-muted">Room sharing</h3>
             <div className="mt-2.5 space-y-1.5">
-              {ROOM_TYPES.map((type) => {
+              {catalog.roomTypes.map((type) => {
                 const isChecked = roomTypes.includes(type.value);
                 return (
                   <label

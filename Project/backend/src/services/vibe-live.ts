@@ -14,7 +14,8 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { FunctionTool, Gemini, InMemoryRunner, LiveRequestQueue, LlmAgent } from '@google/adk';
 import { Modality, Type, type FunctionDeclaration } from '@google/genai';
 import { z } from 'zod';
-import { cleanVibeAnswers, cleanVibeSummary, createLiveProtocol, VIBE_QUESTIONS, vibeTopicsFor, type LiveServerMessage as RelayServerMessage, type VibeAnswers } from '@livingplus/shared';
+import { cleanVibeAnswers, cleanVibeSummary, createLiveProtocol, VIBE_QUESTIONS, vibeTopicsFor, type LiveServerMessage as RelayServerMessage, type VibeAnswers, type VibeQuestion } from '@livingplus/shared';
+import { getPlatformCatalog } from './platform-catalog.js';
 
 const { parseLiveClientMessage } = createLiveProtocol(z);
 import { prisma } from '../db/index.js';
@@ -35,8 +36,8 @@ const liveLocation = () => (process.env.VIBE_LIVE_LOCATION || 'us-central1').tri
 export const vibeLiveEnabled = (): boolean => aiEnabled() && process.env.VIBE_LIVE_ENABLED !== 'false';
 
 /** The record_habits tool, offering only the habits that matter for this PG. */
-function recordHabitsFor(skip: string[]): FunctionDeclaration {
-  const habitProperties = Object.fromEntries(VIBE_QUESTIONS.filter((question) => !skip.includes(question.id)).map((question) => [question.id, {
+function recordHabitsFor(skip: string[], questions: readonly VibeQuestion[] = VIBE_QUESTIONS): FunctionDeclaration {
+  const habitProperties = Object.fromEntries(questions.filter((question) => !skip.includes(question.id)).map((question) => [question.id, {
     type: Type.NUMBER,
     description: `${question.question} 0 = ${question.options[0].label}, 1 = ${question.options[1].label}, 2 = ${question.options[2].label}. Leave out if unknown.`
   }]));
@@ -55,8 +56,8 @@ function recordHabitsFor(skip: string[]): FunctionDeclaration {
   };
 }
 
-function liveInstruction(topics: { skip: string[]; facts: string[] }): string {
-  const skipped = VIBE_QUESTIONS.filter((question) => topics.skip.includes(question.id)).map((question) => question.question.replace(/\?$/, '').toLowerCase());
+function liveInstruction(topics: { skip: string[]; facts: string[] }, questions: readonly VibeQuestion[] = VIBE_QUESTIONS): string {
+  const skipped = questions.filter((question) => topics.skip.includes(question.id)).map((question) => question.question.replace(/\?$/, '').toLowerCase());
   return [
     "You are the user's PG buddy: a friendly, easy-going senior who knows PG life well, chatting with someone who is about to move into one. Behind the scenes you are getting to know how they live, so they can be matched with roommates they will get along with.",
     "Talk like a friend, not an interviewer. Never run through a list of questions, never say words like habits, questionnaire, score or profile, and never ask two questions at once.",
@@ -73,11 +74,16 @@ function liveInstruction(topics: { skip: string[]; facts: string[] }): string {
 }
 
 /** Cleans one record_habits call and merges it into what is already known. */
-export function applyHabitCall(known: VibeAnswers, args: unknown, skip: string[] = []): { answers: VibeAnswers; summary: string | null; done: boolean; missing: string[] } {
+export function applyHabitCall(
+  known: VibeAnswers,
+  args: unknown,
+  skip: string[] = [],
+  questions: readonly VibeQuestion[] = VIBE_QUESTIONS
+): { answers: VibeAnswers; summary: string | null; done: boolean; missing: string[] } {
   const input = (args && typeof args === 'object' ? args : {}) as { answers?: unknown; summary?: unknown; done?: unknown };
-  const found = Object.fromEntries(Object.entries(cleanVibeAnswers(input.answers) ?? {}).filter(([id]) => !skip.includes(id)));
+  const found = Object.fromEntries(Object.entries(cleanVibeAnswers(input.answers, questions) ?? {}).filter(([id]) => !skip.includes(id)));
   const answers = { ...known, ...found };
-  const missing = VIBE_QUESTIONS.filter((question) => !skip.includes(question.id) && answers[question.id] === undefined).map((question) => question.id);
+  const missing = questions.filter((question) => !skip.includes(question.id) && answers[question.id] === undefined).map((question) => question.id);
   return { answers, summary: cleanVibeSummary(typeof input.summary === 'string' ? input.summary : null), done: input.done === true || missing.length === 0, missing };
 }
 
@@ -331,20 +337,22 @@ async function relayLive(client: WebSocket, spec: LiveSessionSpec, binaryAudio =
 
 /** VibeCheck: the PG buddy conversation, recording habits as it goes. */
 async function runSession(client: WebSocket, propertyId: string | null, binaryAudio = false, visitor = 'guest'): Promise<void> {
-  const topics = vibeTopicsFor(await loadPlace(propertyId));
+  const [place, catalog] = await Promise.all([loadPlace(propertyId), getPlatformCatalog()]);
+  const topics = vibeTopicsFor(place);
+  const questions = catalog.vibeQuestions;
   let known: VibeAnswers = {};
   const send = (message: RelayServerMessage) => { if (client.readyState === client.OPEN) client.send(JSON.stringify(message)); };
   await relayLive(client, {
     label: 'VibeCheck',
     agentName: 'vibecheck_buddy',
     userId: `guest:${visitor}`,
-    instruction: liveInstruction(topics),
+    instruction: liveInstruction(topics, questions),
     kickoff: '(The person just joined the call. Say hi like a friend in one short line and casually ask whether they are studying or working these days.)',
-    tools: [recordHabitsFor(topics.skip)],
+    tools: [recordHabitsFor(topics.skip, questions)],
     onToolCall: (name, args, heard) => {
       if (name !== 'record_habits') return { error: 'unknown tool' };
       if (heard < 1) return { saved: false, note: 'Wait for their answer before recording habits.' };
-      const result = applyHabitCall(known, args, topics.skip);
+      const result = applyHabitCall(known, args, topics.skip, questions);
       known = result.answers;
       send({ type: 'habits', ...result });
       return { saved: true, still_missing: result.missing };

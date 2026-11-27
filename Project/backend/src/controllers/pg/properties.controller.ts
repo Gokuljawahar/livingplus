@@ -5,6 +5,7 @@ import { db } from '../../db/index.js';
 import { asSystem } from '../../db/context.js';
 import { logAudit } from '../../services/pg-audit.js';
 import { scheduleSearchIndex } from '../../services/semantic-search.js';
+import { getPlatformCatalog } from '../../services/platform-catalog.js';
 import { createUniquePgSlug } from '../../utils/pg-slug.js';
 import { INVALID_REQUEST, parseBody } from '../../utils/validate.js';
 import { logger } from '../../utils/logger.js';
@@ -53,6 +54,9 @@ export const createProperty = async (req: Request, res: Response): Promise<any> 
   }
 
   try {
+    const catalog = await getPlatformCatalog();
+    const allowedPropertyTypes = catalog.propertyTypes.map((p) => p.value);
+    const allowedGenderPolicies = catalog.genderPolicies.map((g) => g.value);
     const property: any = await asSystem('an owner provisions a new PG workspace', async () => db.pGProperty.create({
       data: {
         slug: await createUniquePgSlug(db, name),
@@ -65,12 +69,12 @@ export const createProperty = async (req: Request, res: Response): Promise<any> 
         contactPhone: contactPhone ? String(contactPhone).replace(/\D/g, '') : null,
         upiId: upiId ? String(upiId).trim() : null,
         landmark: landmark?.trim() || null,
-        city: city?.trim() || 'Chennai',
+        city: city?.trim() || catalog.defaultCity,
         pincode: pincode?.trim() || null,
         latitude: latitude !== undefined && latitude !== '' && Number.isFinite(Number(latitude)) ? Number(latitude) : null,
         longitude: longitude !== undefined && longitude !== '' && Number.isFinite(Number(longitude)) ? Number(longitude) : null,
-        genderPolicy: isGenderPolicy(String(genderPolicy)) ? genderPolicy : 'ANY',
-        propertyType: isPropertyType(String(propertyType)) ? propertyType : 'PG',
+        genderPolicy: isGenderPolicy(String(genderPolicy), allowedGenderPolicies) ? genderPolicy : 'ANY',
+        propertyType: isPropertyType(String(propertyType), allowedPropertyTypes) ? propertyType : 'PG',
         amenities: Array.isArray(amenities) ? amenities : [],
         highlights: Array.isArray(highlights) ? highlights : [],
         nearbyPlaces: Array.isArray(nearbyPlaces) ? nearbyPlaces : [],

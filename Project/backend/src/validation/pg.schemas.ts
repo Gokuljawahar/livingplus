@@ -2,7 +2,7 @@
 // dropped (the frontend sends whole form objects); types and required
 // fields are enforced before any database work.
 import { z } from 'zod';
-import { MESSAGES, PATTERNS, PAYMENT_METHODS } from '@livingplus/shared';
+import { MESSAGES, PATTERNS } from '@livingplus/shared';
 import { optionalText, positiveAmount, text, upperEnum } from '../utils/validate.js';
 
 export const bookingRequestBody = z.object({
@@ -22,7 +22,7 @@ export const bookingRequestBody = z.object({
 
 export const rentPaymentBody = z.object({
   amount: positiveAmount(),
-  method: upperEnum(PAYMENT_METHODS),
+  method: text(30).transform((v) => v.toUpperCase()),
   reference: optionalText(120)
 });
 

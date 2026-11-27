@@ -40,6 +40,7 @@ export {
   createSearchPropertiesSemanticHandler,
   getPgSite,
   getPublicBookingStatus,
+  getPublicCatalog,
   getPublicConfig,
   getPublicProperty,
   listGuestBookings,

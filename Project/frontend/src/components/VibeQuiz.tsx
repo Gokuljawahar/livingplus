@@ -1,16 +1,20 @@
 // VibeCheck questions (DESIGN.md: chunked, sentence case, 44px targets).
 // Lifestyle habits only; the questions live in @livingplus/shared.
-import { VIBE_QUESTIONS, type VibeAnswers } from '@livingplus/shared';
+import { VIBE_QUESTIONS, type VibeAnswers, type VibeQuestion } from '@livingplus/shared';
+import { usePlatformCatalog } from '../hooks/usePlatformCatalog';
 
 interface VibeQuizProps {
   value: VibeAnswers;
   onChange: (next: VibeAnswers) => void;
   /** Topics that don't apply at this PG (no shared kitchen, no AC), as from vibeTopicsFor. */
   skip?: string[];
+  questions?: readonly VibeQuestion[];
 }
 
-export default function VibeQuiz({ value, onChange, skip = [] }: VibeQuizProps) {
-  const questions = VIBE_QUESTIONS.filter((question) => !skip.includes(question.id));
+export default function VibeQuiz({ value, onChange, skip = [], questions: explicitQuestions }: VibeQuizProps) {
+  const { catalog } = usePlatformCatalog();
+  const sourceQuestions = explicitQuestions ?? (catalog.vibeQuestions.length ? catalog.vibeQuestions : VIBE_QUESTIONS);
+  const questions = sourceQuestions.filter((question) => !skip.includes(question.id));
   const answered = questions.filter((question) => value[question.id] !== undefined).length;
   return (
     <div className="space-y-5">

@@ -1,6 +1,6 @@
 // Marketplace property types, owner lead pipeline statuses, and categorized
-// facility definitions shared across the public site, owner workspace, and
-// internal concierge onboarding console.
+// facility definitions. Runtime values are loaded dynamically from PostgreSQL
+// (`PlatformCatalog`); functions accept dynamic catalog arrays with safe defaults.
 export const PROPERTY_TYPES = ['PG', 'HOSTEL', 'COLIVING', 'APARTMENT'];
 export const PROPERTY_TYPE_LABELS = {
     PG: 'Paying Guest (PG)',
@@ -14,7 +14,7 @@ export const PROPERTY_TYPE_SHORT_LABELS = {
     COLIVING: 'Co-Living',
     APARTMENT: 'Apartment'
 };
-export const isPropertyType = (value) => PROPERTY_TYPES.includes(value);
+export const isPropertyType = (value, allowed = PROPERTY_TYPES) => allowed.includes(value);
 export const LEAD_STATUSES = ['NEW', 'CONTACTED', 'IN_PROGRESS', 'PUBLISHED', 'ARCHIVED'];
 export const LEAD_STATUS_LABELS = {
     NEW: 'New inquiry',
@@ -23,7 +23,7 @@ export const LEAD_STATUS_LABELS = {
     PUBLISHED: 'Published',
     ARCHIVED: 'Archived'
 };
-export const isLeadStatus = (value) => LEAD_STATUSES.includes(value);
+export const isLeadStatus = (value, allowed = LEAD_STATUSES) => allowed.includes(value);
 export const AMENITY_CATEGORIES = [
     {
         category: 'Essentials',
@@ -95,13 +95,13 @@ const LEGACY_MATCHES = [
     [/study|cowork|gym|fitness|tv|terrace|balcony|geyser|ac|lounge|bath/i, 'Comfort & Extras']
 ];
 /**
- * Groups an arbitrary list of facility labels (including legacy short tags)
- * into clean display categories without dropping custom entries.
+ * Groups an arbitrary list of facility labels into display categories using
+ * the active dynamic `categories` catalog from PostgreSQL without dropping custom entries.
  */
-export function categorizeAmenities(amenities) {
+export function categorizeAmenities(amenities, categories = AMENITY_CATEGORIES) {
     const seen = new Set();
     const buckets = new Map();
-    for (const group of AMENITY_CATEGORIES)
+    for (const group of categories)
         buckets.set(group.category, []);
     const extras = [];
     for (const raw of amenities) {
@@ -113,7 +113,7 @@ export function categorizeAmenities(amenities) {
             continue;
         seen.add(key);
         let matchedCategory = null;
-        for (const group of AMENITY_CATEGORIES) {
+        for (const group of categories) {
             if (group.options.some((option) => option.toLowerCase() === key)) {
                 matchedCategory = group.category;
                 break;
@@ -121,13 +121,13 @@ export function categorizeAmenities(amenities) {
         }
         if (!matchedCategory) {
             for (const [pattern, category] of LEGACY_MATCHES) {
-                if (pattern.test(label)) {
+                if (buckets.has(category) && pattern.test(label)) {
                     matchedCategory = category;
                     break;
                 }
             }
         }
-        if (matchedCategory) {
+        if (matchedCategory && buckets.has(matchedCategory)) {
             buckets.get(matchedCategory).push(label);
         }
         else {
@@ -135,7 +135,7 @@ export function categorizeAmenities(amenities) {
         }
     }
     const result = [];
-    for (const group of AMENITY_CATEGORIES) {
+    for (const group of categories) {
         const items = buckets.get(group.category);
         if (items.length > 0)
             result.push({ category: group.category, items });
