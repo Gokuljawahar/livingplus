@@ -1,4 +1,5 @@
-import { createContext, useContext, type ComponentType } from 'react';
+import type { ComponentType } from 'react';
+import { create } from 'zustand';
 
 export interface SectionNavItem {
   id: string;
@@ -18,12 +19,18 @@ export interface SidebarContextType {
   setSectionNav: (nav: SectionNavItem[] | null) => void;
 }
 
-export const SidebarContext = createContext<SidebarContextType | undefined>(undefined);
+export const useSidebarStore = create<SidebarContextType>((set) => ({
+  isOpen: false,
+  sectionNav: null,
+  toggle: () => set((state) => ({ isOpen: !state.isOpen })),
+  close: () => set({ isOpen: false }),
+  setSectionNav: (sectionNav) => set({ sectionNav })
+}));
 
-export function useSidebar() {
-  const context = useContext(SidebarContext);
-  if (context === undefined) {
-    throw new Error('useSidebar must be used within a SidebarProvider');
-  }
-  return context;
+export function useSidebar(): SidebarContextType {
+  return useSidebarStore();
+}
+
+export function _resetSidebarStoreForTests(): void {
+  useSidebarStore.setState({ isOpen: false, sectionNav: null });
 }

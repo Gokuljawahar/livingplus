@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect } from 'react';
 import toast from 'react-hot-toast';
+import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import type { Firestore } from 'firebase/firestore';
 import { ensureAnonymousFirebaseUser, getLivingPlusFirebaseApp } from './firebase';
 
@@ -16,38 +18,34 @@ export interface QueuedMaintenanceTicket {
   createdAt: string;
 }
 
-const LOCAL_STORAGE_KEY = 'lp_offline_ticket_outbox_v1';
-let firestorePromise: Promise<Firestore | null> | null = null;
-const outboxListeners = new Set<() => void>();
-
-function notifyOutbox(): void {
-  for (const listener of outboxListeners) listener();
+interface OutboxStoreState {
+  items: QueuedMaintenanceTicket[];
+  isOnline: boolean;
+  flushing: boolean;
+  setItems: (items: QueuedMaintenanceTicket[]) => void;
+  setOnline: (isOnline: boolean) => void;
+  setFlushing: (flushing: boolean) => void;
 }
 
-function readLocalOutbox(): QueuedMaintenanceTicket[] {
-  if (typeof window === 'undefined' || !window.localStorage) return [];
-  try {
-    const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeLocalOutbox(items: QueuedMaintenanceTicket[]): void {
-  if (typeof window === 'undefined' || !window.localStorage) return;
-  try {
-    if (items.length === 0) {
-      window.localStorage.removeItem(LOCAL_STORAGE_KEY);
-    } else {
-      window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(items));
+export const useOutboxStore = create<OutboxStoreState>()(
+  persist(
+    (set) => ({
+      items: [],
+      isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+      flushing: false,
+      setItems: (items) => set({ items }),
+      setOnline: (isOnline) => set({ isOnline }),
+      setFlushing: (flushing) => set({ flushing })
+    }),
+    {
+      name: 'lp_offline_ticket_outbox_v1',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({ items: state.items })
     }
-  } catch {
-    // Ignore storage quota errors
-  }
-}
+  )
+);
+
+let firestorePromise: Promise<Firestore | null> | null = null;
 
 async function getOutboxFirestore(): Promise<{ db: Firestore; uid: string } | null> {
   try {
@@ -82,8 +80,7 @@ async function getOutboxFirestore(): Promise<{ db: Firestore; uid: string } | nu
 /**
  * Queues a triaged maintenance report when the resident has weak/no signal.
  * Writes to Cloud Firestore with `persistentLocalCache()` under
- * `outbox/{firebaseUid}/tickets/{ticketId}` and mirrors locally so the
- * queued ticket renders and auto-flushes reliably across offline reloads.
+ * `outbox/{firebaseUid}/tickets/{ticketId}` and mirrors in Zustand persist store.
  */
 export async function queueOfflineTicket(
   ticket: Omit<QueuedMaintenanceTicket, 'id' | 'createdAt'> & { id?: string; createdAt?: string }
@@ -94,9 +91,8 @@ export async function queueOfflineTicket(
     createdAt: ticket.createdAt || new Date().toISOString()
   };
 
-  const existing = readLocalOutbox().filter((item) => item.id !== entry.id);
-  writeLocalOutbox([entry, ...existing]);
-  notifyOutbox();
+  const existing = useOutboxStore.getState().items.filter((item) => item.id !== entry.id);
+  useOutboxStore.getState().setItems([entry, ...existing]);
 
   try {
     const remote = await getOutboxFirestore();
@@ -105,7 +101,7 @@ export async function queueOfflineTicket(
       await setDoc(doc(remote.db, 'outbox', remote.uid, 'tickets', entry.id), entry);
     }
   } catch {
-    // Local cache / localStorage mirror preserves the entry until online.
+    // Zustand persist cache preserves the entry until online.
   }
 
   return entry;
@@ -113,7 +109,7 @@ export async function queueOfflineTicket(
 
 export async function listQueuedTickets(tenantId?: string): Promise<QueuedMaintenanceTicket[]> {
   const byId = new Map<string, QueuedMaintenanceTicket>();
-  for (const item of readLocalOutbox()) {
+  for (const item of useOutboxStore.getState().items) {
     byId.set(item.id, item);
   }
 
@@ -128,16 +124,17 @@ export async function listQueuedTickets(tenantId?: string): Promise<QueuedMainte
       });
     }
   } catch {
-    // Keep local mirror items when Firestore cannot be reached
+    // Keep Zustand persisted items when Firestore cannot be reached
   }
 
   const all = [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  useOutboxStore.getState().setItems(all);
   return tenantId ? all.filter((item) => item.tenantId === tenantId) : all;
 }
 
 async function deleteQueuedTicket(id: string): Promise<void> {
-  writeLocalOutbox(readLocalOutbox().filter((item) => item.id !== id));
-  notifyOutbox();
+  const next = useOutboxStore.getState().items.filter((item) => item.id !== id);
+  useOutboxStore.getState().setItems(next);
 
   try {
     const remote = await getOutboxFirestore();
@@ -172,82 +169,65 @@ export async function flushOfflineTicketOutbox(
 }
 
 /**
- * React hook keeping queued offline maintenance tickets in sync and flushing
- * them automatically when connectivity returns (`window` `'online'` event).
+ * React hook keeping queued offline maintenance tickets in sync via Zustand
+ * and flushing them automatically when connectivity returns (`window` `'online'` event).
  */
 export function useOfflineTicketOutbox(
   tenantIds: string[],
   submitFn: (ticket: QueuedMaintenanceTicket) => Promise<void>,
   onFlushed?: () => Promise<unknown>
 ) {
-  const [queuedTickets, setQueuedTickets] = useState<QueuedMaintenanceTicket[]>(() => {
-    const initial = readLocalOutbox();
-    return tenantIds.length ? initial.filter((item) => tenantIds.includes(item.tenantId)) : initial;
-  });
-  const [isOnline, setIsOnline] = useState<boolean>(() =>
-    typeof navigator !== 'undefined' ? navigator.onLine : true
-  );
-  const [flushing, setFlushing] = useState(false);
+  const allItems = useOutboxStore((s) => s.items);
+  const isOnline = useOutboxStore((s) => s.isOnline);
+  const flushing = useOutboxStore((s) => s.flushing);
+  const setOnline = useOutboxStore((s) => s.setOnline);
+  const setFlushing = useOutboxStore((s) => s.setFlushing);
 
   const tenantIdsKey = tenantIds.join(',');
+  const allowedIds = tenantIdsKey ? tenantIdsKey.split(',') : [];
+  const queuedTickets = allowedIds.length
+    ? allItems.filter((item) => allowedIds.includes(item.tenantId))
+    : allItems;
 
   const reload = useCallback(async () => {
-    const allowedIds = tenantIdsKey ? tenantIdsKey.split(',') : [];
-    const items = await listQueuedTickets();
-    setQueuedTickets(
-      allowedIds.length ? items.filter((item) => allowedIds.includes(item.tenantId)) : items
-    );
-  }, [tenantIdsKey]);
+    await listQueuedTickets();
+  }, []);
 
   const flush = useCallback(async () => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) return { sentCount: 0, remainingCount: queuedTickets.length };
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return { sentCount: 0, remainingCount: queuedTickets.length };
+    }
     setFlushing(true);
     try {
       const res = await flushOfflineTicketOutbox(submitFn);
       if (res.sentCount > 0) {
         toast.success(`${res.sentCount} offline report${res.sentCount === 1 ? '' : 's'} sent`);
-        await reload();
         await onFlushed?.();
       }
       return res;
     } finally {
       setFlushing(false);
     }
-  }, [submitFn, onFlushed, reload, queuedTickets.length]);
+  }, [submitFn, onFlushed, queuedTickets.length, setFlushing]);
 
   useEffect(() => {
-    let cancelled = false;
-    const allowedIds = tenantIdsKey ? tenantIdsKey.split(',') : [];
-    void listQueuedTickets().then((items) => {
-      if (!cancelled) {
-        setQueuedTickets(
-          allowedIds.length ? items.filter((item) => allowedIds.includes(item.tenantId)) : items
-        );
-      }
-    });
-
-    const reloadHandler = () => {
-      void reload();
-    };
-    outboxListeners.add(reloadHandler);
+    void listQueuedTickets();
 
     const handleOnline = () => {
-      setIsOnline(true);
+      setOnline(true);
       void flush();
     };
     const handleOffline = () => {
-      setIsOnline(false);
+      setOnline(false);
     };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
-      cancelled = true;
-      outboxListeners.delete(reloadHandler);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [reload, flush, tenantIdsKey]);
+  }, [flush, setOnline, tenantIdsKey]);
 
   return {
     queuedTickets,
@@ -260,6 +240,5 @@ export function useOfflineTicketOutbox(
 
 export function _resetOutboxForTests(): void {
   firestorePromise = null;
-  writeLocalOutbox([]);
-  notifyOutbox();
+  useOutboxStore.setState({ items: [], flushing: false, isOnline: true });
 }

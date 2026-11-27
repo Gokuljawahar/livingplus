@@ -49,18 +49,18 @@ import {
   type PGPropertyRoom
 } from '../features/discovery/types';
 import { ROUTES } from '../utils/app-areas';
-import { getGuestSession, type GuestSession } from '../utils/guest-session';
+import { getGuestSession, useGuestSession, type GuestSession } from '../utils/guest-session';
 import { rupees } from '../utils/money';
-import { getSavedPgIds, toggleSavedPg } from '../utils/saved-pgs';
+import { toggleSavedPg, useSavedPgs } from '../utils/saved-pgs';
 
 export default function PGDetailPage() {
   const { slug = '' } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const [guest, setGuest] = useState<GuestSession | null>(() => getGuestSession());
+  const guest = useGuestSession();
   const guestPhone = guest?.phone || '';
-  const [savedIds, setSavedIds] = useState<string[]>(() => (guest?.phone ? getSavedPgIds(guest.phone) : []));
+  const savedIds = useSavedPgs(guestPhone);
   const [signInOpen, setSignInOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<'save' | 'contact' | null>(null);
   const [roomFilter, setRoomFilter] = useState<string>('ALL');
@@ -155,7 +155,6 @@ export default function PGDetailPage() {
       return;
     }
     const next = toggleSavedPg(guestPhone, property.id);
-    setSavedIds(next);
     toast.success(next.includes(property.id) ? 'Saved to your shortlist' : 'Removed from saved PGs');
   };
 
@@ -182,12 +181,8 @@ export default function PGDetailPage() {
   };
 
   const handleGuestVerified = async (session: GuestSession) => {
-    setGuest(session);
     if (pendingAction === 'save') {
-      const next = toggleSavedPg(session.phone, property.id);
-      setSavedIds(next);
-    } else {
-      setSavedIds(getSavedPgIds(session.phone));
+      toggleSavedPg(session.phone, property.id);
     }
     setPendingAction(null);
     await queryClient.invalidateQueries({ queryKey: queryKeys.propertyDetail(slug) });
@@ -828,7 +823,7 @@ export default function PGDetailPage() {
           matchesRoom={matchesAnyOpenRoom}
           guest={guest}
           defaultName={user?.name || ''}
-          onGuestChange={setGuest}
+          onGuestChange={() => undefined}
           initialStep="bed"
           initialBedId={bookingState.bedId}
           initialVibeOpen={bookingState.vibeOpen}

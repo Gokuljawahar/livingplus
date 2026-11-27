@@ -8,6 +8,7 @@ import api from '../api/axios';
 import A2uiSurface, { type A2uiAction, type A2uiMessage } from './a2ui/A2uiSurface';
 import { useAuth } from '../context/auth';
 import { OWNER_USER_KEY, RESIDENT_USER_KEY } from '../utils/session';
+import { usePreferencesStore } from '../utils/preferences-store';
 import { transcribeVoiceBlob, useVoiceRecorder } from '../hooks/useVoiceRecorder';
 
 function readStoredRole(key: string): string | null {
@@ -104,10 +105,9 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
     persona = 'resident';
   }
   const copy = PERSONA_COPY[persona];
-  // Reply language (Tamil, Hindi or English), remembered on this device.
-  const [language, setLanguage] = useState(() => {
-    try { return localStorage.getItem('assistantLanguage') || 'en'; } catch { return 'en'; }
-  });
+  // Reply language (Tamil, Hindi or English), remembered on this device via Zustand persist.
+  const language = usePreferencesStore((s) => s.assistantLanguage);
+  const setLanguage = usePreferencesStore((s) => s.setAssistantLanguage);
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
@@ -281,7 +281,6 @@ export default function AIChatPanel({ limited = false, hideLauncher = false, ope
             value={language}
             onChange={(event) => {
               setLanguage(event.target.value);
-              try { localStorage.setItem('assistantLanguage', event.target.value); } catch { /* per-visit only */ }
             }}
             className="rounded-[6px] border border-white/30 bg-navy-900 px-2 py-1 text-[13px] text-white"
           >

@@ -34,13 +34,13 @@ import PropertyCard from '../features/discovery/PropertyCard';
 import { keywordMatch, SORTS, type PGProperty, type ResidentStay } from '../features/discovery/types';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { ROUTES } from '../utils/app-areas';
-import { clearGuestSession, getGuestSession, type GuestSession } from '../utils/guest-session';
-import { getSavedPgIds, toggleSavedPg } from '../utils/saved-pgs';
+import { clearGuestSession, useGuestSession, type GuestSession } from '../utils/guest-session';
+import { toggleSavedPg, useSavedPgs } from '../utils/saved-pgs';
 import { RESIDENT_SITE_KEY, RESIDENT_TOKEN_KEY } from '../utils/session';
 
 export default function PGDiscovery() {
   const { user, logout: authLogout } = useAuth();
-  const [guest, setGuest] = useState<GuestSession | null>(() => getGuestSession());
+  const guest = useGuestSession();
   const location = useLocation();
   const navigate = useNavigate();
   const activeTab: 'search' | 'requests' = location.pathname === ROUTES.guestRequests ? 'requests' : 'search';
@@ -59,7 +59,7 @@ export default function PGDiscovery() {
   });
 
   const guestPhone = guest?.phone || '';
-  const [savedIds, setSavedIds] = useState<string[]>(() => (guest?.phone ? getSavedPgIds(guest.phone) : []));
+  const savedIds = useSavedPgs(guestPhone);
   const [savedOnly, setSavedOnly] = useState(false);
   const [signInOpen, setSignInOpen] = useState(false);
   const [pendingSaveId, setPendingSaveId] = useState<string | null>(null);
@@ -215,24 +215,19 @@ export default function PGDiscovery() {
       setSignInOpen(true);
       return;
     }
-    setSavedIds(toggleSavedPg(guestPhone, propertyId));
+    toggleSavedPg(guestPhone, propertyId);
   };
 
   const handleGuestVerified = (session: GuestSession) => {
-    setGuest(session);
     if (pendingSaveId) {
-      setSavedIds(toggleSavedPg(session.phone, pendingSaveId));
+      toggleSavedPg(session.phone, pendingSaveId);
       setPendingSaveId(null);
-    } else {
-      setSavedIds(getSavedPgIds(session.phone));
     }
   };
 
   const signOut = () => {
     if (guest) {
       clearGuestSession();
-      setGuest(null);
-      setSavedIds([]);
       setSavedOnly(false);
     }
     if (user) authLogout();
@@ -389,7 +384,6 @@ export default function PGDiscovery() {
               refreshKey={requestsRefresh}
               onSessionExpired={() => {
                 clearGuestSession();
-                setGuest(null);
               }}
             />
           </div>
