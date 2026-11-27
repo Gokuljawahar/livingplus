@@ -54,6 +54,7 @@ vi.mock('firebase/ai', () => ({
     ON_DEVICE: 'on_device',
     IN_CLOUD: 'in_cloud'
   },
+  AgentPlatformBackend: class {},
   GoogleAIBackend: class {},
   Schema: {
     object: (cfg: unknown) => ({ type: 'object', ...(cfg as object) }),

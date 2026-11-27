@@ -9,9 +9,11 @@ import {
   CloudOff,
   Loader2,
   Lock,
+  Mic,
   Plus,
   Send,
   Sparkles,
+  Square,
   Trash2,
   WifiOff,
   Wrench
@@ -27,9 +29,12 @@ import {
 } from '../../ai/outbox';
 import { Button, Card, EmptyState, StatusPill } from '../../components/ui';
 import { apiErrorMessage } from '../../utils/api-error';
+import { transcribeVoiceBlob, useVoiceRecorder } from '../../hooks/useVoiceRecorder';
 import { shortDate } from '../../utils/money';
 import { residentTicketSchema, type ResidentTicketForm } from '../../validation/forms';
 import type { MaintenanceTicket, Stay } from './types';
+
+const MAX_VOICE_RECORD_SECONDS = 30;
 
 const EMPTY_TICKET: ResidentTicketForm = {
   tenantId: '',
@@ -87,6 +92,7 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
   const [triageNote, setTriageNote] = useState('');
   const [triaging, setTriaging] = useState(false);
   const [triageBanner, setTriageBanner] = useState<TriageBannerState | null>(null);
+  const [transcribingVoice, setTranscribingVoice] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const { status: deviceAiStatus, downloadProgress, enable: enableDeviceAi } = useOnDeviceAI();
@@ -123,15 +129,8 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
     flushOutbox
   } = useOfflineTicketOutbox(tenantIds, submitQueuedTicketToApi, onChanged);
 
-  const openTicketForm = (stayId: string) => {
-    setTicketFormFor(stayId);
-    setSnappedImage(null);
-    setTriageNote('');
-    setTriageBanner(null);
-    ticketFormApi.reset({ ...EMPTY_TICKET, tenantId: stayId });
-  };
-
   const resetFormState = () => {
+    setTranscribingVoice(false);
     setTicketFormFor('');
     setSnappedImage(null);
     setTriageNote('');
@@ -191,6 +190,61 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
     } catch {
       toast.error('Could not process that photo. Please try a JPEG or PNG.');
     }
+  };
+
+  const voice = useVoiceRecorder({
+    maxSeconds: MAX_VOICE_RECORD_SECONDS,
+    onRecorded: async (blob) => {
+      setTranscribingVoice(true);
+      try {
+        const transcript = await transcribeVoiceBlob(blob);
+        if (!transcript) {
+          toast.error('No speech was recognized — try speaking closer to the mic or type below.');
+          return;
+        }
+        const nextNote = triageNote.trim() ? `${triageNote.trim()} ${transcript}` : transcript;
+        setTriageNote(nextNote);
+        await runHybridTriage({ note: nextNote });
+      } catch (error) {
+        toast.error(apiErrorMessage(error, 'Voice note could not be transcribed right now.'));
+      } finally {
+        setTranscribingVoice(false);
+      }
+    },
+    onError: (reason) => {
+      toast.error(
+        reason === 'unsupported'
+          ? 'Voice recording is not supported in this browser.'
+          : 'Microphone access was blocked. Allow microphone access and try again.'
+      );
+    }
+  });
+
+  const openTicketForm = (stayId: string) => {
+    voice.cancel();
+    setTranscribingVoice(false);
+    setTicketFormFor(stayId);
+    setSnappedImage(null);
+    setTriageNote('');
+    setTriageBanner(null);
+    ticketFormApi.reset({ ...EMPTY_TICKET, tenantId: stayId });
+  };
+
+  const cancelForm = () => {
+    voice.cancel();
+    resetFormState();
+  };
+
+  const handleVoiceToggle = async () => {
+    if (voice.recording) {
+      voice.stop();
+      return;
+    }
+    if (!isOnline) {
+      toast.error('Voice transcription needs internet — snap a photo or type a note to triage offline.');
+      return;
+    }
+    await voice.start();
   };
 
   const submitTicket = ticketFormApi.handleSubmit(async (form) => {
@@ -381,10 +435,10 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
                       <div>
                         <h4 className="flex items-center gap-1.5 text-xs font-bold text-navy-900">
                           <Sparkles className="h-3.5 w-3.5 text-amber-600" />
-                          Snap &amp; Triage (works offline on Chrome)
+                          Snap, Speak &amp; Triage (works offline on Chrome)
                         </h4>
                         <p className="mt-0.5 text-[11px] text-muted">
-                          Snap a photo or type a quick note to auto-fill category, priority, and safety advice.
+                          Snap a photo, record a voice note (Tamil, Hindi, Tanglish, English), or type a quick note to auto-fill category, priority, and safety advice.
                         </p>
                       </div>
                       {deviceAiStatus === 'downloadable' && (
@@ -418,11 +472,29 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
                         type="button"
                         size="sm"
                         variant="secondary"
-                        disabled={triaging}
+                        disabled={triaging || voice.recording || transcribingVoice}
                         onClick={() => fileInputRef.current?.click()}
                       >
                         <Camera className="h-3.5 w-3.5" />
                         {snappedImage ? 'Retake photo' : 'Snap a photo'}
+                      </Button>
+
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        aria-label={voice.recording ? 'Stop voice note' : 'Record voice note'}
+                        disabled={triaging || transcribingVoice}
+                        onClick={() => void handleVoiceToggle()}
+                      >
+                        {transcribingVoice ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : voice.recording ? (
+                          <Square className="h-3.5 w-3.5 text-negative" />
+                        ) : (
+                          <Mic className="h-3.5 w-3.5" />
+                        )}
+                        {transcribingVoice ? 'Transcribing…' : voice.recording ? 'Stop' : 'Voice note'}
                       </Button>
 
                       <div className="flex flex-1 gap-2">
@@ -436,7 +508,7 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
                         <Button
                           type="button"
                           size="sm"
-                          disabled={triaging || (!snappedImage && !triageNote.trim())}
+                          disabled={triaging || voice.recording || transcribingVoice || (!snappedImage && !triageNote.trim())}
                           onClick={() => void runHybridTriage({})}
                         >
                           {triaging ? (
@@ -448,6 +520,13 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
                         </Button>
                       </div>
                     </div>
+
+                    {voice.recording && (
+                      <p role="status" className="mt-2 inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[11px] font-medium text-rose-900">
+                        <span className="h-2 w-2 animate-pulse rounded-full bg-rose-600" />
+                        Recording voice note… speak in Tamil, Hindi, Tanglish or English, then tap Stop (max 30s)
+                      </p>
+                    )}
 
                     {snappedImage && (
                       <div className="mt-3 flex items-center gap-3 rounded-[var(--radius-field)] border border-hairline bg-surface p-2">
@@ -585,7 +664,7 @@ export default function ResidentMaintenanceView({ stays, tickets, onChanged }: P
                       type="button"
                       variant="secondary"
                       size="sm"
-                      onClick={resetFormState}
+                      onClick={cancelForm}
                     >
                       Cancel
                     </Button>

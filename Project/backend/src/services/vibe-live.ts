@@ -1,17 +1,18 @@
-// Live voice VibeCheck on the Gemini Live API. The browser streams microphone
-// audio over a WebSocket to this server, which relays it to a Gemini Live
-// session (Vertex AI has no browser tokens, so the server holds the session)
-// and streams Gemini's spoken replies back. Gemini records what it learns with
-// a `record_habits` tool call, which we clean and pass to the page as chips.
+// Live voice VibeCheck & Owner Briefing on @google/adk bidirectional streaming
+// (`InMemoryRunner.runLive` + `LiveRequestQueue`) backed by Vertex AI Gemini Live.
+// The browser streams 16 kHz PCM audio (binary WebSocket frames, or JSON fallback)
+// to this relay and plays 24 kHz Gemini spoken replies back.
 //
 // Guard rails: same-site origin only, at most two live sessions per visitor
 // and a fixed number per instance, six minutes per conversation, small
 // message frames. Nothing is stored; the person reviews the habits before
 // matching. If Live is unavailable, the page falls back to tap-to-talk.
+import { randomUUID } from 'crypto';
 import type { IncomingMessage, Server } from 'http';
 import type { Duplex } from 'stream';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { GoogleGenAI, Modality, Type, type FunctionDeclaration, type FunctionResponse, type LiveServerMessage, type Session } from '@google/genai';
+import { FunctionTool, Gemini, InMemoryRunner, LiveRequestQueue, LlmAgent } from '@google/adk';
+import { Modality, Type, type FunctionDeclaration } from '@google/genai';
 import { z } from 'zod';
 import { cleanVibeAnswers, cleanVibeSummary, createLiveProtocol, VIBE_QUESTIONS, vibeTopicsFor, type LiveServerMessage as RelayServerMessage, type VibeAnswers } from '@livingplus/shared';
 
@@ -93,11 +94,11 @@ export function originAllowed(req: IncomingMessage): boolean {
   }
 }
 
-async function liveClient(): Promise<GoogleGenAI> {
+async function createLiveModel(): Promise<Gemini> {
   const auth = await resolveGoogleAuth();
   return auth.vertexai
-    ? new GoogleGenAI({ vertexai: true, project: auth.project!, location: liveLocation() })
-    : new GoogleGenAI({ apiKey: auth.apiKey! });
+    ? new Gemini({ model: liveModel(), vertexai: true, project: auth.project!, location: liveLocation() })
+    : new Gemini({ model: liveModel(), vertexai: false, apiKey: auth.apiKey! });
 }
 
 const visitorOf = (req: IncomingMessage) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0]!.trim();
@@ -110,15 +111,17 @@ export function attachVibeLive(server: Server): void {
   let open = 0;
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    const path = (req.url || '').split('?')[0];
+    const reqUrl = new URL(req.url || '/', 'http://local');
+    const path = reqUrl.pathname;
     if (path !== VIBE_LIVE_PATH && path !== OWNER_BRIEFING_PATH) return;
     const visitor = visitorOf(req);
     const refuse = (status: string) => { socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`); socket.destroy(); };
     if (!vibeLiveEnabled()) return refuse('503 Service Unavailable');
     if (!originAllowed(req)) return refuse('403 Forbidden');
     if (open >= MAX_PER_INSTANCE || (perVisitor.get(visitor) ?? 0) >= MAX_PER_VISITOR) return refuse('429 Too Many Requests');
-    const ownerId = path === OWNER_BRIEFING_PATH ? readBriefingPass(new URL(req.url || '/', 'http://local').searchParams.get('pass')) : null;
+    const ownerId = path === OWNER_BRIEFING_PATH ? readBriefingPass(reqUrl.searchParams.get('pass')) : null;
     if (path === OWNER_BRIEFING_PATH && !ownerId) return refuse('401 Unauthorized');
+    const binaryAudio = reqUrl.searchParams.get('binary') === '1';
     wss.handleUpgrade(req, socket, head, (client) => {
       open += 1;
       perVisitor.set(visitor, (perVisitor.get(visitor) ?? 0) + 1);
@@ -128,11 +131,11 @@ export function attachVibeLive(server: Server): void {
         if (left > 0) perVisitor.set(visitor, left); else perVisitor.delete(visitor);
       });
       if (ownerId) {
-        void runBriefing(client, ownerId);
+        void runBriefing(client, ownerId, binaryAudio);
         return;
       }
-      const propertyId = new URL(req.url || '/', 'http://local').searchParams.get('propertyId') || '';
-      void runSession(client, /^[A-Za-z0-9-]{8,64}$/.test(propertyId) ? propertyId : null);
+      const propertyId = reqUrl.searchParams.get('propertyId') || '';
+      void runSession(client, /^[A-Za-z0-9-]{8,64}$/.test(propertyId) ? propertyId : null, binaryAudio, visitor);
     });
   });
 }
@@ -149,9 +152,11 @@ async function loadPlace(propertyId: string | null) {
   }).catch(() => null);
 }
 
-/** What a live voice session needs: its instruction, opening line and optional tools. */
+/** What a live voice session needs: its ADK identity, instruction, opening line and optional tools. */
 interface LiveSessionSpec {
   label: string;
+  agentName: string;
+  userId: string;
   instruction: string;
   kickoff: string;
   tools?: FunctionDeclaration[];
@@ -160,110 +165,179 @@ interface LiveSessionSpec {
 }
 
 /**
- * Relays one browser WebSocket to one Gemini Live session: mic audio and typed
- * text in; Gemini's voice, both transcripts and turn markers out. Ends after
- * MAX_SESSION_MS or when either side closes.
+ * Relays one browser WebSocket to a @google/adk `InMemoryRunner.runLive` session
+ * via `LiveRequestQueue`: mic audio (binary PCM16 or JSON) and typed text in;
+ * Gemini's voice, both transcripts, turn markers and session resumption out.
  */
-async function relayLive(client: WebSocket, spec: LiveSessionSpec): Promise<void> {
+async function relayLive(client: WebSocket, spec: LiveSessionSpec, binaryAudio = false): Promise<void> {
   const send = (message: RelayServerMessage) => { if (client.readyState === client.OPEN) client.send(JSON.stringify(message)); };
-  let live: Session | null = null;
+  const liveRequestQueue = new LiveRequestQueue();
+  const abortController = new AbortController();
   // Utterances from the person: a new speech transcript run or a typed message.
   let heardCount = 0;
   let lastHeardAt = 0;
   let inSpeechRun = false;
   let replyStarted = false;
-  const timer = setTimeout(() => { send({ type: 'end', reason: 'time' }); client.close(); }, MAX_SESSION_MS);
-  client.once('close', () => { clearTimeout(timer); try { live?.close(); } catch { /* already closed */ } });
+  let closed = false;
 
-  const onMessage = (message: LiveServerMessage) => {
-    const content = message.serverContent;
-    for (const part of content?.modelTurn?.parts ?? []) {
-      if (part.inlineData?.data) {
-        // Response latency: from the last thing the person said to the first spoken audio back.
-        if (!replyStarted && lastHeardAt) {
-          send({ type: 'latency', ms: Math.max(0, Date.now() - lastHeardAt) });
-          lastHeardAt = 0;
-        }
-        inSpeechRun = false;
-        replyStarted = true;
-        send({ type: 'audio', data: part.inlineData.data, mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000' });
-      }
-    }
-    if (content?.inputTranscription?.text) {
-      if (!inSpeechRun) { heardCount += 1; inSpeechRun = true; }
-      lastHeardAt = Date.now();
-      replyStarted = false;
-      send({ type: 'heard', text: content.inputTranscription.text });
-    }
-    if (content?.outputTranscription?.text) { inSpeechRun = false; send({ type: 'said', text: content.outputTranscription.text }); }
-    if (content?.interrupted) { replyStarted = false; inSpeechRun = false; send({ type: 'interrupted' }); }
-    if (content?.turnComplete) { replyStarted = false; inSpeechRun = false; send({ type: 'turn' }); }
-    const calls = message.toolCall?.functionCalls ?? [];
-    if (calls.length && live) {
-      const session = live;
-      void Promise.all(calls.map(async (call): Promise<FunctionResponse> => {
-        const base = { ...(call.id ? { id: call.id } : {}), name: call.name || 'unknown' };
-        try {
-          const response = spec.onToolCall ? await spec.onToolCall(call.name || '', call.args, heardCount) : { error: 'no tools here' };
-          return { ...base, response };
-        } catch (error: any) {
-          logger.warn({ err: error?.message || String(error) }, `${spec.label} tool call failed`);
-          return { ...base, response: { error: 'That did not work.' } };
-        }
-      })).then((functionResponses) => { try { session.sendToolResponse({ functionResponses }); } catch { /* session closed */ } });
-    }
+  const closeAll = () => {
+    closed = true;
+    liveRequestQueue.close();
+    abortController.abort();
   };
 
-  try {
-    const ai = await liveClient();
-    live = await ai.live.connect({
-      model: liveModel(),
-      config: {
-        responseModalities: [Modality.AUDIO],
-        systemInstruction: { parts: [{ text: spec.instruction }] },
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
-        ...(spec.tools?.length ? { tools: [{ functionDeclarations: spec.tools }] } : {})
-      },
-      callbacks: {
-        onmessage: onMessage,
-        onerror: (error: any) => { logger.warn({ err: error?.message || String(error) }, `${spec.label} live session error`); send({ type: 'error', message: 'The live voice connection dropped.' }); client.close(); },
-        onclose: () => client.close()
+  const timer = setTimeout(() => {
+    send({ type: 'end', reason: 'time' });
+    closeAll();
+    client.close();
+  }, MAX_SESSION_MS);
+
+  client.once('close', () => {
+    clearTimeout(timer);
+    closeAll();
+  });
+
+  const tools = (spec.tools ?? []).map((decl) => new FunctionTool({
+    name: decl.name!,
+    description: decl.description || '',
+    ...(decl.parameters ? { parameters: decl.parameters } : {}),
+    execute: async (args: unknown) => {
+      try {
+        return spec.onToolCall ? await spec.onToolCall(decl.name!, args, heardCount) : { error: 'no tools here' };
+      } catch (error: any) {
+        logger.warn({ err: error?.message || String(error) }, `${spec.label} tool call failed`);
+        return { error: 'That did not work.' };
       }
+    }
+  }));
+
+  let runner: InMemoryRunner;
+  try {
+    const model = await createLiveModel();
+    const agent = new LlmAgent({
+      name: spec.agentName,
+      model,
+      instruction: spec.instruction,
+      tools
     });
+    runner = new InMemoryRunner({ agent, appName: 'livingplus-voice' });
   } catch (error: any) {
     logger.warn({ err: error?.message || String(error) }, `${spec.label} live session could not start`);
     send({ type: 'error', message: 'Live voice is not available right now.' });
+    clearTimeout(timer);
+    closeAll();
     client.close();
     return;
   }
-  if (client.readyState !== client.OPEN) { live.close(); return; }
-  send({ type: 'ready' });
-  live.sendClientContent({ turns: [{ role: 'user', parts: [{ text: spec.kickoff }] }], turnComplete: true });
 
-  client.on('message', (raw) => {
-    const message = parseLiveClientMessage(String(raw));
-    if (!message || !live) return;
-    if (message.type === 'audio') {
-      live.sendRealtimeInput({ audio: { data: message.data, mimeType: 'audio/pcm;rate=16000' } });
-    } else if (message.type === 'text') {
-      heardCount += 1;
-      lastHeardAt = Date.now();
-      replyStarted = false;
-      live.sendClientContent({ turns: [{ role: 'user', parts: [{ text: message.text }] }], turnComplete: true });
-    } else if (message.type === 'pause') {
-      live.sendRealtimeInput({ audioStreamEnd: true });
+  if (client.readyState !== client.OPEN) {
+    clearTimeout(timer);
+    closeAll();
+    return;
+  }
+
+  client.on('message', (raw, isBinary) => {
+    if (isBinary) {
+      const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as ArrayBuffer);
+      if (buf.byteLength > 0 && buf.byteLength <= 199_999) {
+        try {
+          liveRequestQueue.sendRealtime({ data: buf.toString('base64'), mimeType: 'audio/pcm;rate=16000' });
+        } catch { /* queue closed */ }
+      }
+      return;
     }
+    const message = parseLiveClientMessage(String(raw));
+    if (!message) return;
+    try {
+      if (message.type === 'audio') {
+        liveRequestQueue.sendRealtime({ data: message.data, mimeType: 'audio/pcm;rate=16000' });
+      } else if (message.type === 'text') {
+        heardCount += 1;
+        lastHeardAt = Date.now();
+        replyStarted = false;
+        liveRequestQueue.sendContent({ role: 'user', parts: [{ text: message.text }] });
+      } else if (message.type === 'pause') {
+        liveRequestQueue.sendActivityEnd();
+      }
+    } catch { /* queue closed */ }
   });
+
+  liveRequestQueue.sendContent({ role: 'user', parts: [{ text: spec.kickoff }] });
+  send({ type: 'ready' });
+
+  try {
+    for await (const event of runner.runLive({
+      userId: spec.userId,
+      sessionId: randomUUID(),
+      liveRequestQueue,
+      abortSignal: abortController.signal,
+      runConfig: {
+        responseModalities: [Modality.AUDIO],
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
+        contextWindowCompression: { slidingWindow: {} }
+      }
+    })) {
+      if (closed || client.readyState !== client.OPEN) break;
+
+      for (const part of event.content?.parts ?? []) {
+        if (part.inlineData?.data && (!part.inlineData.mimeType || part.inlineData.mimeType.startsWith('audio/'))) {
+          if (!replyStarted && lastHeardAt) {
+            send({ type: 'latency', ms: Math.max(0, Date.now() - lastHeardAt) });
+            lastHeardAt = 0;
+          }
+          inSpeechRun = false;
+          replyStarted = true;
+          if (binaryAudio) {
+            client.send(Buffer.from(part.inlineData.data, 'base64'));
+          } else {
+            send({ type: 'audio', data: part.inlineData.data, mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000' });
+          }
+        }
+      }
+
+      if (event.inputTranscription?.text) {
+        if (!inSpeechRun) { heardCount += 1; inSpeechRun = true; }
+        lastHeardAt = Date.now();
+        replyStarted = false;
+        send({ type: 'heard', text: event.inputTranscription.text });
+      }
+      if (event.outputTranscription?.text) {
+        inSpeechRun = false;
+        send({ type: 'said', text: event.outputTranscription.text });
+      }
+      if (event.interrupted) {
+        replyStarted = false;
+        inSpeechRun = false;
+        send({ type: 'interrupted' });
+      }
+      if (event.turnComplete) {
+        replyStarted = false;
+        inSpeechRun = false;
+        send({ type: 'turn' });
+      }
+    }
+  } catch (error: any) {
+    if (!closed && !abortController.signal.aborted) {
+      logger.warn({ err: error?.message || String(error) }, `${spec.label} live session error`);
+      send({ type: 'error', message: 'The live voice connection dropped.' });
+    }
+  } finally {
+    clearTimeout(timer);
+    closeAll();
+    if (client.readyState === client.OPEN) client.close();
+  }
 }
 
 /** VibeCheck: the PG buddy conversation, recording habits as it goes. */
-async function runSession(client: WebSocket, propertyId: string | null): Promise<void> {
+async function runSession(client: WebSocket, propertyId: string | null, binaryAudio = false, visitor = 'guest'): Promise<void> {
   const topics = vibeTopicsFor(await loadPlace(propertyId));
   let known: VibeAnswers = {};
   const send = (message: RelayServerMessage) => { if (client.readyState === client.OPEN) client.send(JSON.stringify(message)); };
   await relayLive(client, {
     label: 'VibeCheck',
+    agentName: 'vibecheck_buddy',
+    userId: `guest:${visitor}`,
     instruction: liveInstruction(topics),
     kickoff: '(The person just joined the call. Say hi like a friend in one short line and casually ask whether they are studying or working these days.)',
     tools: [recordHabitsFor(topics.skip)],
@@ -275,11 +349,11 @@ async function runSession(client: WebSocket, propertyId: string | null): Promise
       send({ type: 'habits', ...result });
       return { saved: true, still_missing: result.missing };
     }
-  });
+  }, binaryAudio);
 }
 
 /** Owner voice session: a spoken briefing, then voice-to-action with a spoken read-back before any change. */
-async function runBriefing(client: WebSocket, userId: string): Promise<void> {
+async function runBriefing(client: WebSocket, userId: string, binaryAudio = false): Promise<void> {
   const context = await briefingFacts(userId).catch(() => null);
   if (!context) {
     if (client.readyState === client.OPEN) client.send(JSON.stringify({ type: 'error', message: 'There is nothing to brief you on yet.' }));
@@ -298,8 +372,10 @@ async function runBriefing(client: WebSocket, userId: string): Promise<void> {
     : null;
   await relayLive(client, {
     label: 'Owner briefing',
+    agentName: 'owner_briefing',
+    userId,
     instruction: briefingInstruction(context.facts, Boolean(actions)),
     kickoff: `(The owner, ${context.firstName}, just tapped "Brief me". Greet them by first name in a few words and give the briefing.)`,
     ...(actions && identity ? { tools: voiceActionDeclarations(identity.actor.role), onToolCall: (name: string, args: unknown, heard: number) => actions.callTool(name, args, heard) } : {})
-  });
+  }, binaryAudio);
 }

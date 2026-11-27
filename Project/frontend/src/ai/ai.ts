@@ -110,7 +110,8 @@ function resolveSourceFromResponse(
 }
 
 /**
- * Lazily initializes Firebase AI Logic (`firebase/ai` with `GoogleAIBackend`), ensures App Check,
+ * Lazily initializes Firebase AI Logic (`firebase/ai` with `AgentPlatformBackend('global')`
+ * or `GoogleAIBackend` when `VITE_FIREBASE_AI_BACKEND=google`), ensures App Check,
  * and returns a hybrid `GenerativeModel` configured for on-device + cloud inference.
  */
 export async function getHybridModel(
@@ -122,11 +123,14 @@ export async function getHybridModel(
 
   await ensureAppCheck(app);
 
-  const { getAI, getGenerativeModel, GoogleAIBackend, InferenceMode } = await import('firebase/ai');
-  const ai = getAI(app, { backend: new GoogleAIBackend() });
+  const { getAI, getGenerativeModel, AgentPlatformBackend, GoogleAIBackend, InferenceMode } = await import('firebase/ai');
+  const useGoogleAi = import.meta.env.VITE_FIREBASE_AI_BACKEND?.trim() === 'google';
+  const ai = getAI(app, {
+    backend: useGoogleAi ? new GoogleAIBackend() : new AgentPlatformBackend('global')
+  });
 
   const rc = getHybridRemoteConfig();
-  const cloudModel = options.cloudModelName || rc.cloud_model_name || 'gemini-2.5-flash';
+  const cloudModel = options.cloudModelName || rc.cloud_model_name || 'gemini-3.8-flash';
 
   const resolvedMode =
     mode === 'ONLY_ON_DEVICE'

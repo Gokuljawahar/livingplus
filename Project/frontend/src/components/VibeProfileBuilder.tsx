@@ -9,7 +9,7 @@ import { VIBE_QUESTIONS, type VibeAnswers } from '@livingplus/shared';
 import api from '../api/axios';
 import { getHybridRemoteConfig } from '../ai/remote-config';
 import VibeQuiz from './VibeQuiz';
-import { blobToWav16k } from '../utils/audio';
+import { blobToBase64, useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { apiErrorMessage } from '../utils/api-error';
 import { useVibeLive } from '../hooks/useVibeLive';
 
@@ -47,18 +47,9 @@ function stopSpeaking() {
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
 }
 
-async function blobToBase64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(binary);
-}
-
 export default function VibeProfileBuilder({ answers, summary, onChange, propertyId, skipTopics }: VibeProfileBuilderProps) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [started, setStarted] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [seconds, setSeconds] = useState(0);
   const [thinking, setThinking] = useState(false);
   const [done, setDone] = useState(false);
   const [typing, setTyping] = useState(false);
@@ -90,9 +81,6 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
     setError('Live voice is busy right now, so tap the mic for each answer instead.');
     begin(true);
   };
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const tickRef = useRef<number | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -100,8 +88,6 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
   }, [turns, thinking]);
 
   useEffect(() => () => {
-    if (tickRef.current) window.clearInterval(tickRef.current);
-    recorderRef.current?.stream.getTracks().forEach((track) => track.stop());
     stopSpeaking();
   }, []);
 
@@ -130,53 +116,32 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
     }
   };
 
-  const stopRecording = () => {
-    if (tickRef.current) window.clearInterval(tickRef.current);
-    tickRef.current = null;
-    if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
-  };
+  const tapRecorder = useVoiceRecorder({
+    maxSeconds: MAX_SECONDS,
+    onRecorded: async (blob) => {
+      const history = turns.length ? turns : [{ role: 'assistant' as const, text: OPENING }];
+      try {
+        const mimeType = (blob.type || 'audio/webm').split(';')[0] || 'audio/webm';
+        await send({ audio: { mimeType, data: await blobToBase64(blob) } }, '', history);
+      } catch {
+        setError("I couldn't process that recording. Try again, or type your answer.");
+      }
+    },
+    onError: (reason) => {
+      setTyping(true);
+      setError(
+        reason === 'unsupported'
+          ? 'Voice is not available in this browser. Type your answer instead.'
+          : 'Microphone access was blocked. Type your answer instead.'
+      );
+    }
+  });
 
   const startRecording = async () => {
     setError('');
-    const history = started ? turns : [{ role: 'assistant' as const, text: OPENING }];
     if (!started) begin(false);
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setTyping(true);
-      setError('Voice is not available in this browser. Type your answer instead.');
-      return;
-    }
-    try {
-      stopSpeaking();
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      chunksRef.current = [];
-      recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data); };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
-        setRecording(false);
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
-        if (!blob.size) return;
-        try {
-          const wav = await blobToWav16k(blob);
-          await send({ audio: { mimeType: 'audio/wav', data: await blobToBase64(wav) } }, '', history);
-        } catch {
-          setError("I couldn't process that recording. Try again, or type your answer.");
-        }
-      };
-      recorderRef.current = recorder;
-      recorder.start();
-      setRecording(true);
-      setSeconds(0);
-      tickRef.current = window.setInterval(() => {
-        setSeconds((value) => {
-          if (value + 1 >= MAX_SECONDS) stopRecording();
-          return value + 1;
-        });
-      }, 1000);
-    } catch {
-      setTyping(true);
-      setError('Microphone access was blocked. Type your answer instead.');
-    }
+    stopSpeaking();
+    await tapRecorder.start();
   };
 
   const submitTyped = () => {
@@ -365,14 +330,14 @@ export default function VibeProfileBuilder({ answers, summary, onChange, propert
                   <button
                     type="button"
                     disabled={thinking}
-                    onClick={() => (recording ? stopRecording() : void startRecording())}
-                    aria-label={recording ? 'Stop and send' : 'Tap to answer'}
-                    className={`flex h-14 w-14 items-center justify-center rounded-full text-white disabled:opacity-50 ${recording ? 'animate-pulse bg-negative' : 'bg-navy-900 hover:bg-navy-700'}`}
+                    onClick={() => (tapRecorder.recording ? tapRecorder.stop() : void startRecording())}
+                    aria-label={tapRecorder.recording ? 'Stop and send' : 'Tap to answer'}
+                    className={`flex h-14 w-14 items-center justify-center rounded-full text-white disabled:opacity-50 ${tapRecorder.recording ? 'animate-pulse bg-negative' : 'bg-navy-900 hover:bg-navy-700'}`}
                   >
-                    {recording ? <Square className="h-5 w-5" /> : <Mic className="h-6 w-6 text-amber-500" />}
+                    {tapRecorder.recording ? <Square className="h-5 w-5" /> : <Mic className="h-6 w-6 text-amber-500" />}
                   </button>
                   <p className="w-32 text-sm text-muted">
-                    {recording ? `Listening · ${seconds}s, tap to send` : thinking ? 'Thinking…' : 'Tap to answer'}
+                    {tapRecorder.recording ? `Listening · ${tapRecorder.seconds}s, tap to send` : thinking ? 'Thinking…' : 'Tap to answer'}
                   </p>
                   <button type="button" onClick={() => setTyping(true)} aria-label="Type instead" className="flex h-11 w-11 items-center justify-center rounded-full border border-hairline text-navy-900">
                     <Keyboard className="h-4 w-4" />

@@ -32,7 +32,7 @@ export function defaultHybridConfig(): HybridRemoteConfigValues {
     triage_inference_mode: 'PREFER_ON_DEVICE',
     triage_prompt_version: 'v1',
     vibe_on_device_enabled: true,
-    cloud_model_name: import.meta.env.VITE_GEMINI_CLOUD_MODEL?.trim() || 'gemini-2.5-flash'
+    cloud_model_name: import.meta.env.VITE_GEMINI_CLOUD_MODEL?.trim() || 'gemini-3.8-flash'
   };
 }
 
