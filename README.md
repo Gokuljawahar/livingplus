@@ -1,6 +1,10 @@
 # Living Plus
 
-**PG (paying-guest) living in Chennai, run end to end: honest discovery for guests, a simple home for residents, and a calm workspace for owners, with hybrid on-device + cloud Gemini AI doing the routine work and people approving anything that matters.**
+**Vernacular, offline-first AI infrastructure for India's urban PG & co-living housing: honest semantic discovery for guests, an offline-ready home for residents, and an agentic Google ADK workspace for owners — with hybrid on-device + cloud Gemini AI doing the routine work and humans approving every financial or booking action.**
+
+- **Live Prototype (Google Cloud Run):** https://livingplus-pfpdmrspea-el.a.run.app
+- **Hybrid AI Live Inspector (`?debug=ai`):** https://livingplus-pfpdmrspea-el.a.run.app/?debug=ai
+- **Portals:** Guest Marketplace (`/`) · Resident Portal (`/stay/harbour-point-mens-pg`) · Owner Workspace (`/owner/login`) · Admin & Dynamic Catalog (`/admin/login`)
 
 ---
 
