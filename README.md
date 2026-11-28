@@ -3,6 +3,7 @@
 **Vernacular, offline-first AI infrastructure for India's urban PG & co-living MSMEs — built for fast-growing regional hubs starting with Indore & Madhya Pradesh (Bhanwarkuan & Vijay Nagar coaching/IT corridors) and scaling across Chennai, Bengaluru, and Bharat: honest semantic discovery for skilling students & freshers, an offline-ready home for residents, and an agentic Google ADK workspace for owners delivering clean urban infrastructure.**
 
 - **Live Prototype (Google Cloud Run):** https://livingplus-pfpdmrspea-el.a.run.app
+- **Demo Video Walkthrough:** https://www.youtube.com/watch?v=UcOu5pxH08g
 - **Hybrid AI Live Inspector (`?debug=ai`):** https://livingplus-pfpdmrspea-el.a.run.app/?debug=ai
 - **Portals:** Guest Marketplace (`/`) · Resident Portal (`/stay/harbour-point-mens-pg`) · Owner Workspace (`/owner/login`) · Admin & Dynamic Catalog (`/admin/login`)
 
